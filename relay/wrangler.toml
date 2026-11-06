@@ -1,0 +1,12 @@
+name = "dnd-arena"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "Hub"
+
+# бесплатный тариф: Durable Object на SQLite
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Hub"]

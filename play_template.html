@@ -1,0 +1,1776 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Арена Боссов — игра за персонажа</title>
+<style>
+:root{
+  --bg:#f3f1ec; --bg2:#ebe8e1; --panel:#ffffff; --panel2:#f7f5f0; --line:#d9d4c8; --text:#1d1f26; --muted:#6a6e7a;
+  --a:#2f7de1; --a-soft:#2f7de122; --b:#e0553f; --b-soft:#e0553f22; --gold:#b7860b; --good:#2e9a5b; --bad:#d23b3b;
+  --shadow:0 1px 2px rgba(20,20,30,.08),0 8px 24px rgba(20,20,30,.06); --stage:#1a1d26;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1117; --bg2:#141720; --panel:#181c26; --panel2:#1d2230; --line:#2a3042; --text:#e9eaf0; --muted:#8e94a8;
+    --a:#5aa9ff; --a-soft:#5aa9ff22; --b:#ff7a63; --b-soft:#ff7a6322; --gold:#f2c14e; --good:#5fd08a; --bad:#ff6b6b;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45;font-size:15.5px}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer;transition:transform .08s,border-color .15s,background .15s}
+button:hover:not(:disabled){border-color:var(--muted)} button:active:not(:disabled){transform:translateY(1px)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--gold);color:#1b1500;border-color:transparent;font-weight:700}
+button.danger{border-color:var(--bad);color:var(--bad)}
+input[type=number],input[type=text],select{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 8px;min-width:0}
+input[type=number]{width:74px}
+input[type=range]{accent-color:var(--gold);vertical-align:middle}
+.tnum{font-variant-numeric:tabular-nums}
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 16px 10px;max-width:1760px;margin:0 auto}
+header h1{font-size:18px;margin:0;letter-spacing:.04em;text-transform:uppercase}
+.tabs{display:flex;gap:6px;margin-left:auto}
+.tab{border-radius:999px;padding:7px 16px;font-size:14px}
+.tab[aria-selected="true"]{background:var(--text);color:var(--bg);border-color:transparent}
+main{max-width:1760px;margin:0 auto;padding:0 16px 48px}
+.scene{display:none} .scene.on{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);margin-bottom:14px}
+.card h3{margin:0 0 4px;font-size:17px;display:flex;align-items:center;gap:8px}
+.card .hint,.hint{color:var(--muted);font-size:13px;margin:2px 0 10px}
+.chip{display:inline-block;font-size:12px;font-weight:700;border-radius:6px;padding:1px 8px;color:#fff}
+.chip.A{background:var(--a)} .chip.B{background:var(--b)}
+
+/* конструктор */
+.build{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:16px;align-items:start}
+@media(max-width:1000px){.build{grid-template-columns:1fr}}
+.side{position:sticky;top:8px;display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 16px);overflow:auto}
+@media(max-width:1000px){.side{position:static;max-height:none}}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0}
+.row label{display:flex;gap:6px;align-items:center}
+.lbl{color:var(--muted);font-size:13px}
+.statrow{display:grid;grid-template-columns:44px 1fr 56px 88px 72px;gap:8px;align-items:center;margin:4px 0}
+.statrow .nm{font-weight:700}
+.meter{height:18px;border-radius:9px;background:var(--bg2);border:1px solid var(--line);overflow:hidden;display:flex;margin:6px 0}
+.meter i{display:block;height:100%}
+.big{font-size:30px;font-weight:800}
+.err{background:#d23b3b1f;border:1px solid var(--bad);color:var(--bad);border-radius:10px;padding:8px 10px;font-size:14px;margin:8px 0}
+.ok{background:#2e9a5b1f;border:1px solid var(--good);color:var(--good);border-radius:10px;padding:8px 10px;font-size:14px;margin:8px 0}
+.items{display:flex;flex-direction:column;gap:5px;max-height:360px;overflow:auto}
+.item{display:grid;grid-template-columns:26px 1fr auto;gap:8px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:8px;padding:5px 8px;font-size:13.5px}
+.item .dt{font-size:12px;color:var(--muted)}
+.item .co{font-weight:700;white-space:nowrap}
+.item.neg .co{color:var(--good)}
+.abil{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:10px 0;background:var(--panel2)}
+.abil .top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.abil .price{margin-left:auto;font-weight:800;color:var(--gold)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px 14px;margin-top:8px}
+.grid2 label{display:flex;gap:6px;align-items:center;justify-content:space-between;font-size:14px}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}
+.chipb{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px;cursor:pointer;background:var(--panel2);user-select:none}
+.chipb.on{background:var(--text);color:var(--bg);border-color:transparent}
+.sec-h{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:14px 0 4px}
+.price-tag{color:var(--gold);font-weight:700;font-size:12.5px;margin-left:6px}
+details.fold>summary{cursor:pointer;font-weight:700;padding:4px 0}
+.steps{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0}
+.step-b{display:flex;flex-direction:column;align-items:flex-start;gap:1px;border-radius:10px;padding:5px 11px;font-size:13.5px;line-height:1.2;text-align:left}
+.step-b small{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums}
+.step-b.on{background:var(--text);color:var(--bg);border-color:transparent} .step-b.on small{color:var(--bg);opacity:.75}
+.stepbox{display:none} .stepbox.on{display:block}
+.stepnav{display:flex;justify-content:space-between;gap:8px;margin:4px 0 14px}
+.eff{border-top:1px dashed var(--line);margin-top:8px;padding-top:6px}
+.eff-h{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:6px}
+.eff-h .x{padding:0 6px;font-size:11px;border:none;background:none;color:var(--muted)} .eff-h .x:hover{color:var(--bad)}
+.adds{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+.adds .add{padding:3px 10px;font-size:13px;border-radius:999px;border-style:dashed;background:transparent}
+.adds .add:hover{border-style:solid}
+
+/* соперник */
+.opp{display:grid;grid-template-columns:360px minmax(0,1fr);gap:16px;align-items:start}
+@media(max-width:1000px){.opp{grid-template-columns:1fr}}
+
+/* бой */
+.fight{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:16px;align-items:start}
+@media(max-width:1100px){.fight{grid-template-columns:1fr}}
+.stagebox:fullscreen{overflow:auto;border-radius:0}
+.abparts{margin:2px 0 6px;color:var(--muted)}
+.descbox{margin:4px 0 8px} .descbox textarea{width:100%;font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:4px 0}
+.stagebox.bigfield{position:fixed;inset:0;z-index:50;overflow:auto;border-radius:0}
+.stagebox{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:12px}
+.stage{position:relative;background:var(--stage);border-radius:12px;overflow:hidden;display:flex;justify-content:center}
+canvas{display:block;max-width:100%}
+#cv{cursor:crosshair}
+.banner{position:absolute;left:50%;top:10px;transform:translateX(-50%);padding:6px 16px;border-radius:999px;font-weight:800;font-size:15px;color:#1b1000;background:#f2c14e;opacity:0;pointer-events:none;transition:opacity .25s;white-space:nowrap}
+.banner.on{opacity:1}
+.toast{position:absolute;left:12px;bottom:12px;right:12px;padding:8px 12px;border-radius:10px;background:rgba(12,14,20,.86);color:#f2f2f6;font-size:14px;display:none}
+.toast.on{display:block}
+.result{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;background:rgba(8,10,16,.78);backdrop-filter:blur(3px);padding:20px}
+.result.on{display:flex}
+.result .box{max-width:480px;color:#f2f2f6}
+.result h2{font-size:32px;margin:0 0 8px}
+.result p{color:#c9ccd8;margin:4px 0}
+.result .btns{display:flex;gap:8px;justify-content:center;margin-top:16px;flex-wrap:wrap}
+.result .btns button:not(.primary){color:var(--text)}   /* текст окна итогов белый, а фон кнопки в светлой теме светлый */
+.turn{margin-top:10px;display:flex;flex-direction:column;gap:8px;min-height:150px}
+.acts.minor button{padding:4px 9px;font-size:13px}
+.tbar .endb{margin-left:auto}
+.recap{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13.5px}
+.recap b{color:var(--muted);font-weight:600;font-size:12px;letter-spacing:.05em;text-transform:uppercase}
+.recap .ln{padding:2px 0;border:none;font-size:13.5px}
+.seen{margin-top:8px;font-size:13px}
+.seen div{margin:2px 0}
+.tbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:14px}
+.mv{flex:1;min-width:140px;height:12px;border-radius:6px;background:var(--bg2);border:1px solid var(--line);overflow:hidden}
+.mv i{display:block;height:100%;background:var(--good);transition:width .25s}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid var(--muted);vertical-align:-2px;margin-right:4px}
+.dot.free{background:var(--good);border-color:var(--good)}
+.dot.free.b{background:var(--gold);border-color:var(--gold)}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{padding:7px 11px;font-size:14px}
+.acts button.sel{background:var(--text);color:var(--bg);border-color:transparent}
+.acts .sp{display:flex;flex-direction:column;align-items:flex-start;text-align:left;line-height:1.25}
+.acts .sp small{color:var(--muted);font-size:11.5px}
+.acts button.sel small{color:var(--bg);opacity:.8}
+.timer{font-weight:800;font-variant-numeric:tabular-nums;padding:2px 10px;border-radius:999px;background:var(--panel2);border:1px solid var(--line)}
+.timer.low{background:#d23b3b33;border-color:var(--bad);color:var(--bad);animation:blink .6s infinite}
+@keyframes blink{50%{opacity:.5}}
+.msg{min-height:20px;color:var(--gold);font-size:14px}
+.pcard .hpbar{height:16px;border-radius:8px;background:var(--bg2);border:1px solid var(--line);overflow:hidden;margin:6px 0 2px}
+.pcard .hpbar i{display:block;height:100%}
+.pcard.A .hpbar i{background:var(--a)} .pcard.B .hpbar i{background:var(--b)}
+.pcard h4{margin:0;font-size:17px;display:flex;gap:8px;align-items:center}
+.small{font-size:12.5px;color:var(--muted)}
+.pill{font-size:11.5px;border-radius:999px;padding:2px 8px;background:#d23b3b22;border:1px solid #d23b3b66;color:var(--bad);margin-right:4px}
+.log{height:380px;overflow:auto}
+.rnd{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:10px 0 3px;padding-top:6px;border-top:1px dashed var(--line)}
+.ln{padding:5px 8px;border-radius:8px;font-size:14px;border-left:3px solid transparent;margin:1px 0}
+.ln.A{border-left-color:var(--a)} .ln.B{border-left-color:var(--b)}
+.ln .ev{display:block;font-size:12.5px;margin-top:2px}
+.ln .ev.chase{color:var(--gold)} .ln .ev.bad{color:var(--bad)} .ln .ev.good{color:var(--good)} .ln .ev.mut{color:var(--muted)}
+.dmg{color:var(--bad);font-weight:600} .heal{color:var(--good);font-weight:600}
+.who.A{color:var(--a);font-weight:600} .who.B{color:var(--b);font-weight:600}
+kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;background:var(--panel2)}
+.mapbox{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.sh{border-collapse:collapse;width:100%;margin:8px 0;font-size:14px}.sh th,.sh td{border:1px solid var(--line);padding:5px 9px;text-align:left}.sh th{background:var(--panel2)}
+.legend2{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin-top:8px}
+.legend2 span::before{content:"";display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;background:var(--c);vertical-align:-2px;border:1px solid rgba(128,128,140,.5)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Арена Боссов · игра за персонажа</h1>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab1" aria-selected="true">1 · Персонаж</button>
+    <button class="tab" role="tab" id="tab2" aria-selected="false">2 · Соперник</button>
+    <button class="tab" role="tab" id="tab3" aria-selected="false">3 · Бой</button>
+    <button class="tab" role="tab" id="tab6" aria-selected="false">👥 Комната</button>
+    <button class="tab" role="tab" id="tab5" aria-selected="false">🗺 Карты</button>
+    <button class="tab" role="tab" id="tab4" aria-selected="false">? Шпаргалка цен</button>
+  </div>
+</header>
+<main>
+
+<!-- ============ 1. Конструктор ============ -->
+<section class="scene on" id="s1">
+  <div class="build">
+    <div id="form"></div>
+    <div class="side">
+      <div class="card">
+        <h3>Очки персонажа</h3>
+        <div><span class="big tnum" id="spent">0</span> <span class="tnum">из <b id="bud">800</b></span> <span class="lbl" id="leftLbl"></span></div>
+        <div class="meter" id="meter"></div>
+        <div id="verdict"></div>
+        <div class="row">
+          <button class="primary" id="toOpp" disabled>К сопернику →</button>
+          <button id="btnExport">Экспорт</button>
+          <button id="btnImport">Импорт</button>
+          <input type="file" id="fileImport" accept="application/json,.json" style="display:none">
+        </div>
+      </div>
+      <div class="card"><h3>Покупки</h3><div class="items" id="items"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2. Соперник ============ -->
+<section class="scene" id="s2">
+  <div class="opp">
+    <div class="card">
+      <h3>Соперник и арена</h3>
+      <div class="hint">Арена случайная и зависит от зерна: размер от 5×5 до 100×100, ручьи, мосты, возвышенности, стены. Выход за край арены — побег, а побег — поражение.</div>
+      <div class="row"><label>Кто собирает соперника
+        <select id="oppMode"><option value="net">нейросеть-Сборщик</option><option value="generator">случайный генератор</option></select></label></div>
+      <div class="row"><label>Кто им играет
+        <select id="oppBrain"><option value="net">нейросеть-боец (GRU, помнит бой)</option><option value="rules">правило-бот (по ИНТ)</option></select></label></div>
+      <div class="row"><label>Время на ваш ход
+        <select id="turnTime"><option value="0">без ограничения</option><option value="45">45 с</option><option value="30" selected>30 с (реальное время)</option><option value="20">20 с</option><option value="10">10 с (блиц)</option></select></label></div>
+      <div class="row"><label>Сила соперника (очки)
+        <select id="oppMul"><option value="0.5">0.5× вашего бюджета</option><option value="0.75">0.75×</option><option value="1" selected>1× (поровну)</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
+      <div class="row"><label>Зерно (арена и соперник) <input type="number" id="seed" value="1" min="1" step="1" style="width:110px"></label><button id="btnDice" title="Другое зерно">🎲</button></div>
+      <div class="row"><label>Арена
+        <select id="mapSel"><option value="">участок мира по зерну боя</option><option value="__world">мир на выбор (место — на карте мира)</option></select></label></div>
+      <div id="worldBox" style="display:none">
+        <div class="row"><label>Зерно мира <input type="text" id="wSeed" value="1" style="width:130px"></label><button id="wDice" title="Другой мир">🎲</button>
+          <label>Размер мира <select id="wSize"></select></label></div>
+        <div class="row"><label>Арена, клеток: ширина <input type="number" id="wW" min="2" max="100" value="30"></label><label>высота <input type="number" id="wH" min="2" max="100" value="30"></label></div>
+        <div class="row"><button id="wShow">🗺 Показать мир</button><span class="small" id="wPick">место: случайное</span></div>
+      </div>
+      <div class="row"><label>Сторона
+        <select id="side"><option value="-1">случайно</option><option value="0">A (синий)</option><option value="1">B (красный)</option></select></label></div>
+      <div class="row"><button class="primary" id="btnFight">⚔ В бой!</button></div>
+      <div id="oppErr"></div>
+    </div>
+    <div class="card" id="oppCard"><h3>Соперник</h3><div class="hint">Загрузка…</div></div>
+  </div>
+  <div class="card" id="worldCard" style="display:none"><h3>Мир</h3><div class="hint">Щёлкните место боя: рамка — арена. Цвет — биом, светлее — выше; # и + — поселения, ~ — вода, V — ущелья.</div>
+    <canvas id="wCv" style="max-width:100%;cursor:crosshair;border-radius:8px"></canvas><div class="legend2" id="wLegend"></div></div>
+</section>
+
+<!-- ============ 5. Карты ============ -->
+<section class="scene" id="s6">
+  <div class="card" style="max-width:820px;margin:0 auto">
+    <h3>Бой нескольких команд</h3>
+    <div class="hint">Один создаёт комнату и передаёт код, остальные входят по коду. Каждый берёт своего персонажа (вкладка «Персонаж») и выбирает команду; хозяин может добавить ботов и начинает бой. Команд сколько угодно. Побеждает последняя команда, в которой кто-то жив; если бой дошёл до предела раундов — по очкам (доля хитов команды + 1 за каждого убитого врага).</div>
+    <div class="row" id="rmJoin"><label>Ваше имя <input type="text" id="rmName" style="width:150px"></label>
+      <button class="primary" id="rmCreate">Создать комнату</button>
+      <label>Код <input type="text" id="rmCode" style="width:90px;text-transform:uppercase" maxlength="5"></label><button id="rmEnter">Войти</button></div>
+    <div id="rmBox"></div>
+  </div>
+</section>
+<section class="scene" id="s5">
+  <div class="mapbox">
+    <div class="card" style="min-width:300px;max-width:360px">
+      <h3>Моя карта</h3>
+      <div class="hint">Рисуйте арену: левая кнопка мыши — нарисовать, правая — стереть выбранный слой. Все свободные клетки должны быть связаны (пройти от любой до любой пешком; ущелье пересекается только мостом).</div>
+      <div class="row"><label>Название <input type="text" id="meName" value="Моя арена" style="width:170px"></label></div>
+      <div class="row"><label>Ширина <input type="number" id="meW" min="5" max="200" value="20"></label><label>Высота <input type="number" id="meH" min="5" max="200" value="14"></label><button id="meResize">Применить размер</button></div>
+      <div class="row"><label>Тема <select id="meTheme"><option value="0">дикая местность</option><option value="1">город</option></select></label></div>
+      <div class="sec-h">Кисть</div>
+      <div class="chips" id="meTools"></div>
+      <div class="row"><label>Размер кисти <select id="meBrush"><option>1</option><option>2</option><option>3</option><option>5</option></select></label>
+        <label title="Для высоты земли и настила: уровень по 10 фт">Уровень <select id="meLevel"><option value="0">0 (0 фт)</option><option value="1" selected>1 (10 фт)</option><option value="2">2 (20 фт)</option><option value="3">3 (30 фт)</option><option value="4">4 (40 фт)</option><option value="5">5 (50 фт)</option><option value="6">6 (60 фт)</option><option value="7">7 (70 фт)</option><option value="8">8 (80 фт)</option><option value="9">9 (90 фт)</option></select></label></div>
+      <div class="hint">Высота: соседние клетки с перепадом в 1 уровень — подъём, больше — обрыв (пройти только по лестнице или летуну под открытым небом). Настил — второй ярус над землёй (мост, балкон); без лестницы или подъёма к нему — потолок.</div>
+      <div class="row"><button id="meRandom">🎲 Случайная заготовка</button><button id="meClear">Очистить</button><button id="meBorder">Рамка из стен</button></div>
+      <div class="row"><button id="meCheck">Проверить</button><button class="primary" id="meSave">Сохранить</button></div>
+      <div id="meMsg"></div>
+      <div class="sec-h">Сохранённые карты</div>
+      <div id="meList"></div>
+      <div class="row"><button id="meExport">Экспорт</button><button id="meImport">Импорт</button><input type="file" id="meFile" accept="application/json,.json" style="display:none"></div>
+    </div>
+    <div class="card" style="flex:1;min-width:300px;overflow:auto"><canvas id="meCv" style="touch-action:none;border-radius:8px"></canvas><div class="legend2" id="meLegend"></div></div>
+  </div>
+</section>
+
+<!-- ============ 4. Шпаргалка ============ -->
+<section class="scene" id="s4"><div class="card" id="sheet" style="max-width:980px"><div class="hint">Загрузка…</div></div></section>
+
+<!-- ============ 3. Бой ============ -->
+<section class="scene" id="s3">
+  <div class="fight">
+    <div class="stagebox">
+      <div class="stage" id="stage">
+        <canvas id="cv"></canvas>
+        <div class="banner" id="banner"></div>
+        <div class="toast" id="toast"></div>
+        <div class="result" id="result"><div class="box"></div></div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button id="camBtn">🎥 Камера</button><button id="fullBtn" title="Поле во весь экран (Esc — выйти)">⛶ Во весь экран</button><label class="small" title="Затемнить клетки, которых ваша сторона не видит"><input type="checkbox" id="fogOn" checked> туман войны</label><span class="small" style="opacity:.75">колесо — масштаб, правая кнопка или Shift + перетаскивание — сдвиг</span><label class="small">Темп боя соперника <select id="tempo"><option value="1" selected>спокойно</option><option value="1.6">быстро</option><option value="2.6">очень быстро</option></select></label></div>
+      <div class="turn" id="turn"><div class="hint">Бой ещё не начат.</div></div>
+      <details class="small" style="margin-top:6px"><summary>Обозначения на карте</summary><div class="legend2"><span style="--c:#2d6fa3">ручей (труднопроходим)</span><span style="--c:#07080c">ущелье</span><span style="--c:#7a5a34">мост</span><span style="--c:#6f9a6f">возвышенность</span><span style="--c:#3b404d">стена (КД 17, 54 хита)</span><span style="--c:#2f6a33">дерево (КД 15, 27 хитов; залезть — +20 фт высоты)</span><span style="--c:#4a4438">обломки</span><span style="--c:#e2572a">опасная зона: лава, кислота, дым, лёд, гроза, туман — урон при входе и в начале хода (спасбросок — половина)</span><span style="--c:#7d7568">укрытие</span><span style="--c:#56401e">грязь</span><span style="--c:#1a1d3a">тьма</span><span style="--c:#f2c14e">край арены: выход = побег = поражение</span></div></details>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+      <div class="card pcard" id="cardMe"></div>
+      <div class="card pcard" id="cardEnemy"></div>
+      <div class="card"><h3>Журнал боя</h3><div class="log" id="log"></div></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+// ====================================================================================================================
+// Общее
+// ====================================================================================================================
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const SIDE = ['A','B'];
+const STAT_N = ['СИЛ','ЛОВ','ТЕЛ','ИНТ','МДР','ХАР'];
+const DT_COL = ['#9be15d','#cdbba0','#8fd8ff','#ff8a3d','#c58bff','#fff06a','#9a74d6','#e4e4e4','#7bd88f','#ff7bd5','#fff2a8','#f0f0f0','#9fb4ff'];
+const CATS = {
+  stat:{ic:'💪',c:'#8e7cc3',n:'Характеристики'}, ac:{ic:'🛡️',c:'#5b9bd5',n:'КД'}, weapon:{ic:'⚔️',c:'#d9822b',n:'Оружие'},
+  ability:{ic:'✨',c:'#d95fa8',n:'Способности'}, passive:{ic:'🧿',c:'#3fb0a0',n:'Пассивы'}, aura:{ic:'🔥',c:'#e5b83a',n:'Аура'},
+  minions:{ic:'👥',c:'#8aa04a',n:'Приспешники'}, hp:{ic:'❤️',c:'#d23b3b',n:'Здоровье'}
+};
+// свой id браузера: у каждого игрока свой бой и своё место в комнате
+let SID = ''; try { SID = localStorage.getItem('dnd_sid') || ''; if (!SID){ SID = Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('dnd_sid', SID); } } catch (e) { SID = Math.random().toString(36).slice(2); }
+async function api(obj){
+  try {
+    const ac = new AbortController(), to = setTimeout(() => ac.abort(), 35000);   // туннель завис — не ждать вечно
+    const r = await fetch('/api', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.assign({sid: SID}, obj)), signal: ac.signal});
+    clearTimeout(to);
+    return await r.json();
+  } catch (e) { return {type:'error', err:'нет связи с сервером: ' + e.message}; }
+}
+function showTab(n){
+  [1,2,3,4,5,6].forEach(i => { $('s' + i).classList.toggle('on', i === n); $('tab' + i).setAttribute('aria-selected', i === n); });
+  if (n === 4) loadSheet();
+  if (n === 5) meShow();
+  if (n === 2) loadPreview();
+  if (n === 3 && G.active) { fitPlay(); }
+}
+$('tab6').onclick = () => showTab(6); $('tab5').onclick = () => showTab(5); $('tab4').onclick = () => showTab(4); $('tab1').onclick = () => showTab(1); $('tab2').onclick = () => showTab(2); $('tab3').onclick = () => showTab(3);
+
+// ====================================================================================================================
+// 1. Конструктор персонажа
+// ====================================================================================================================
+const DEFAULT_CHAR = {v:21, name:'Рыцарь', budget:500, ctype:9, stats:[16,10,14,8,10,8], acV:4, main:0, prof:2, size:2, armor:{kind:0, shield:false, stealthDis:false, prof:true},
+  weapon:{armed:true, n:1, s:8, range:5, att:2, reach:5, type:11, finesse:false, ammo:false, prof:true},
+  abilities:[{_kind:'save', saveStat:1, range:5, radius:10, dmgN:2, dmgS:6, dtype:1, cond:1, condRounds:1, recharge:5}],
+  passives:{speed:30, saveProf:[2], rules:[], res:[], imm:[], vuln:[], immCond:[], slots:[0,0,0,0,0,0,0,0,0,0], aura:{n:0,s:6,type:3,rad:0,cond:0,rounds:1}, rider:{n:0,s:6,type:3,cond:0,rounds:1}}};
+let S = JSON.parse(JSON.stringify(DEFAULT_CHAR));
+// описание до v21: acV — прежние КД-очки (+1 КД за 2), speedBonus — надбавка к бесплатным 30 фт
+function migrateChar(c){
+  if (c.weapon && c.weapon.prof == null) c.weapon.prof = true;
+  if (!c.armor) c.armor = {kind:0, shield:false, stealthDis:false, prof:true};   // доспехи (v21)
+  (c.abilities || []).forEach(a => { if (a._kind === 'zone'){ a.ground = true; const hostile = a.dmgN > 0 || a.cond > 0 || a.pushFt > 0 || a.dotN > 0; a._kind = !hostile ? 'auto' : ['attack', 'save', 'auto'][a._zdel == null ? 1 : +a._zdel]; } });   // «по клетке» — галочка   // владения (v21): прежние персонажи владеют своим оружием
+  const p = c.passives || {};   // «когда → что»: прежние склейки — в правила
+  if (!p.rules){
+    p.rules = [];
+    if (p.pack) p.rules.push({when:1, what:0});
+    if (p.reckless) p.rules.push({when:7, what:0}, {when:7, what:4});
+    if (p.saveAdv) p.rules.push({when:0, what:7});
+    if (p.phN > 0) p.rules.push({when:2, what:1, n:p.phN, s:6});
+    if (p.cdN > 0) p.rules.push({when:5, warg:p.cdK || 1, what:1, n:p.cdN, s:6, once:true});
+    if (p.condDefT > 0) p.rules.push({when:[0, 3, 2, 4][p.condDefT], what:p.condDefS === 2 ? 6 : 5});
+    p.rules.forEach(r => { r.warg = r.warg || 1; r.n = r.n || 1; r.s = r.s || 6; r.once = !!r.once; });
+    ['pack', 'reckless', 'saveAdv', 'phN', 'cdN', 'cdK', 'condDefT', 'condDefS'].forEach(k => delete p[k]);
+  }
+  if (c.v >= 21) return c;
+  c.acV = Math.floor((c.acV || 0) / 2);
+  c.passives = c.passives || {};
+  if (c.passives.speed == null) c.passives.speed = 30 + (c.passives.speedBonus || 0);
+  delete c.passives.speedBonus;
+  c.v = 21;
+  return c;
+}
+try { const t = localStorage.getItem('dnd_char'); if (t) S = Object.assign(JSON.parse(JSON.stringify(DEFAULT_CHAR)), migrateChar(JSON.parse(t))); } catch (e) {}
+let CAT = null, lastPrice = null, priceTimer = null, priceSeq = 0;
+
+const ABIL_PRESETS = [
+  {n:'Удар заклинанием', a:{_kind:'attack', range:60, dmgN:3, dmgS:8, dtype:3}},
+  {n:'Огненный шар', a:{_kind:'save', saveStat:1, range:60, radius:20, dmgN:4, dmgS:6, dtype:3, recharge:5}},
+  {n:'Удар с отбросом', a:{_kind:'attack', range:5, dmgN:2, dmgS:6, dtype:1, pushFt:10}},
+  {n:'Ледяные путы', a:{_kind:'save', saveStat:0, range:30, cond:2, condRounds:2, dmgN:2, dmgS:6, dtype:2, uses:2}},
+  {n:'Страх', a:{_kind:'save', saveStat:4, range:30, radius:15, cond:3, condRounds:2, uses:1}},
+  {n:'Лечение', a:{_kind:'self', healN:3, bonus:true, uses:3}},
+  {n:'Каменная кожа', a:{_kind:'self', tempN:4, uses:1}},
+  {n:'Прыжок', a:{_kind:'self', teleFt:30, bonus:true, recharge:5}},
+  {n:'Стена-барьер', a:{_kind:'auto', ground:true, range:30, wallLen:5, wallRounds:3, uses:2}},
+  {n:'Заросли (замедляют путь)', a:{_kind:'auto', ground:true, range:30, radius:15, terr:true, recharge:5}},
+  {n:'Огненный шар по клетке', a:{_kind:'save', ground:true, saveStat:1, range:60, radius:20, dmgN:4, dmgS:6, dtype:3, recharge:5}},
+  // заклинания PHB (v21): числа из книги в механиках движка; для заклинаний с ячейкой купите ячейки (пассивы)
+  {n:'PHB · Огненный снаряд (заговор)', a:{_kind:'attack', name:'Огненный снаряд', range:120, dmgN:1, dmgS:10, dtype:3}},
+  {n:'PHB · Луч холода (заговор)', a:{_kind:'attack', name:'Луч холода', range:60, dmgN:1, dmgS:8, dtype:2, cond:7, condRounds:1}},
+  {n:'PHB · Священное пламя (заговор)', a:{_kind:'save', name:'Священное пламя', saveStat:1, range:60, dmgN:1, dmgS:8, dtype:10}},
+  {n:'PHB · Волшебная стрела (1 ур.)', a:{_kind:'auto', name:'Волшебная стрела', range:120, dmgN:3, dmgS:4, dtype:4, slotLvl:1}},
+  {n:'PHB · Громовая волна (1 ур.)', a:{_kind:'save', name:'Громовая волна', saveStat:2, range:15, radius:15, shape:1, dmgN:2, dmgS:8, dtype:12, pushFt:10, slotLvl:1}},
+  {n:'PHB · Лечащее слово (1 ур.)', a:{_kind:'self', name:'Лечащее слово', healN:1, bonus:true, slotLvl:1}},
+  {n:'PHB · Туманный шаг (2 ур.)', a:{_kind:'self', name:'Туманный шаг', teleFt:30, bonus:true, slotLvl:2}},
+  {n:'PHB · Удержание личности (2 ур.)', a:{_kind:'save', name:'Удержание личности', saveStat:4, range:60, cond:10, condRounds:10, conc:true, slotLvl:2}},
+  {n:'PHB · Паутина (2 ур.)', a:{_kind:'save', name:'Паутина', ground:true, saveStat:1, range:60, radius:20, cond:2, condRounds:10, conc:true, slotLvl:2}},
+  {n:'PHB · Огненный шар (3 ур.)', a:{_kind:'save', name:'Огненный шар', ground:true, saveStat:1, range:150, radius:20, dmgN:8, dmgS:6, dtype:3, slotLvl:3}},
+  {n:'PHB · Молния (3 ур.)', a:{_kind:'save', name:'Молния', saveStat:1, range:100, radius:100, shape:3, dmgN:8, dmgS:6, dtype:5, slotLvl:3}},
+  {n:'PHB · Ужас (3 ур.)', a:{_kind:'save', name:'Ужас', saveStat:4, range:30, radius:30, shape:2, cond:3, condRounds:10, conc:true, slotLvl:3}},
+];
+const PATHS = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
+function setPath(o, p, v){ const ks = p.split('.'); let a = o; for (let i = 0; i < ks.length - 1; i++){ if (a[ks[i]] == null) a[ks[i]] = {}; a = a[ks[i]]; } a[ks[ks.length - 1]] = v; }
+function num(v, d = 0){ const x = parseFloat(v); return Number.isFinite(x) ? x : d; }
+
+function toSpec(a){   // из состояния формы в описание способности для движка
+  const k = a._kind || 'attack', o = {};
+  for (const key of Object.keys(a)) if (key[0] !== '_') o[key] = a[key];
+  o.self = k === 'self';
+  o.delivery = k === 'save' ? 1 : (k === 'auto' ? 2 : 0);
+  if (k === 'zone'){ o.ground = true; o.delivery = (o.dmgN > 0 || o.cond > 0 || o.pushFt > 0 || o.dotN > 0) ? (a._zdel == null ? 1 : +a._zdel) : 0; }   // старые описания
+  if (k === 'onhit'){ o.onHit = true; o.delivery = a._ohsave ? 1 : 0; }   // приём при попадании оружием
+  if (k === 'offhand'){ return {offhand:true, twfMod:!!a.twfMod, name:a.name || ''}; }   // атака второй рукой
+  if (k === 'cmd'){ return {cmdAtk:true, self:true, range:+a.range || 30, bonus:!!a.bonus, uses:+a.uses || 0, name:a.name || ''}; }   // приказ союзнику
+  if (k === 'counter'){ return {counter:true, self:true, react:4, range:+a.range || 60, uses:+a.uses || 0, slotLvl:+a.slotLvl || 0, name:a.name || ''}; }   // контрзаклинание
+  if (k === 'summon'){   // призыв: до 4 групп приспешников из библиотеки
+    const M = MINI(), gs = Object.values(a.groups || {}).filter(g => g && M[g.m]).slice(0, 4).map(g => ({n: Math.max(1, +g.n || 1), minion: M[g.m]}));
+    return {self:true, summon:{groups: gs}, bonus:!!a.bonus, conc:!!a.conc, uses:+a.uses || 0, name:a.name || ''};
+  }
+  if (k === 'form'){ const M = MINI(); return {self:true, form:{body: M[a.m] || M['Медведь']}, bonus:!!a.bonus, uses:+a.uses || 1, name:a.name || ''}; }
+  if (k === 'guard'){ return {react:5, self:true, protect:!!a.protect, strike:!!a.strike, range:+a.range || 5, uses:+a.uses || 0, name:a.name || ''}; }   // реакция за союзника
+  // доп. урон другого типа (v21): в форме — more.0, more.1; движку — список непустых
+  o.more = Object.values(a.more || {}).filter(m => m && +m.n > 0).map(m => ({n:+m.n, s:+(m.s || DIE_OPTS()[0][0]), type:m.type == null || m.type === '' ? DT_OPTS().map(x => x[0]).find(t => t !== +o.dtype) : +m.type}));   // пустое поле = первый вариант списка, как показывает форма
+  if (k === 'self') o.more = [];
+  return o;
+}
+// Библиотека приспешников и обликов (v21): готовые шаблоны + сохранённые игроком персонажи (описание для движка)
+const MINI_PRESETS = {
+  'Волк': {v:21, name:'Волк', budget:150, ctype:1, stats:[12,15,12,3,12,6], acV:3, main:1, size:2, weapon:{n:2, s:4, range:5, att:1, reach:5, type:7, finesse:true}, passives:{speed:40}},
+  'Скелет': {v:21, name:'Скелет', budget:120, ctype:13, stats:[10,14,15,6,8,5], acV:3, main:1, size:2, weapon:{n:1, s:6, range:5, att:1, reach:5, type:7, finesse:true}, passives:{speed:30, vuln:[1], imm:[8]}},
+  'Медведь': {v:21, name:'Медведь', budget:400, ctype:1, stats:[19,10,16,2,13,7], acV:1, main:0, size:3, weapon:{n:2, s:6, range:5, att:2, reach:5, type:11}, passives:{speed:40, climbS:true}},
+  'Орёл': {v:21, name:'Орёл', budget:120, ctype:1, stats:[6,15,10,2,14,7], acV:2, main:1, size:1, weapon:{n:1, s:6, range:5, att:1, reach:5, type:11, finesse:true}, passives:{speed:10, fly:true}}};
+let MINI_USER = {}; try { MINI_USER = JSON.parse(localStorage.getItem('dnd_minions') || '{}'); } catch (e) {}
+const MINI = () => Object.assign({}, MINI_PRESETS, MINI_USER);
+const MINI_OPTS = () => Object.keys(MINI()).map(n => [n, n + (MINI_PRESETS[n] ? '' : ' (свой)') + ' · бюджет ' + MINI()[n].budget]);
+function toChar(){
+  const c = JSON.parse(JSON.stringify(S));
+  const w = c.weapon; if (!w.armed) c.weapon = {n:0}; else { delete w.armed; delete w._desc; delete w._descMech; }
+  c.abilities = (S.abilities || []).map(toSpec);
+  c.altWeapons = (S.altWeapons || []).map(q => ({n:+q.n || 1, s:+q.s || 6, type:+(q.type || 0), att:+q.att || 1, range:+q.range || 5, reach:+q.reach || 5, finesse:!!q.finesse, ammo:!!q.ammo}));
+  return c;
+}
+
+// технические пределы и кубики приходят из движка (каталог); запасные значения — на случай старого каталога
+const LIM = {get ft(){ return (CAT && CAT.maxFt) || 500; }, get rounds(){ return (CAT && CAT.maxRounds) || 500; }, get dice(){ return (CAT && CAT.maxDice) || 1000; },
+  get count(){ return (CAT && CAT.maxCount) || 1000; }, get stat(){ return (CAT && CAT.statMax) || 40; }, get ac(){ return (CAT && CAT.acMax) || 30; }};
+function DIE_OPTS(){ return ((CAT && CAT.dice) || [2,4,6,8,10,12,20,100]).map(x => [x, 'к' + x]); }
+function numIn(path, min, max, step = 1, w = 74){
+  return `<input type="number" data-p="${path}" data-t="num" min="${min}" max="${max}" step="${step}" style="width:${w}px">`;
+}
+// число применений: 0 = без ограничения, в поле — пусто и «∞»
+function usesIn(path, w = 74){
+  return `<input type="number" data-p="${path}" data-t="num" data-inf="1" min="0" max="${LIM.count}" step="1" placeholder="∞" style="width:${w}px">`;
+}
+function selIn(path, opts, t = 'int'){
+  return `<select data-p="${path}" data-t="${t}">${opts.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select>`;
+}
+function chkIn(path, label, hint = ''){
+  return `<label><span><input type="checkbox" data-p="${path}" data-t="bool"> ${esc(label)}${hint ? `<span class="price-tag">${esc(hint)}</span>` : ''}</span></label>`;
+}
+function chipsFor(path, names, extra = '', order = null, prices = null){   // prices[i] — цена варианта (видна прямо на кнопке)
+  return `<div class="chips" data-chips="${path}">${(order || names.map((n, i) => i)).map(i => `<span class="chipb" data-i="${i}">${esc(names[i])}${prices && prices[i] != null ? ` <small>${prices[i] < 0 ? '+' + (-prices[i]) : prices[i]} оч.</small>` : ''}</span>`).join('')}</div>`;
+}
+// цена защиты от типа урона: единица × доля этого типа в бою (у уязвимости очки возвращаются — показано с «+»)
+const dtPrices = key => CAT.dtypes.map((n, i) => Math.max(1, Math.round((CAT.unit[key] || 0) * ((CAT.dshare || [])[i] || 0))) * (key === 'vuln5' ? -1 : 1));
+// типы урона в списках: физические, стихии, магические (номера типов в движке не меняются, только порядок показа)
+const DT_SHOW = ['дробящий', 'колющий', 'рубящий', 'огонь', 'холод', 'электричество', 'кислота', 'звук', 'яд', 'силовое поле', 'излучение', 'некротическая энергия', 'психическая энергия'];
+function dtOrder(){
+  const names = CAT.dtypes, rank = n => { const k = DT_SHOW.findIndex(x => n.startsWith(x.slice(0, 5))); return k < 0 ? 99 : k; };
+  return names.map((n, j) => j).sort((a, b) => rank(names[a]) - rank(names[b]) || a - b);
+}
+const DT_OPTS = () => dtOrder().map(j => [j, CAT.dtypes[j]]);
+// список типов урона; пустое значение = первый показанный тип (syncForm записывает его, чтобы видимое совпало с тем, что уйдёт движку)
+const dtSel = path => selIn(path, DT_OPTS()).replace('<select ', '<select data-dt="1" ');
+
+// ---- группы эффектов: показаны только выбранные, остальные — кнопками «+ …» (OPEN — добавленные, но ещё пустые) ----
+const OPEN = new Set(), GREG = {};
+function groupsHTML(base, obj, groups, rer){
+  let h = '', add = '';
+  for (const g of groups){
+    const key = base + '|' + g.id;
+    GREG[key] = {g, obj, rer};
+    if (g.always || (g.has && g.has(obj)) || OPEN.has(key))
+      h += `<div class="eff"><div class="eff-h">${esc(g.n)}${g.always ? '' : `<button class="x" data-gdel="${key}" title="Убрать">✕</button>`}</div>${g.html}</div>`;
+    else add += `<button class="add" data-gadd="${key}">+ ${esc(g.n)}</button>`;
+  }
+  return h + (add ? `<div class="adds">${add}</div>` : '');
+}
+const any = (a, ks) => ks.some(k => +a[k] > 0 || a[k] === true);
+const zero = (a, ks) => ks.forEach(k => { if (typeof a[k] === 'boolean') a[k] = false; else if (a[k] != null) a[k] = 0; });
+const G2 = s => `<div class="grid2">${s}</div>`;
+function abilGroups(a, k, P, dt, cd){
+  const SAVE = `<label>Спасбросок цели ${selIn(P('saveStat'), STAT_N.map((n, j) => [j, n]))}</label>`;
+  const COND = {id:'cond', n:'Состояние', has:a => +a.cond > 0, init:a => { a.cond = 1; a.condRounds = 1; }, clear:a => zero(a, ['cond']),
+    html:G2(`<label>Состояние ${selIn(P('cond'), cd)}</label><label>раундов ${numIn(P('condRounds'), 1, LIM.rounds)}</label>`)};
+  const TIMING = {id:'timing', n:'Как применяется', always:true,
+    html:G2(`${chkIn(P('bonus'), 'Бонусное действие')}<label>Реакция (срабатывает сама) ${selIn(P('react'), [[0,'нет — обычное действие'],[1,'когда меня атакуют'],[2,'когда мне нанесли урон'],[3,'когда враг вошёл в зону'],[4,'когда враг применил способность в зоне']])}</label>`)};
+  const COST = {id:'cost', n:'Ограничения (дешевле)', has:a => any(a, ['uses', 'recharge', 'slotLvl', 'conc']), init:a => { a.uses = 1; }, clear:a => zero(a, ['uses', 'recharge', 'slotLvl', 'conc']),
+    html:G2(`<label>Применений за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'))}</label><label>Перезарядка ${selIn(P('recharge'), [[0,'нет'],[6,'6'],[5,'5–6'],[4,'4–6']])}</label>
+      <label>Ячейка заклинания, ур. (0 — нет) ${numIn(P('slotLvl'), 0, 9)}</label>${chkIn(P('conc'), 'Концентрация')}`)};
+  if (k === 'self') return [
+    {id:'ally', n:'И на союзника', has:a => !!a.ally, init:a => { a.ally = true; a.range = a.range || 30; }, clear:a => { a.ally = false; },
+      html:G2(`${chkIn(P('ally'), 'И на союзника (лечение, хиты, баффы, невидимость)')}<label>дальность до союзника, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label>`)},
+    {id:'heal', n:'Лечение', has:a => any(a, ['healN', 'healB']), init:a => { a.healN = 1; a.healS = 8; }, clear:a => zero(a, ['healN', 'healB']),
+      html:G2(`<label>кубиков ${numIn(P('healN'), 0, LIM.dice)}</label><label>грань ${selIn(P('healS'), DIE_OPTS())}</label><label>+ к лечению ${numIn(P('healB'), 0, 1000)}</label>`)},
+    {id:'temp', n:'Временные хиты', has:a => +a.tempN > 0, init:a => { a.tempN = 1; }, clear:a => zero(a, ['tempN']), html:G2(`<label>к6 ${numIn(P('tempN'), 0, LIM.dice)}</label>`)},
+    {id:'ac', n:'Бонус КД', has:a => +a.acB > 0, init:a => { a.acB = 2; a.acRounds = 10; }, clear:a => zero(a, ['acB', 'acRounds']),
+      html:G2(`<label>+КД ${numIn(P('acB'), 0, LIM.count)}</label><label>раундов ${numIn(P('acRounds'), 0, LIM.rounds)}</label>`)},
+    {id:'buff', n:'Бафф оружия', has:a => +a.buffN > 0, init:a => { a.buffN = 1; a.buffS = 6; a.buffRounds = 10; }, clear:a => zero(a, ['buffN', 'buffRounds']),
+      html:G2(`<label>кубиков ${numIn(P('buffN'), 0, LIM.dice)}</label><label>грань ${selIn(P('buffS'), DIE_OPTS())}</label><label>раундов ${numIn(P('buffRounds'), 0, LIM.rounds)}</label>`)},
+    {id:'sb', n:'Бафф характеристики', has:a => +a.sbAmt > 0, init:a => { a.sbAmt = 2; a.sbRounds = 10; }, clear:a => zero(a, ['sbAmt', 'sbRounds']),
+      html:G2(`<label>характеристика ${selIn(P('sbStat'), STAT_N.map((n, j) => [j, n]))}</label><label>+ к модификатору ${numIn(P('sbAmt'), 0, LIM.count)}</label><label>раундов ${numIn(P('sbRounds'), 0, LIM.rounds)}</label>`)},
+    {id:'tele', n:'Телепорт', has:a => +a.teleFt > 0, init:a => { a.teleFt = 30; }, clear:a => zero(a, ['teleFt']), html:G2(`<label>фт ${numIn(P('teleFt'), 0, LIM.ft, 10)}</label>`)},
+    {id:'dark', n:'Тьма вокруг', has:a => +a.darkR > 0, init:a => { a.darkR = 10; }, clear:a => zero(a, ['darkR']), html:G2(`<label>радиус, фт ${numIn(P('darkR'), 0, LIM.ft, 10)}</label>`)},
+    {id:'invis', n:'Невидимость', has:a => +a.invisN > 0, init:a => { a.invisN = 1; }, clear:a => zero(a, ['invisN']), html:G2(`<label>раундов ${numIn(P('invisN'), 0, LIM.rounds)}</label>`)},
+    {id:'hide', n:'Укрытие (скрытность)', has:a => !!a.hide, init:a => { a.hide = true; }, clear:a => { a.hide = false; }, html:G2(chkIn(P('hide'), 'Укрытие (скрытность)'))},
+    TIMING, COST];
+  if (k === 'onhit') return [
+    {id:'base', n:'Приём', always:true, html:`<div class="hint" style="margin:4px 0">Вы атакуете оружием (действие Атака), и на первое попадание ложатся эффекты ниже. Не попали — приём не потрачен. Запас костей задаётся в «Оружии».</div>`},
+    {id:'dmg', n:'Доп. урон', has:a => +a.dmgN > 0, init:a => { a.dmgN = 1; a.dmgS = 6; }, clear:a => zero(a, ['dmgN']),
+      html:G2(`<label>кубиков ${numIn(P('dmgN'), 0, LIM.dice)}</label><label>грань ${selIn(P('dmgS'), DIE_OPTS())}</label><label>тип ${dtSel(P('dtype'))}</label>`)},
+    {id:'pool', n:'Кость запаса к урону', has:a => !!a.pool, init:a => { a.pool = true; }, clear:a => { a.pool = false; }, html:G2(chkIn(P('pool'), 'Тратит кость запаса (к урону)'))},
+    COND,
+    {id:'save', n:'Цель спасается', has:a => !!a._ohsave, init:a => { a._ohsave = true; }, clear:a => { a._ohsave = false; },
+      html:G2(`${chkIn(P('_ohsave'), 'Цель спасается от эффекта')}<label>спасбросок ${selIn(P('saveStat'), STAT_N.map((n, j) => [j, n]))}</label>`)},
+    {id:'disarm', n:'Обезоруживание', has:a => !!a.disarm, init:a => { a.disarm = true; }, clear:a => { a.disarm = false; }, html:G2(chkIn(P('disarm'), 'Обезоруживает'))},
+    {id:'push', n:'Толчок', has:a => +a.pushFt > 0, init:a => { a.pushFt = 10; }, clear:a => zero(a, ['pushFt']), html:G2(`<label>фт ${numIn(P('pushFt'), 0, LIM.ft, 5)}</label>`)},
+    {id:'selfd', n:'Урон себе', has:a => +a.selfN > 0, init:a => { a.selfN = 1; a.selfS = 6; }, clear:a => zero(a, ['selfN']),
+      html:G2(`<label>кубиков ${numIn(P('selfN'), 0, LIM.dice)}</label><label>грань ${selIn(P('selfS'), DIE_OPTS())}</label>`)},
+    {id:'kill', n:'Убил — лечение себе', has:a => any(a, ['killN', 'killB']), init:a => { a.killN = 1; a.killS = 8; }, clear:a => zero(a, ['killN', 'killB']),
+      html:G2(`<label>кубиков ${numIn(P('killN'), 0, LIM.dice)}</label><label>грань ${selIn(P('killS'), DIE_OPTS())}</label><label>+ ${numIn(P('killB'), 0, 1000)}</label>`)},
+    TIMING, COST];
+  // атака, спасбросок, без броска
+  return [
+    {id:'base', n:'Основное', always:true, html:G2(`<label>Дальность, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label>${k === 'save' ? SAVE : ''}
+      <label>Урон: кубиков ${numIn(P('dmgN'), 0, LIM.dice)}</label><label>грань ${selIn(P('dmgS'), DIE_OPTS())}</label><label>тип урона ${dtSel(P('dtype'))}</label>`)},
+    {id:'area', n:'Область', has:a => +a.radius > 0, init:a => { a.radius = 10; }, clear:a => { zero(a, ['radius', 'shape', 'selective']); },
+      html:G2(`<label>Форма ${selIn(P('shape'), [[0,'сфера (круг)'],[1,'куб (квадрат)'],[2,'конус от себя'],[3,'линия от себя']])}</label>
+        <label>${+a.shape >= 2 ? 'Длина' : (+a.shape === 1 ? 'Полусторона' : 'Радиус')}, фт ${numIn(P('radius'), 0, LIM.ft, 5)}</label>
+        ${chkIn(P('selective'), 'Избирательная: бьёт только врагов (иначе задевает и своих, и вас)')}`)},
+    {id:'targets', n:'Несколько целей', has:a => +a.targets > 1, init:a => { a.targets = 2; }, clear:a => { a.targets = 1; },
+      html:G2(`<label>Целей на выбор (без области) ${numIn(P('targets'), 1, 10, 1, 56)}</label>`)},
+    COND,
+    {id:'move', n:'Толчок и притягивание', has:a => any(a, ['pushFt', 'pullFt', 'collN']), init:a => { a.pushFt = 10; }, clear:a => zero(a, ['pushFt', 'pullFt', 'collN']),
+      html:G2(`<label>Толчок, фт ${numIn(P('pushFt'), 0, LIM.ft, 5)}</label><label>Урон при столкновении, к6 ${numIn(P('collN'), 0, LIM.dice)}</label><label>Притягивание, фт ${numIn(P('pullFt'), 0, LIM.ft, 5)}</label>`)},
+    {id:'dot', n:'Урон по времени', has:a => +a.dotN > 0, init:a => { a.dotN = 1; a.dotRounds = 2; }, clear:a => zero(a, ['dotN', 'dotRounds']),
+      html:G2(`<label>кубиков ${numIn(P('dotN'), 0, LIM.dice)}</label><label>раундов ${numIn(P('dotRounds'), 0, LIM.rounds)}</label>`)},
+    {id:'more', n:'Доп. урон другого типа', has:a => Object.values(a.more || {}).some(m => m && +m.n > 0), init:a => { a.more = {0:{n:1, s:6, type:1}}; }, clear:a => { a.more = {}; }, html:moreHTML(P, dt.filter(x => x[0] !== (a.dtype == null || a.dtype === '' ? dt[0][0] : +a.dtype)))},
+    {id:'special', n:'Особые эффекты', has:a => any(a, ['maxHpDmg', 'drain', 'dispel']), clear:a => zero(a, ['maxHpDmg', 'drain', 'dispel']),
+      html:G2(`${chkIn(P('maxHpDmg'), 'Урон снижает и максимум хитов')}${chkIn(P('drain'), 'Вампиризм: половина урона — себе в хиты')}${chkIn(P('dispel'), 'Рассеивание: снимает баффы и концентрацию')}`)},
+    {id:'ground', n:'Клетка, барьер, местность', has:a => any(a, ['ground', 'terr', 'wallLen']), init:a => { a.ground = true; }, clear:a => zero(a, ['ground', 'terr', 'wallLen', 'wallRounds']),
+      html:G2(`${chkIn(P('ground'), 'Центр в клетке: область или барьер на любой клетке, а не на враге')}${chkIn(P('terr'), 'Труднопроходимая местность')}
+        ${a.ground ? `<label>Барьер: клеток в линии (0 — нет) ${numIn(P('wallLen'), 0, 100)}</label><label>раундов барьера ${numIn(P('wallRounds'), 0, LIM.rounds)}</label>` : ''}`)},
+    TIMING, COST];
+}
+const KIND_OPTS = [['attack','Атака (бросок попадания)'],['save','Спасбросок цели'],['auto','Без броска (всегда попадает)'],['self','На себя'],['onhit','При попадании оружием (приём)'],['offhand','Атака второй рукой'],['cmd','Приказ союзнику атаковать'],['guard','Реакция за союзника'],['counter','Контрзаклинание'],['summon','Призыв приспешников'],['form','Превращение (облик)']];
+function abilityHTML(a, i){
+  const k = a._kind || 'attack';
+  const dt = DT_OPTS(), cd = CAT.conds.map((n, j) => [j, n + (CAT.condPrice && CAT.condPrice[j] != null ? ` · ${Math.round(CAT.condPrice[j])} оч. (1 раунд)` : '')]).filter(x => x[0] > 0);
+  const P = f => `abilities.${i}.${f}`;
+  let h = `<div class="abil" data-ab="${i}"><div class="top"><b>${i + 1}.</b>
+    <input type="text" data-p="${P('name')}" data-t="str" placeholder="Название" style="width:170px">
+    ${selIn(P('_kind'), KIND_OPTS, 'str')}
+    <span class="price" data-abprice="${i}"></span><button data-del="${i}" class="danger" title="Удалить">✕</button></div>
+    <div class="small abparts" data-abparts="${i}"></div>
+    <details class="descbox"${a._desc ? ' open' : ''}><summary>Описание для игроков (механика — выше; описание на бой не влияет)</summary>
+      <textarea data-p="${P('_desc')}" data-t="str" rows="2" placeholder="Например: змея обвивает противника кольцами и сдавливает"></textarea>
+      <div class="row"><button data-mkdesc="${i}" title="Черновик из деталей способности — дальше перепишите своими словами">✓ Собрать из механики</button><span class="small" data-descwarn="${i}"></span></div></details>`;
+  if (k === 'cmd'){
+    h += `<div class="hint" style="margin:6px 0">Союзник (приспешник) в пределах дальности бьёт оружием своей реакцией — по ближайшему врагу в досягаемости.</div>
+      <div class="grid2"><label>Дальность до союзника, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label>${chkIn(P('bonus'), 'Бонусным действием')}
+      <label>Применений за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'))}</label></div></div>`;
+    return h;
+  }
+  if (k === 'summon'){
+    const gs = a.groups || (a.groups = {0:{m:'Волк', n:2}}), keys = Object.keys(gs).filter(g => gs[g]);
+    h += `<div class="hint" style="margin:6px 0">Приспешники появляются рядом и ходят сразу после вас — вы управляете ими сами. Цена: шаблон × копии × применения. Свой шаблон — соберите персонажа и нажмите «В библиотеку».</div>`;
+    keys.forEach((g, n) => { h += `<div class="grid2"><label>Группа ${n + 1}: кто ${selIn(P('groups.' + g + '.m'), MINI_OPTS(), 'str')}</label><label>Копий ${numIn(P('groups.' + g + '.n'), 1, 20)}</label>${keys.length > 1 ? `<button data-sgdel="${i}:${g}" class="danger">✕ группу</button>` : ''}</div>`; });
+    h += `<div class="grid2">${keys.length < 4 ? `<button data-sgadd="${i}">+ ещё группа (другие приспешники)</button>` : ''}<button data-minisave="1" title="Текущий персонаж (без его призывов) — в библиотеку приспешников и обликов">📥 Текущего персонажа — в библиотеку</button></div>
+      <div class="grid2"><label>Применений за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'))}</label>${chkIn(P('bonus'), 'Бонусным действием')}${chkIn(P('conc'), 'Концентрация (дешевле; исчезают с ней)')}</div></div>`;
+    return h;
+  }
+  if (k === 'form'){
+    h += `<div class="hint" style="margin:6px 0">Тело облика: размер, СИЛ/ЛОВ/ТЕЛ, КД, оружие, скорость и свой запас хитов; ваши ИНТ/МДР/ХАР остаются. Хиты облика кончились — вы возвращаетесь, лишний урон идёт на ваши хиты. В облике способности недоступны.</div>
+      <div class="grid2"><label>Облик ${selIn(P('m'), MINI_OPTS(), 'str')}</label><label>Применений за бой ${numIn(P('uses'), 1, 10)}</label>${chkIn(P('bonus'), 'Бонусным действием')}<button data-minisave="1">📥 Текущего персонажа — в библиотеку</button></div></div>`;
+    return h;
+  }
+  if (k === 'counter'){
+    h += `<div class="hint" style="margin:6px 0">Срабатывает сама, реакцией: когда враг применяет способность в пределах дальности, она гаснет (плата за неё всё равно списана).</div>
+      <div class="grid2"><label>Дальность, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label><label>Применений за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'))}</label>
+      <label>Ячейка заклинания, ур. (0 — нет) ${numIn(P('slotLvl'), 0, 9)}</label></div></div>`;
+    return h;
+  }
+  if (k === 'guard'){
+    h += `<div class="hint" style="margin:6px 0">Срабатывает сама, реакцией: когда враг атакует союзника рядом с вами. Помеха — как стиль «Защита», удар — как черта «Страж».</div>
+      <div class="grid2">${chkIn(P('protect'), 'Помеха этой атаке')}${chkIn(P('strike'), 'Удар оружием по атакующему')}
+      <label>Союзник не дальше, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label>
+      <label>Применений за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'))}</label></div></div>`;
+    return h;
+  }
+  if (k === 'offhand'){
+    h += `<div class="hint" style="margin:6px 0">Бой двумя оружиями: после атаки оружием в свой ход — бонусным действием ещё одна атака тем же оружием. Нужно лёгкое ближнее оружие (галочка в «Оружии»). Без стиля модификатор к урону второй рукой не добавляется (кроме отрицательного).</div>
+      <div class="grid2">${chkIn(P('twfMod'), 'Стиль «сражение двумя оружиями»: модификатор к урону второй рукой')}</div></div>`;
+    return h;
+  }
+  return h + groupsHTML('abilities.' + i, a, abilGroups(a, k, P, dt, cd), renderAbilities) + '</div>';
+}
+// доп. урон другого типа (модификация при сборке, v21 №10): до двух строк
+function moreHTML(P, dt){
+  return `<div class="grid2" style="margin-top:6px">${[0, 1].map(j => `<label>Доп. урон ${j + 1}: кубиков ${numIn(P('more.' + j + '.n'), 0, LIM.dice)}</label>
+    <label>грань ${selIn(P('more.' + j + '.s'), DIE_OPTS())}</label><label>тип (другой) ${selIn(P('more.' + j + '.type'), dt).replace('<select ', '<select data-dt="1" ')}</label>`).join('')}</div>`;
+}
+
+// шаги конструктора: показан один; в подписи — цена шага (по категориям покупок) или сколько выбрано
+const STEPS = [
+  {n:'Основа'}, {n:'Характеристики и КД', cats:['stat', 'ac']}, {n:'Владения'}, {n:'Оружие', cats:['weapon']},
+  {n:'Способности', cats:['ability', 'minions']}, {n:'Защита'}, {n:'Движение и чувства'}, {n:'Особенности'}];
+let STEP = 0;
+try { STEP = Math.min(STEPS.length - 1, Math.max(0, +localStorage.getItem('dnd_step') || 0)); } catch (e) {}
+function stepNote(i){
+  const p = S.passives || {}, L = x => (x || []).length;
+  const st = STEPS[i], b = lastPrice && lastPrice.boss;
+  if (st.cats && b){ const c = b.items.filter(it => st.cats.includes(it.cat)).reduce((s, it) => s + it.cost, 0); return c ? c + ' оч.' : '—'; }
+  if (i === 0) return S.budget + ' оч.';
+  const n = [0, 0,
+    L(p.skills) + L(p.expert) + L(p.saveProf) + (+p.tools > 0) + ((+S.prof || 2) > 2), 0, 0,
+    L(p.res) + L(p.imm) + L(p.vuln) + L(p.immCond) + !!p.resNM + !!p.immNM + (+p.parry > 0) + !!p.uncanny + !!p.riposte,
+    !!p.fly + !!p.immPush + !!p.disengB + !!p.ignDiff + !!p.climbS + !!p.swimS + !!p.burrowS + !!p.evasion + !!p.sunSens + (+p.lair > 0) + (+p.dv > 0) + (+p.blindsight > 0) + (+p.truesight > 0),
+    L(p.rules) + L(p.trigs) + (+p.regenN > 0) + (+p.surge > 0) + (+p.legRes > 0) + (+p.legAct > 0) + !!p.wMagic + ((p.slots || []).some(x => +x > 0)) + (+(p.aura || {}).rad > 0) + (+(p.rider || {}).n > 0 || +(p.rider || {}).cond > 0)][i];
+  return n ? 'выбрано ' + n : 'ничего';
+}
+function renderSteps(){
+  const bar = $('stepBar'); if (!bar) return;
+  bar.innerHTML = STEPS.map((s, i) => `<button class="step-b${i === STEP ? ' on' : ''}" data-step="${i}"><span>${i + 1} · ${esc(s.n)}</span><small>${esc(stepNote(i))}</small></button>`).join('');
+  document.querySelectorAll('#form .stepbox').forEach(el => el.classList.toggle('on', +el.dataset.box === STEP));
+}
+function goStep(i){
+  STEP = Math.min(STEPS.length - 1, Math.max(0, i));
+  try { localStorage.setItem('dnd_step', STEP); } catch (e) {}
+  renderSteps();
+  $('form').scrollIntoView({block:'start', behavior:'smooth'});
+}
+function stepNav(i){
+  return `<div class="stepnav">${i > 0 ? `<button data-step="${i - 1}">← ${esc(STEPS[i - 1].n)}</button>` : '<span></span>'}${i < STEPS.length - 1 ? `<button class="primary" data-step="${i + 1}">${esc(STEPS[i + 1].n)} →</button>` : '<button class="primary" data-tab2>К сопернику →</button>'}</div>`;
+}
+function presetSel(kind, list){
+  return `<select data-presetsel="${kind}"><option value="">+ из заготовки…</option>${list.map((p, i) => `<option value="${i}">${esc(p.n)}</option>`).join('')}</select>`;
+}
+
+function buildForm(){
+  const dt = DT_OPTS(), cd = CAT.conds.map((n, j) => [j, n + (CAT.condPrice && CAT.condPrice[j] != null ? ` · ${Math.round(CAT.condPrice[j])} оч. (1 раунд)` : '')]).filter(x => x[0] > 0);
+  const pass = Object.fromEntries(CAT.passives.map(p => [p.key, p]));
+  const pc = k => pass[k] ? ` · ${pass[k].price} оч.` : '';
+  const U = CAT.unit;
+  S.passives = S.passives || {};
+  const p = S.passives, PP = f => 'passives.' + f;
+  const box = (i, inner) => `<div class="stepbox" data-box="${i}">${inner}${stepNav(i)}</div>`;
+  let h = `<div class="steps" id="stepBar"></div>`;
+  // 0 · основа
+  h += box(0, `<div class="card"><h3>Основа</h3>
+    <div class="row"><label>Имя <input type="text" data-p="name" data-t="str" style="width:200px"></label>
+    <label>Бюджет (очки) ${numIn('budget', CAT.minBudget || 20, CAT.maxBudget || 100000, 1, 90)}</label>
+    <label>Размер ${selIn('size', [[0,'крошечный'],[1,'маленький'],[2,'средний'],[3,'большой'],[4,'огромный'],[5,'громадный']])}</label>
+    <label>Тип существа ${selIn('ctype', ['аберрация', 'зверь', 'небожитель', 'конструкт', 'дракон', 'элементаль', 'фея', 'исчадие', 'великан', 'гуманоид', 'монстр', 'слизь', 'растение', 'нежить'].map((t, j) => [j, t]))}</label></div>
+    <div class="hint">Бюджет — сила персонажа, любое целое число от ${CAT.minBudget || 20} до ${CAT.maxBudget || 100000}. Все характеристики по 10 бесплатны, поэтому очки уходят на то, что выше десяти, и возвращаются, если что-то опустить ниже. Здоровье тратит остаток: 2 очка за ХП. У соперника по умолчанию столько же очков.</div>
+    <div class="hint">Дальше по шагам: характеристики, владения, оружие, способности, защита, движение, особенности. Шаги можно проходить в любом порядке; справа — сколько потрачено и все покупки.</div></div>`);
+  // 1 · характеристики и КД
+  let st = `<div class="card"><h3>Характеристики и КД</h3>
+    <div class="hint">Цена значения V (1–${LIM.stat}): V·(V+1)/2 − 55. Десять бесплатно, 16 стоит 81, 20 стоит 155; опустите до 8 — получите 19 очков. </div>
+    <div class="hint"><b>Главная характеристика</b> — любая из шести, отметьте кружок «главная» справа. От неё бросок атаки способностей и СЛ спасбросков против них (8 + мастерство + её модификатор). Оружие бьёт своей: СИЛ, фехтовальное и боеприпасы — ЛОВ.</div>`;
+  STAT_N.forEach((n, i) => {
+    st += `<div class="statrow"><span class="nm">${n}</span><input type="range" min="1" max="${LIM.stat}" data-p="stats.${i}" data-t="int">${numIn('stats.' + i, 1, LIM.stat, 1, 56)}<span class="tnum small" data-statcost="${i}"></span>
+      <label class="small"><input type="radio" name="main" data-main="${i}"> главная (способности)</label></div>`;
+  });
+  st += `<div class="statrow"><span class="nm">КД</span><input type="range" min="0" max="${LIM.ac}" data-p="acV" data-t="int">${numIn('acV', 0, LIM.ac, 1, 56)}<span class="tnum small" data-accost></span><span class="small" data-acval></span></div>
+    <div class="hint">КД = 10 + купленные единицы + ЛОВ (по доспеху) + щит. Средний доспех пропускает ЛОВ не больше +2, тяжёлый — не пропускает вовсе; за срезанную ЛОВ очки возвращаются.</div>
+    <div class="row"><label>Доспех ${selIn('armor.kind', [[0,'без доспеха'],[1,'лёгкий'],[2,'средний (ЛОВ до +2)'],[3,'тяжёлый (без ЛОВ, СИЛ 13+)']])}</label>
+      ${chkIn('armor.shield', 'Щит +2 КД (занимает руку)', U.shield + ' оч.')}${chkIn('armor.stealthDis', 'Помеха к Скрытности')}${chkIn('armor.prof', 'Владею доспехом и щитом')}</div></div>`;
+  h += box(1, st);
+  // 2 · владения
+  const SKL = (CAT.skills || []).map(k => k.name + ' (' + STAT_N[k.stat] + ')' + (k.combat ? ' ⚔' : ''));
+  h += box(2, `<div class="card"><h3>Владения</h3>
+    <div class="hint">Как в D&D: бонус мастерства — один на всё, чем вы владеете. +2 даром, каждая единица сверх — ${U.prof1} оч. Цена владения растёт с мастерством (× мастерство/2). Экспертиза удваивает мастерство в навыке. ⚔ — навык работает в бою (${U.skillC} оч.), остальные нужны вне боя (${U.skillNC} оч.).</div>
+    <div class="row"><label>Бонус мастерства +${numIn('prof', 2, 6, 1, 56)}</label><label>Инструментов ${numIn('passives.tools', 0, 40, 1, 56)}</label></div>
+    <div class="sec-h">Спасброски (${U.saveProf} оч. × мастерство/2)</div>${chipsFor('passives.saveProf', STAT_N)}
+    <div class="sec-h">Навыки</div>${chipsFor('passives.skills', SKL)}
+    <div class="sec-h">Экспертиза (только в навыке с владением)</div>${chipsFor('passives.expert', SKL)}</div>`);
+  // 3 · оружие
+  h += box(3, `<div class="card"><h3>Оружие</h3>
+    <div class="row">${chkIn('weapon.armed', 'Есть оружие (иначе безоружный)')}</div>
+    <div id="wpn">
+      <details class="descbox"${S.weapon && S.weapon._desc ? ' open' : ''}><summary>Описание оружия для игроков</summary>
+        <textarea data-p="weapon._desc" data-t="str" rows="2" placeholder="Например: ржавая алебарда с зазубринами"></textarea>
+        <div class="row"><button data-mkwdesc="1">✓ Собрать из механики</button><span class="small" data-wdescwarn></span></div></details>
+      <div class="grid2"><label>Кубиков урона ${numIn('weapon.n', 1, LIM.dice)}</label><label>грань ${selIn('weapon.s', DIE_OPTS())}</label>
+      <label>Тип урона ${dtSel('weapon.type')}</label><label>Атак за действие ${numIn('weapon.att', 1, LIM.count)}</label>
+      <label>Дальность, фт (5 — ближнее) ${numIn('weapon.range', 5, LIM.ft, 5)}</label><label>Досягаемость ближнего, фт ${numIn('weapon.reach', 5, LIM.ft, 5)}</label>
+      ${chkIn('weapon.prof', 'Владею этим оружием', 'без владения: −' + U.noWProf + ' оч. × мастерство/2')}</div>
+      <div class="sec-h">Свойства</div>
+      <div class="grid2">${chkIn('weapon.finesse', 'Фехтовальное (СИЛ или ЛОВ)', '+3 оч.')}${chkIn('weapon.ammo', 'Боеприпасное (по ЛОВ)')}
+      ${chkIn('weapon.light', 'Лёгкое (можно бить второй рукой)')}${chkIn('weapon.twoHanded', 'Двуручное (без щита и второй руки)')}${chkIn('weapon.heavy', 'Тяжёлое (маленьким — помеха)')}
+      <label>Универсальное: грань двумя руками ${selIn('weapon.versatile', [[0,'нет'], ...DIE_OPTS()])}</label>
+      <label>Дальняя дистанция, фт (0 — нет) ${numIn('weapon.long', 0, LIM.ft, 5)}</label></div>
+      <div class="sec-h">Запас костей (кости превосходства, ки)</div>
+      <div class="grid2"><label>костей ${numIn('weapon.poolN', 0, LIM.count, 1, 56)}</label><label>грань ${selIn('weapon.poolS', DIE_OPTS())}</label></div>
+      <div class="hint">Перезарядка (арбалеты) = 1 атака за действие. Приёмы, которые тратят кости запаса, — способности «При попадании оружием».</div>
+    </div>
+    <div class="sec-h">Запасное оружие</div>
+    <div class="hint">Можно держать несколько видов оружия и менять их в бою: первая смена за ход бесплатна, вторая — бонусным действием, третья — действием. Каждое стоит как отдельное оружие.</div>
+    ${(S.altWeapons || []).map((q, i) => { const W = f => `altWeapons.${i}.${f}`; return `<div class="abil"><div class="top"><b>${i + 2}.</b>
+      <input type="text" data-p="${W('name')}" data-t="str" placeholder="Название (лук, кинжал…)" style="width:170px"><span class="price" data-altprice="${i}"></span><button data-altdel="${i}" class="danger" title="Удалить">✕</button></div>
+      <div class="grid2"><label>Кубиков ${numIn(W('n'), 1, LIM.dice)}</label><label>грань ${selIn(W('s'), DIE_OPTS())}</label><label>Тип урона ${dtSel(W('type'))}</label>
+      <label>Атак за действие ${numIn(W('att'), 1, LIM.count)}</label><label>Дальность, фт (5 — ближнее) ${numIn(W('range'), 5, LIM.ft, 5)}</label><label>Досягаемость ближнего, фт ${numIn(W('reach'), 5, LIM.ft, 5)}</label>
+      ${chkIn(W('finesse'), 'Фехтовальное')}${chkIn(W('ammo'), 'Боеприпасное (по ЛОВ)')}</div></div>`; }).join('')}
+    <button data-altadd="1">+ Запасное оружие</button></div>`);
+  // 4 · способности
+  h += box(4, `<div class="card"><h3>Способности</h3><div class="hint">Заклинания и приёмы. Цена = эффекты × (100% + надбавки − скидки), но не меньше 20% от эффектов. Надбавки — дальность, область, бонусное действие, «без броска»; скидки — ограничения, перезарядка, концентрация, ячейка. В каждой способности видны только выбранные эффекты, остальные — кнопками «+».</div>
+    <div class="row"><button data-preset="blank" class="primary">+ Новая способность</button>${presetSel('abil', ABIL_PRESETS)}</div>
+    <div id="abilList"></div></div>`);
+  // 5 · защита
+  const immCondChips = chipsFor('passives.immCond', CAT.conds.slice(1).map(String)).replace(/data-i="(\d+)"/g, (m, g) => `data-i="${+g + 1}"`);
+  h += box(5, `<div class="card"><h3>Защита</h3><div class="hint">Цена резиста и иммунитета зависит от того, как часто встречается этот тип урона.</div>
+    <div id="defGroups">${groupsHTML('def', p, [
+      {id:'res', n:'Резист (урон вдвое меньше)', has:o => (o.res || []).length > 0, clear:o => { o.res = []; }, html:chipsFor('passives.res', CAT.dtypes, '', dtOrder(), dtPrices('resist5'))},
+      {id:'imm', n:'Иммунитет к урону', has:o => (o.imm || []).length > 0, clear:o => { o.imm = []; }, html:chipsFor('passives.imm', CAT.dtypes, '', dtOrder(), dtPrices('imm5'))},
+      {id:'vuln', n:'Уязвимость (очки возвращаются)', has:o => (o.vuln || []).length > 0, clear:o => { o.vuln = []; }, html:chipsFor('passives.vuln', CAT.dtypes, '', dtOrder(), dtPrices('vuln5'))},
+      {id:'immc', n:'Иммунитет к состояниям', has:o => (o.immCond || []).length > 0, clear:o => { o.immCond = []; }, html:`<div class="small">${U.immCond} оч. за каждое</div>` + immCondChips},
+      {id:'nm', n:'Немагическое физическое', has:o => !!o.resNM || !!o.immNM, clear:o => { o.resNM = o.immNM = false; },
+        html:G2(`${chkIn(PP('resNM'), 'Резист', pc('resNM'))}${chkIn(PP('immNM'), 'Иммунитет', pc('immNM'))}`)},
+      {id:'react', n:'Защитные реакции', has:o => +o.parry > 0 || !!o.uncanny || !!o.riposte, clear:o => { o.parry = 0; o.uncanny = o.riposte = false; },
+        html:G2(`<label>Парирование: +КД против ближней атаки ${numIn(PP('parry'), 0, LIM.count)}</label>${chkIn(PP('uncanny'), 'Невероятное уклонение', pc('uncanny'))}${chkIn(PP('riposte'), 'Контратака', pc('riposte'))}`)},
+    ], buildForm)}</div></div>`);
+  // 6 · движение и чувства
+  h += box(6, `<div class="card"><h3>Движение и чувства</h3>
+    <div class="grid2"><label>Скорость, фт (покупается вся, шаг 5) ${numIn(PP('speed'), 0, LIM.ft, 5)}</label></div>
+    <div class="sec-h">Движение</div>
+    <div class="grid2">${chkIn(PP('fly'), 'Полёт', pc('fly'))}${chkIn(PP('immPush'), 'Неподвижность (иммунитет к толчку)', pc('immPush'))}${chkIn(PP('disengB'), 'Отход бонусным действием', pc('disengB'))}${chkIn(PP('ignDiff'), 'Лёгкая поступь', pc('ignDiff'))}${chkIn(PP('climbS'), 'Скорость лазания', pc('climbS'))}${chkIn(PP('swimS'), 'Скорость плавания', pc('swimS'))}${chkIn(PP('burrowS'), 'Скорость копания', pc('burrowS'))}${chkIn(PP('evasion'), 'Увёртливость', pc('evasion'))}${chkIn(PP('sunSens'), 'Солнечная чувствительность (возврат)', pc('sunSens'))}</div>
+    <div class="sec-h">Чувства</div>
+    <div class="grid2"><label>Тёмное зрение ${selIn(PP('dv'), [[0,'нет'],[30,'30 фт'],[60,'60 фт'],[120,'120 фт']])}</label><label>Слепое зрение ${selIn(PP('blindsight'), [[0,'нет'],[10,'10 фт'],[30,'30 фт'],[60,'60 фт']])}</label><label>Истинное зрение ${selIn(PP('truesight'), [[0,'нет'],[10,'10 фт'],[30,'30 фт'],[60,'60 фт'],[120,'120 фт']])}</label><label title="В начале раунда — обвал (уровень×2к10, ЛОВ — половина) или трясина вокруг врага, по очереди">Действия логова ${selIn(PP('lair'), [[0,'нет'],[1,'1: 2к10 · ' + U.lair + ' оч.'],[2,'2: 4к10 · ' + 2 * U.lair + ' оч.'],[3,'3: 6к10 · ' + 3 * U.lair + ' оч.']])}</label></div></div>`);
+  // 7 · особенности
+  h += box(7, `<div class="card"><h3>Особенности</h3>
+    <div class="sec-h">«Когда → что»</div>
+    <div class="hint">Условие и эффект: цена правила = цена эффекта × доля времени, когда условие выполняется. Противник — цель вашей атаки или тот, кто атакует вас.</div>
+    <div class="row"><button data-rpreset="blank" class="primary">+ Своё правило</button>${presetSel('rule', RULE_PRESETS)}</div>
+    <div id="ruleList"></div>
+    <div class="sec-h">«Событие → эффект»</div>
+    <div class="hint">Срабатывают при событии: крит, убийство, хиты упали до 0, после Рывка или Уклонения, в начале хода или боя, враг провалил ваш спасбросок.</div>
+    <div class="row"><button data-tpreset="blank" class="primary">+ Своё событие</button>${presetSel('trig', TRIG_PRESETS)}</div>
+    <div id="trigList"></div>
+    <div class="sec-h">Другое</div>
+    ${groupsHTML('feat', p, [
+      {id:'boost', n:'Усиления', has:o => any(o, ['regenN', 'surge', 'legRes', 'legAct', 'wMagic']), clear:o => zero(o, ['regenN', 'surge', 'legRes', 'legAct', 'wMagic']),
+        html:G2(`<label>Регенерация, к6 в ход ${numIn(PP('regenN'), 0, LIM.dice)}</label><label>Всплеск действий (раз за бой) ${numIn(PP('surge'), 0, LIM.count)}</label>
+          <label>Легендарное сопротивление ${numIn(PP('legRes'), 0, LIM.count)}</label><label>Легендарные действия (очки) ${numIn(PP('legAct'), 0, LIM.count)}</label>${chkIn(PP('wMagic'), 'Магическое оружие', pc('wMagic'))}`)},
+      {id:'slots', n:'Ячейки заклинаний', has:o => (o.slots || []).some(x => +x > 0), clear:o => { o.slots = [0,0,0,0,0,0,0,0,0,0]; },
+        html:`<div class="small">Нужны способностям с «ячейкой».</div>` + G2([1,2,3,4,5,6,7,8,9].map(L => `<label>${L} ур. × ${numIn(PP('slots.' + L), 0, LIM.count, 1, 56)}</label>`).join(''))},
+      {id:'aura', n:'Аура (на врагов рядом)', has:o => +(o.aura || {}).rad > 0, init:o => { o.aura = Object.assign({s:6, type:3, cond:0, rounds:1}, o.aura, {rad:10}); if (!(+o.aura.n > 0) && !(+o.aura.cond > 0)) o.aura.n = 1; }, clear:o => { (o.aura = o.aura || {}).rad = 0; },
+        html:G2(`<label>Радиус, фт ${numIn(PP('aura.rad'), 0, LIM.ft, 5)}</label><label>кубиков ${numIn(PP('aura.n'), 0, LIM.dice)}</label><label>грань ${selIn(PP('aura.s'), DIE_OPTS())}</label>
+          <label>тип ${dtSel(PP('aura.type'))}</label><label>состояние ${selIn(PP('aura.cond'), [[0,'нет'], ...cd])}</label><label>раундов ${numIn(PP('aura.rounds'), 1, LIM.rounds)}</label>`)},
+      {id:'rider', n:'Довесок к удару оружием (раз в ход)', has:o => +(o.rider || {}).n > 0 || +(o.rider || {}).cond > 0, init:o => { o.rider = Object.assign({s:6, type:3, cond:0, rounds:1}, o.rider, {n:1}); }, clear:o => { o.rider = Object.assign(o.rider || {}, {n:0, cond:0}); },
+        html:G2(`<label>кубиков ${numIn(PP('rider.n'), 0, LIM.dice)}</label><label>грань ${selIn(PP('rider.s'), DIE_OPTS())}</label><label>тип ${dtSel(PP('rider.type'))}</label>
+          <label>состояние ${selIn(PP('rider.cond'), [[0,'нет'], ...cd])}</label><label>раундов ${numIn(PP('rider.rounds'), 1, LIM.rounds)}</label>`)},
+    ], buildForm)}</div>`);
+  $('form').innerHTML = h;
+  renderSteps();
+  renderAbilities();
+  renderRules();
+  renderTrigs();
+  syncForm();
+}
+// «когда → что»: заготовки — прежние склейки, разложенные на условие и эффект
+const RULE_PRESETS = [
+  {n:'Тактика стаи', r:[{when:1, what:0}]},
+  {n:'Ярость', r:[{when:2, what:1, n:2, s:6}]},
+  {n:'Добивание', r:[{when:5, warg:1, what:1, n:1, s:6, once:true}]},
+  {n:'Безрассудство', r:[{when:7, what:0}, {when:7, what:4}]},
+  {n:'Условная защита', r:[{when:3, what:6}]},
+  {n:'Преимущество на спасы', r:[{when:0, what:7}]},
+  {n:'Аура защиты', r:[{when:0, what:8, n:3, allyR:10}]},
+  {n:'Благословение', r:[{when:0, what:9, n:1, s:4}]},
+  {n:'Мастер тяжёлых доспехов', r:[{when:0, what:11, n:3}]},
+  {n:'Мастер большого оружия (−5/+10)', r:[{when:0, what:14, n:5}]},
+  {n:'Меткий стрелок (укрытие)', r:[{when:0, what:13}]},
+  {n:'Подвижный (без провоцированных)', r:[{when:0, what:15}]},
+];
+function ruleHTML(r, i){
+  const P = f => `passives.rules.${i}.${f}`;
+  const ws = (CAT.whens || []).map((w, k) => [k, w.name + (([5,6,7,8,10,11,12,15].includes(+r.what)) && !w.self ? ' (нельзя: нужен противник)' : '')]);
+  const es = (CAT.whats || []).map((e, k) => [k, e]);
+  const cd = CAT.conds.map((n, j) => [j, n + (CAT.condPrice && CAT.condPrice[j] != null ? ` · ${Math.round(CAT.condPrice[j])} оч. (1 раунд)` : '')]).filter(x => x[0] > 0);
+  let h = `<div class="row rule" data-rule="${i}"><b>Когда</b> ${selIn(P('when'), ws)}`;
+  if (+r.when === 5) h += ` состояние ${selIn(P('warg'), cd)}`;
+  h += ` <b>→</b> ${selIn(P('what'), es)}`;
+  if (+r.what === 1) h += ` кубиков ${numIn(P('n'), 1, LIM.dice, 1, 56)} грань ${selIn(P('s'), DIE_OPTS())} ${chkIn(P('once'), 'раз в ход')}`;
+  if (+r.what === 2) h += ` +${numIn(P('n'), 1, 20, 1, 56)} КД`;
+  if (+r.what === 8) h += ` +${numIn(P('n'), 1, 20, 1, 56)}`;
+  if (+r.what === 9 || +r.what === 10) h += ` кубиков ${numIn(P('n'), 1, LIM.dice, 1, 56)} грань ${selIn(P('s'), DIE_OPTS())}`;
+  if (+r.what === 11) h += ` на ${numIn(P('n'), 1, 1000, 1, 56)}`;
+  if (+r.what === 12) h += ` тип ${dtSel(P('n'))}`;
+  if (+r.what === 14) h += ` −${numIn(P('n'), 1, 20, 1, 56)} / +2×`;
+  h += ` <label class="small">аура для своих, фт ${numIn(P('allyR'), 0, LIM.ft, 5, 56)}</label>`;
+  return h + ` <span class="price" data-rprice="${i}"></span><button data-rdel="${i}" class="danger" title="Удалить">✕</button></div>`;
+}
+const TRIG_PRESETS = [
+  {n:'Мастер большого оружия (крит/убийство → атака)', t:[{on:0, what:0}, {on:1, what:0}]},
+  {n:'Неумолимая ярость (0 хитов → 1)', t:[{on:2, what:5, uses:1}]},
+  {n:'Налётчик (Рывок → атака)', t:[{on:3, what:0}]},
+  {n:'Бдительный (+5 к инициативе)', t:[{on:6, what:7, n:5}]},
+  {n:'Везунчик (3 переброса)', t:[{on:8, what:9, uses:3}, {on:9, what:9, uses:3}]},
+  {n:'Второй шанс', t:[{on:10, what:9, uses:1}]},
+];
+function trigHTML(t, i){
+  const P = f => `passives.trigs.${i}.${f}`;
+  const on = +t.on || 0, ok = (CAT.tok || [])[on] || [];
+  const cd = CAT.conds.map((n, j) => [j, n + (CAT.condPrice && CAT.condPrice[j] != null ? ` · ${Math.round(CAT.condPrice[j])} оч. (1 раунд)` : '')]).filter(x => x[0] > 0);
+  let h = `<div class="row rule"><b>Событие</b> ${selIn(P('on'), (CAT.tons || []).map((n, k) => [k, n]))} <b>→</b> ${selIn(P('what'), (CAT.tdos || []).map((n, k) => [k, n + (ok[k] ? '' : ' (не сочетается)')]))}`;
+  const w = +t.what || 0;
+  if (w === 1 || w === 2 || w === 3) h += ` кубиков ${numIn(P('n'), 0, LIM.dice, 1, 56)} грань ${selIn(P('s'), DIE_OPTS())} + ${numIn(P('b'), 0, 1000, 1, 56)}`;
+  if (w === 4) h += ` ${selIn(P('cond'), cd)} на ${numIn(P('n'), 1, LIM.rounds, 1, 56)} р.`;
+  if (w === 7) h += ` +${numIn(P('n'), 1, 20, 1, 56)}`;
+  if (w === 8) h += ` +5 фт × ${numIn(P('n'), 1, 20, 1, 56)}`;
+  return h + ` раз за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'), 56)} <span class="price" data-tprice="${i}"></span><button data-tdel="${i}" class="danger" title="Удалить">✕</button></div>`;
+}
+function renderTrigs(){
+  const box = $('trigList'); if (!box) return;
+  const ts = (S.passives && S.passives.trigs) || [];
+  box.innerHTML = ts.map(trigHTML).join('') || '<div class="hint">Событий нет.</div>';
+  syncForm();
+}
+function renderRules(){
+  const box = $('ruleList'); if (!box) return;
+  const rs = (S.passives && S.passives.rules) || [];
+  box.innerHTML = rs.map(ruleHTML).join('') || '<div class="hint">Особенностей нет.</div>';
+  syncForm();
+}
+function renderAbilities(){
+  $('abilList').innerHTML = (S.abilities || []).map(abilityHTML).join('') || '<div class="hint">Способностей пока нет: выберите заготовку выше.</div>';
+  syncForm();
+}
+// значения из состояния в поля формы
+function syncForm(){
+  document.querySelectorAll('#form [data-p]').forEach(el => {
+    const v = PATHS(S, el.dataset.p), t = el.dataset.t;
+    if (t === 'bool') el.checked = !!v;
+    else if (t === 'str') { if (el !== document.activeElement) el.value = v == null ? '' : v; }
+    else if (el.tagName === 'SELECT') { el.value = String(v == null ? (el.options[0] || {}).value : v); if (v == null && el.dataset.dt && el.options[0]) setPath(S, el.dataset.p, +el.options[0].value); }
+    else if (el.dataset.inf) { if (el !== document.activeElement) el.value = +v > 0 ? v : ''; }
+    else if (el !== document.activeElement || el.type === 'range') el.value = v == null ? 0 : v;
+  });
+  document.querySelectorAll('#form [data-chips]').forEach(box => {
+    const arr = PATHS(S, box.dataset.chips) || [];
+    box.querySelectorAll('.chipb').forEach(c => c.classList.toggle('on', arr.includes(+c.dataset.i)));
+  });
+  document.querySelectorAll('#form [data-main]').forEach(r => r.checked = (S.main == null ? 0 : S.main) === +r.dataset.main);
+  const w = S.weapon || {}; const armed = !!w.armed;
+  document.querySelectorAll('#wpn input,#wpn select').forEach(el => { if (el.dataset.p !== 'weapon.armed') el.disabled = !armed; });
+  STAT_N.forEach((n, i) => { const v = (S.stats || [])[i] || 10, el = document.querySelector(`[data-statcost="${i}"]`); if (el) { const c = v * (v + 1) / 2 - 55; el.textContent = `мод ${Math.floor((v - 10) / 2) >= 0 ? '+' : ''}${Math.floor((v - 10) / 2)} · ${c > 0 ? '−' + c : (c < 0 ? '+' + (-c) : '0')} оч.`; el.style.color = c < 0 ? 'var(--good)' : ''; } });
+  const acv = S.acV || 0; const ae = document.querySelector('[data-accost]'); if (ae) ae.textContent = `${acv * (2 * acv + 1)} оч.`;   // (2a)(2a+1)/2
+  const av = document.querySelector('[data-acval]'); if (av) av.textContent = lastPrice && lastPrice.boss ? `итого КД ${lastPrice.boss.ac}` : `КД ${10 + acv} + ЛОВ`;
+  $('bud').textContent = S.budget;
+}
+function onInput(e){
+  const el = e.target;
+  if (el.dataset.p){
+    const t = el.dataset.t; let v;
+    if (t === 'bool') v = el.checked; else if (t === 'str') v = el.value; else if (t === 'num') v = num(el.value, 0); else v = parseInt(el.value, 10);
+    if (el.dataset.p === 'budget'){
+      v = Math.round(+el.value);   // любое целое в допустимых пределах; пока число набирается и вне пределов — ждём
+      if (!Number.isFinite(v) || v < (CAT.minBudget || 20) || v > (CAT.maxBudget || 100000) || v === S.budget) return;
+      S.budget = v; loadCatalog().then(() => { syncForm(); queuePrice(); }); save(); return;
+    }
+    setPath(S, el.dataset.p, v);
+    if (el.dataset.p.endsWith('_kind') || /^abilities\.\d+\.(ground|shape)$/.test(el.dataset.p)) renderAbilities();
+    if (/^passives\.rules\.\d+\.(when|what)$/.test(el.dataset.p)) renderRules();
+    if (/^passives\.trigs\.\d+\.(on|what)$/.test(el.dataset.p)) renderTrigs();
+    save(); syncForm(); queuePrice();
+  } else if (el.dataset.main != null){ S.main = +el.dataset.main; save(); queuePrice(); }
+}
+$('form').addEventListener('input', onInput);
+$('form').addEventListener('change', onInput);
+$('form').addEventListener('click', e => {
+  const chip = e.target.closest('.chipb');
+  if (chip){
+    const path = chip.parentElement.dataset.chips, arr = PATHS(S, path) || []; const i = +chip.dataset.i, k = arr.indexOf(i);
+    if (k >= 0) arr.splice(k, 1); else arr.push(i);
+    setPath(S, path, arr); save(); syncForm(); queuePrice(); return;
+  }
+  const tdel = e.target.closest('[data-tdel]');
+  if (tdel){ S.passives.trigs.splice(+tdel.dataset.tdel, 1); save(); renderTrigs(); queuePrice(); return; }
+  const tp = e.target.closest('[data-tpreset]');
+  if (tp){ addPreset('trig', tp.dataset.tpreset); return; }
+  const rdel = e.target.closest('[data-rdel]');
+  if (rdel){ S.passives.rules.splice(+rdel.dataset.rdel, 1); save(); renderRules(); queuePrice(); return; }
+  const rp = e.target.closest('[data-rpreset]');
+  if (rp){ addPreset('rule', rp.dataset.rpreset); return; }
+  // описание из механики: деталь способности (оружия) из разбора цены, без цены; запоминаем, по какой механике собрано
+  const mk = e.target.closest('[data-mkdesc]'), mkw = e.target.closest('[data-mkwdesc]');
+  if (mk || mkw){
+    const det = mkw ? mechWeapon() : mechAbil(+mk.dataset.mkdesc); if (!det) return;
+    const o = mkw ? S.weapon : S.abilities[+mk.dataset.mkdesc];
+    o._desc = det.charAt(0).toUpperCase() + det.slice(1); o._descMech = det;
+    save(); syncForm(); renderPrice(); return;
+  }
+  if (e.target.closest('[data-altadd]')){ (S.altWeapons = S.altWeapons || []).push({n:1, s:6, type:7, att:1, range:80, reach:5, ammo:true}); save(); buildForm(); queuePrice(); return; }
+  const adel = e.target.closest('[data-altdel]');
+  if (adel){ S.altWeapons.splice(+adel.dataset.altdel, 1); save(); buildForm(); queuePrice(); return; }
+  const del = e.target.closest('[data-del]');
+  if (del){
+    S.abilities.splice(+del.dataset.del, 1);
+    [...OPEN].forEach(k => { if (k.startsWith('abilities.')) OPEN.delete(k); });   // номера способностей сдвинулись
+    save(); renderAbilities(); queuePrice(); return;
+  }
+  const pr = e.target.closest('[data-preset]');
+  if (pr){ addPreset('abil', pr.dataset.preset); return; }
+  const sga = e.target.closest('[data-sgadd]'), sgd = e.target.closest('[data-sgdel]'), ms = e.target.closest('[data-minisave]');
+  if (sga){ const a = S.abilities[+sga.dataset.sgadd]; a.groups = a.groups || {}; a.groups[Date.now()] = {m:'Скелет', n:1}; save(); renderAbilities(); queuePrice(); return; }
+  if (sgd){ const [ai, g] = sgd.dataset.sgdel.split(':'); delete S.abilities[+ai].groups[g]; save(); renderAbilities(); queuePrice(); return; }
+  if (ms){
+    const c = toChar(); c.abilities = c.abilities.filter(x => !x.summon && !x.form);
+    const nm = prompt('Имя в библиотеке приспешников:', S.name || 'Приспешник'); if (!nm) return;
+    MINI_USER[nm] = c; try { localStorage.setItem('dnd_minions', JSON.stringify(MINI_USER)); } catch (er) {}
+    renderAbilities(); toast('«' + nm + '» — в библиотеке приспешников'); return;
+  }
+  const ga = e.target.closest('[data-gadd]'), gd = e.target.closest('[data-gdel]');
+  if (ga || gd){   // группа эффектов: добавить (с начальными значениями) или убрать (обнулить)
+    const key = (ga || gd).dataset[ga ? 'gadd' : 'gdel'], r = GREG[key]; if (!r) return;
+    if (ga){ OPEN.add(key); if (r.g.init && !(r.g.has && r.g.has(r.obj))) r.g.init(r.obj); }
+    else { OPEN.delete(key); if (r.g.clear) r.g.clear(r.obj); }
+    save(); r.rer(); queuePrice(); return;
+  }
+  const sb = e.target.closest('[data-step]');
+  if (sb){ goStep(+sb.dataset.step); return; }
+  if (e.target.closest('[data-tab2]')) showTab(2);
+});
+$('form').addEventListener('change', e => {   // заготовки из выпадающего списка
+  const el = e.target.closest('[data-presetsel]');
+  if (el && el.value !== ''){ const v = el.value; el.value = ''; addPreset(el.dataset.presetsel, v); }
+});
+function addPreset(kind, k){
+  S.passives = S.passives || {};
+  if (kind === 'abil'){
+    const a = k === 'blank' ? {_kind:'attack', range:5, dmgN:1, dmgS:6, dtype:3} : JSON.parse(JSON.stringify(ABIL_PRESETS[+k].a));
+    (S.abilities = S.abilities || []).push(a); save(); renderAbilities();
+  } else if (kind === 'rule'){
+    S.passives.rules = S.passives.rules || [];
+    const add = k === 'blank' ? [{when:0, what:0, n:1, s:6}] : RULE_PRESETS[+k].r;
+    add.forEach(r => S.passives.rules.push(Object.assign({warg:1, n:1, s:6, once:false}, JSON.parse(JSON.stringify(r)))));
+    save(); renderRules();
+  } else {
+    S.passives.trigs = S.passives.trigs || [];
+    const add = k === 'blank' ? [{on:1, what:1, n:1, s:6}] : TRIG_PRESETS[+k].t;
+    add.forEach(t => S.passives.trigs.push(Object.assign({n:1, s:6, b:0, cond:1, uses:0}, JSON.parse(JSON.stringify(t)))));
+    save(); renderTrigs();
+  }
+  renderSteps(); queuePrice();
+}
+function save(){
+  try { localStorage.setItem('dnd_char', JSON.stringify(S)); } catch (e) {}
+  // копия на сервере под именем игрока: адрес туннеля меняется — браузер «забывает», сервер помнит
+  clearTimeout(save.t); save.t = setTimeout(() => { const n = playerName(false); if (n) api({cmd:'player_save', name:n, s:S}); }, 1500);
+}
+function playerName(ask){
+  let n = ''; try { n = localStorage.getItem('dnd_rmname') || ''; } catch (e) {}
+  if (!n && ask){ n = (prompt('Ваше имя — под ним сохраняется персонаж и место в комнате (если ссылка сменится, войдите с тем же именем):') || '').trim(); if (n) try { localStorage.setItem('dnd_rmname', n); } catch (e) {} }
+  return n;
+}
+
+async function loadCatalog(){
+  const r = await api({cmd:'catalog', budget:S.budget});
+  if (r.type === 'catalog') CAT = r.data;
+  return CAT;
+}
+function queuePrice(){ clearTimeout(priceTimer); priceTimer = setTimeout(doPrice, 140); }
+async function doPrice(){
+  const seq = ++priceSeq;
+  const r = await api({cmd:'price', char: toChar()});
+  if (seq !== priceSeq) return;
+  if (r.type !== 'price'){ $('verdict').innerHTML = `<div class="err">${esc(r.err || 'ошибка')}</div>`; return; }
+  lastPrice = r.data; renderPrice(); syncForm(); renderSteps();
+}
+// механика способности i и оружия словами движка (деталь из разбора цены, без «-- N очк.»)
+function mechAbil(i){
+  const b = lastPrice && lastPrice.boss; if (!b) return '';
+  const it = b.items.filter(x => x.cat === 'ability' && x.label !== 'Наценка за число способностей')[i];
+  return it ? String(it.detail || '').replace(/\s*--\s*\d+\s*очк\.?\s*$/, '').trim() : '';
+}
+function mechWeapon(){
+  const b = lastPrice && lastPrice.boss; if (!b) return '';
+  const it = b.items.find(x => x.cat === 'weapon' && /оружие/i.test(x.label) && !/Запасное|Дальняя|Двуруч|Универс|Без владения/.test(x.label));
+  return it ? String(it.detail || '') : '';
+}
+function renderPrice(){
+  const d = lastPrice, b = d.boss;
+  $('spent').textContent = d.spent != null ? d.spent : '—';
+  $('leftLbl').textContent = d.left != null ? (d.left >= 0 ? 'осталось ' + d.left : 'перерасход ' + (-d.left)) : '';
+  const seg = {};
+  if (b) b.items.forEach(it => seg[it.cat] = (seg[it.cat] || 0) + Math.max(0, it.cost));
+  $('meter').innerHTML = Object.keys(CATS).filter(k => seg[k] > 0).map(k => `<i title="${CATS[k].n}: ${seg[k]}" style="width:${100 * seg[k] / S.budget}%;background:${CATS[k].c}"></i>`).join('');
+  // всё непотраченное уходит в хиты: показать, на сколько хитов изменилась последняя покупка
+  if (renderPrice.last !== d){   // новый разбор цены (renderPrice зовут и повторно с тем же разбором)
+    renderPrice.dHp = d.ok && renderPrice.hp != null && renderPrice.who === S.name ? b.hp - renderPrice.hp : 0;
+    if (d.ok){ renderPrice.hp = b.hp; renderPrice.who = S.name; }
+    renderPrice.last = d;
+  }
+  const dHp = renderPrice.dHp || 0;
+  $('verdict').innerHTML = d.ok ? `<div class="ok">Персонаж готов: ${b.hp} ХП${dHp ? ` <b style="color:${dHp > 0 ? 'var(--good)' : 'var(--bad)'}">(${dHp > 0 ? '+' : ''}${dHp} ХП: ${dHp > 0 ? 'освободилось' : 'потрачено'} ${Math.abs(2 * dHp)} оч.)</b>` : ''}, КД ${b.ac}, скорость ${b.speed} фт.</div>
+    <div class="small">Всё, что не потрачено, уходит в хиты: 2 очка = 1 ХП.</div>` : `<div class="err">${esc(d.err)}</div>`;
+  $('toOpp').disabled = !d.ok;
+  $('items').innerHTML = b ? b.items.map(it => `<div class="item${it.cost < 0 ? ' neg' : ''}" style="--c:${(CATS[it.cat] || CATS.passive).c}"><span>${(CATS[it.cat] || CATS.passive).ic}</span><div><div>${esc(it.label)}</div>${it.detail ? `<div class="dt">${esc(it.detail)}</div>` : ''}</div><span class="co tnum">${it.cost > 0 ? '−' : '+'}${Math.abs(it.cost)}</span></div>`).join('') : '';
+  // цена каждой способности рядом с её редактором
+  const ab = b ? b.items.filter(it => it.cat === 'ability' && it.label !== 'Наценка за число способностей') : [];
+  document.querySelectorAll('[data-abprice]').forEach(el => { const it = ab[+el.dataset.abprice]; el.textContent = it ? it.cost + ' оч.' : ''; });
+  { const alts = b ? b.items.filter(it => it.label === 'Запасное оружие') : []; document.querySelectorAll('[data-altprice]').forEach(el => { const it = alts[+el.dataset.altprice]; el.textContent = it ? it.cost + ' оч.' : ''; }); }
+  // описание собрано по другой механике — подсказать, что его стоит проверить (текст игрока не трогаем)
+  document.querySelectorAll('[data-descwarn]').forEach(el => { const a = S.abilities[+el.dataset.descwarn], m = mechAbil(+el.dataset.descwarn); el.textContent = a && a._desc && a._descMech && m && a._descMech !== m ? '⚠ механика изменилась — проверьте описание' : ''; });
+  { const el = document.querySelector('[data-wdescwarn]'), m = mechWeapon(); if (el) el.textContent = S.weapon._desc && S.weapon._descMech && m && S.weapon._descMech !== m ? '⚠ механика изменилась — проверьте описание' : ''; }
+  // из чего цена способности: части (+) и скидки (−) — разница цены с этой частью и без неё
+  document.querySelectorAll('[data-abparts]').forEach(el => {
+    const pp = (d.abParts || [])[+el.dataset.abparts];
+    el.innerHTML = pp && pp.length ? 'Из чего цена: ' + pp.map(([n, v]) => `<span style="color:${v < 0 ? 'var(--good)' : 'inherit'}">${esc(n)} ${v > 0 ? '+' : '−'}${Math.abs(v)}</span>`).join(' · ') : '';
+  });
+  const tl = b ? b.items.filter(it => it.label === 'Событие') : [];   // «событие → эффект»: цена каждого
+  document.querySelectorAll('[data-tprice]').forEach(el => { const it = tl[+el.dataset.tprice]; el.textContent = it ? it.cost + ' оч.' : ''; });
+  const rl = b ? b.items.filter(it => it.label === 'Правило') : [];   // «когда → что»: цена каждого правила
+  document.querySelectorAll('[data-rprice]').forEach(el => { const it = rl[+el.dataset.rprice]; el.textContent = it ? (it.cost < 0 ? '+' + (-it.cost) + ' оч. назад' : it.cost + ' оч.') : ''; });
+}
+$('btnExport').onclick = () => {
+  const blob = new Blob([JSON.stringify(S, null, 2)], {type:'application/json'}), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = (S.name || 'character') + '.json'; a.click();
+};
+$('btnImport').onclick = () => $('fileImport').click();
+async function importChar(j){ S = Object.assign(JSON.parse(JSON.stringify(DEFAULT_CHAR)), migrateChar(j)); save(); await loadCatalog(); buildForm(); queuePrice(); }
+$('fileImport').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { await importChar(JSON.parse(await f.text())); }
+  catch (err) { alert('Не удалось прочитать файл: ' + err.message); }
+};
+// файл, брошенный в окно: персонаж (есть характеристики) или карта; без этого браузер открывал файл вместо страницы
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', async e => {
+  e.preventDefault();
+  const f = e.dataTransfer && e.dataTransfer.files[0]; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    if (Array.isArray(j.stats)){ await importChar(j); showTab(1); }
+    else { ME = meFromJson(j, j.name || f.name.replace(/\.json$/, '')); showTab(5); meShow(); meMsg('Карта прочитана: проверьте и сохраните.'); }
+  } catch (err) { alert('Не удалось прочитать файл: ' + err.message); }
+});
+$('toOpp').onclick = () => showTab(2);
+
+// ---- шпаргалка: markdown от сервера в простую вёрстку ----
+let sheetFor = 0;
+async function loadSheet(){
+  if (sheetFor === S.budget) return; sheetFor = S.budget;
+  const t = await (await fetch('/sheet?budget=' + S.budget)).text();
+  const inl = x => esc(x).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  let h = '', tbl = null, ul = false;
+  const endUl = () => { if (ul){ h += '</ul>'; ul = false; } };
+  for (const line of t.split('\n')){
+    if (line.startsWith('|')){
+      endUl(); const cells = line.split('|').slice(1, -1).map(c => c.trim());
+      if (cells.every(c => /^-+$/.test(c))) continue;
+      if (!tbl){ tbl = true; h += '<table class="sh"><tr>' + cells.map(c => '<th>' + inl(c) + '</th>').join('') + '</tr>'; }
+      else h += '<tr>' + cells.map(c => '<td>' + inl(c) + '</td>').join('') + '</tr>';
+      continue;
+    }
+    if (tbl){ h += '</table>'; tbl = null; }
+    if (line.startsWith('# ')) h += '<h2>' + inl(line.slice(2)) + '</h2>';
+    else if (line.startsWith('## ')){ endUl(); h += '<h3 style="margin-top:18px">' + inl(line.slice(3)) + '</h3>'; }
+    else if (line.startsWith('- ')){ if (!ul){ h += '<ul>'; ul = true; } h += '<li>' + inl(line.slice(2)) + '</li>'; }
+    else if (line.trim()){ endUl(); h += '<p>' + inl(line) + '</p>'; }
+  }
+  if (tbl) h += '</table>'; endUl();
+  $('sheet').innerHTML = h + '<p class="hint">Цены посчитаны движком для бюджета ' + S.budget + '. Файл: kratko-pravila.md.</p>';
+}
+// ====================================================================================================================
+// 2. Соперник
+// ====================================================================================================================
+function oppCfg(){ return {mode: $('oppMode').value, mul: +$('oppMul').value, builder: 'net_runs/builder5_B.bin', brain: $('oppBrain').value}; }
+let prevKey = '';
+async function loadPreview(){
+  const key = JSON.stringify([S.budget, $('seed').value, oppCfg()]);
+  if (key === prevKey) return; prevKey = key;
+  $('oppCard').innerHTML = '<h3>Соперник</h3><div class="hint">Собираем…</div>';
+  const r = await api({cmd:'preview', budget:S.budget, seed:+$('seed').value, opp:oppCfg()});
+  if (r.type !== 'preview'){ $('oppCard').innerHTML = `<h3>Соперник</h3><div class="err">${esc(r.err || 'ошибка')}</div>`; return; }
+  const b = r.boss;
+  $('oppCard').innerHTML = `<h3><span class="chip B">враг</span>${esc(b.title)}</h3><div class="hint">Собран: ${esc(r.label)} · ${b.budget} очков · ИНТ ${b.int} · ${b.hp} ХП · КД ${b.ac} · скорость ${b.speed} фт</div>
+    <div class="items" style="max-height:520px">${b.items.map(it => `<div class="item${it.cost < 0 ? ' neg' : ''}" style="--c:${(CATS[it.cat] || CATS.passive).c}"><span>${(CATS[it.cat] || CATS.passive).ic}</span><div><div>${esc(it.label)}</div>${it.detail ? `<div class="dt">${esc(it.detail)}</div>` : ''}</div><span class="co tnum">${it.cost > 0 ? '−' : '+'}${Math.abs(it.cost)}</span></div>`).join('')}</div>`;
+}
+['oppMode','oppMul','seed'].forEach(id => $(id).addEventListener('change', loadPreview));
+// ---- мир на выбор: зерно, размер, место боя на карте мира ----
+const BIOME_COL = {a:'#b9c3c9', b:'#3f6b4f', c:'#e8f0f6', d:'#b5a76a', e:'#5d9a4e', f:'#4a6b4a', g:'#d9c27a', h:'#a8b25a', i:'#2f7d3a', '~':'#2d6fa3', V:'#07080c', '#':'#555a66', '+':'#a08a6a', '=':'#c8b08a'};
+const BIOME_NAMES = [['a','тундра'],['b','тайга'],['c','ледник'],['d','степь'],['e','лес и поля'],['f','болото'],['g','пустыня'],['h','саванна'],['i','джунгли'],['~','вода'],['#','стены'],['+','поселение'],['=','дорога']];
+let WMAP = null, WPICK = null;
+$('wSize').innerHTML = [1000,2000,3000,5000,7500,10000].map(v => `<option value="${v}">${v}×${v} (~${(v * 5 * 0.3048 / 1000).toFixed(1)} км)</option>`).join('');
+$('mapSel').addEventListener('change', () => { const on = $('mapSel').value === '__world'; $('worldBox').style.display = on ? '' : 'none'; $('worldCard').style.display = on ? '' : 'none'; if (on && !WMAP) showWorld(); });
+$('wDice').onclick = () => { $('wSeed').value = String(1 + Math.floor(Math.random() * 1e9)); WPICK = null; showWorld(); };
+$('wShow').onclick = showWorld;
+['wSize'].forEach(id => $(id).addEventListener('change', () => { WPICK = null; showWorld(); }));
+['wW','wH'].forEach(id => $(id).addEventListener('change', drawWorld));
+async function showWorld(){
+  $('wPick').textContent = 'строим мир…';
+  const r = await api({cmd:'worldmap', seed: $('wSeed').value.trim() || '1', size: +$('wSize').value});
+  if (r.type !== 'worldmap'){ $('wPick').textContent = r.err || 'ошибка'; return; }
+  WMAP = r; drawWorld();
+  $('wLegend').innerHTML = BIOME_NAMES.map(([k, n]) => `<span style="--c:${BIOME_COL[k]}">${n}</span>`).join('');
+}
+function drawWorld(){
+  if (!WMAP) return;
+  const cv2 = $('wCv'), n = WMAP.n, px = Math.max(2, Math.floor(Math.min(900, cv2.parentElement.clientWidth - 30) / n));
+  cv2.width = n * px; cv2.height = n * px;
+  const c = cv2.getContext('2d');
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++){
+    const b = WMAP.biome[j][i], h = +WMAP.height[j][i];
+    c.fillStyle = BIOME_COL[b] || '#888'; c.fillRect(i * px, j * px, px, px);
+    if (h && !'~#+V='.includes(b)){ c.fillStyle = `rgba(255,255,255,${h * .035})`; c.fillRect(i * px, j * px, px, px); }
+  }
+  const k = px / WMAP.step;
+  WMAP.towns.forEach(t => { c.strokeStyle = t[3] === 2 ? '#ff6b6b' : '#ffe2a0'; c.lineWidth = 1.5; c.beginPath(); c.arc(t[0] * k, t[1] * k, Math.max(3, t[2] * k), 0, 7); c.stroke(); });
+  if (WPICK){ c.strokeStyle = '#fff'; c.lineWidth = 2; c.strokeRect(WPICK[0] * k, WPICK[1] * k, Math.max(3, +$('wW').value * k), Math.max(3, +$('wH').value * k)); }
+  $('wPick').textContent = WPICK ? `место: клетка ${WPICK[0]}, ${WPICK[1]} (из ${WMAP.size})` : 'место: случайное — щёлкните по карте мира';
+}
+$('wCv').addEventListener('click', e => {
+  if (!WMAP) return;
+  const r = $('wCv').getBoundingClientRect(), k = ($('wCv').width / r.width) / ($('wCv').width / WMAP.n) * WMAP.step;
+  const aw = +$('wW').value, ah = +$('wH').value;
+  const x = Math.round((e.clientX - r.left) * k - aw / 2), y = Math.round((e.clientY - r.top) * k - ah / 2);
+  WPICK = [Math.max(0, Math.min(WMAP.size - aw, x)), Math.max(0, Math.min(WMAP.size - ah, y))]; drawWorld();
+});
+$('btnDice').onclick = () => { $('seed').value = 1 + Math.floor(Math.random() * 99999); loadPreview(); };
+
+// ====================================================================================================================
+// 5. Редактор карт
+// ====================================================================================================================
+const LAYERS = ['wall','pit','water','diff','climb','dark','height','tree','haz','ladder','deck','door','strong'];
+let MAPS = {}; try { MAPS = JSON.parse(localStorage.getItem('dnd_maps') || '{}'); } catch (e) {}
+let ME = null, meTool = 'wall', meCS = 20, mePainting = 0;
+const TOOLS = [['wall','Стена','#3b404d'],['pit','Ущелье','#07080c'],['water','Ручей','#2d6fa3'],['h','Высота земли (уровень)','#6f9a6f'],['ladder','Лестница','#c9a46a'],['deck','Настил / потолок (уровень)','#96703c'],['diff','Грязь','#56401e'],['climb','Укрытие','#7d7568'],['tree','Дерево','#2f6a33'],['doorC','Дверь (закрыта)','#6b4423'],['doorO','Дверь (открыта)','#a07040'],['strong','Крепкая стена','#17191f'],['z1','Лава','#e2572a'],['z2','Кислота','#7ccf2e'],['z3','Ядовитый дым','#7e8f57'],['z4','Ледяное поле','#9fd8ff'],['z5','Грозовое поле','#5868d8'],['z6','Некротический туман','#4b3a63'],['dark','Тьма','#1a1d3a'],['startA','Старт A','#2f7de1'],['startB','Старт B','#e0553f'],['erase','Ластик','#999']];
+function meNew(aw, ah, theme = 0){ const L = {}; LAYERS.forEach(k => L[k] = new Uint8Array(aw * ah)); return {name: ME ? ME.name : 'Моя арена', aw, ah, theme, L, starts: [null, null]}; }
+function meFromJson(j, name){
+  const m = meNew(j.aw, j.ah, j.theme || 0); if (name) m.name = name;
+  LAYERS.forEach(k => { for (let y = 0; y < j.ah; y++){ const row = (j[k] || [])[y] || ''; for (let x = 0; x < j.aw; x++) m.L[k][y * j.aw + x] = Math.max(0, +(row[x] || 0)) || 0; } });
+  m.starts = [j.starts && j.starts[0] ? j.starts[0].slice() : null, j.starts && j.starts[1] ? j.starts[1].slice() : null];
+  if (!(m.starts[0] && m.starts[1])) m.starts = [null, null];
+  return m;
+}
+function meToJson(m = ME){
+  const o = {aw: m.aw, ah: m.ah, theme: m.theme};
+  LAYERS.forEach(k => { o[k] = []; for (let y = 0; y < m.ah; y++){ let r = ''; for (let x = 0; x < m.aw; x++) r += m.L[k][y * m.aw + x]; o[k].push(r); } });
+  if (m.starts[0] && m.starts[1]) o.starts = m.starts;
+  return o;
+}
+function meMsg(t, cls = ''){ $('meMsg').innerHTML = t ? `<div class="${cls || 'hint'}">${esc(t)}</div>` : ''; }
+function meShow(){
+  if (!ME){ const names = Object.keys(MAPS); ME = names.length ? meFromJson(MAPS[names[0]], names[0]) : meNew(20, 14); }
+  $('meName').value = ME.name; $('meW').value = ME.aw; $('meH').value = ME.ah; $('meTheme').value = ME.theme;
+  $('meTools').innerHTML = TOOLS.map(t => `<span class="chipb ${t[0] === meTool ? 'on' : ''}" data-tool="${t[0]}" style="border-left:8px solid ${t[2]}">${t[1]}</span>`).join('');
+  $('meLegend').innerHTML = '<span style="--c:#2f7de1">старт A</span><span style="--c:#e0553f">старт B</span><span style="--c:#f2c14e">обе стартовые клетки нужны вместе, иначе места случайные</span>';
+  meList(); meDraw();
+}
+function meList(){
+  const names = Object.keys(MAPS);
+  $('meList').innerHTML = names.length ? names.map(n => `<div class="row"><b>${esc(n)}</b><span class="small">${MAPS[n].aw}×${MAPS[n].ah}</span><button data-open="${esc(n)}">Открыть</button><button data-play="${esc(n)}" class="primary">Играть здесь</button><button data-del="${esc(n)}" class="danger">✕</button></div>`).join('') : '<div class="hint">Сохранённых карт нет.</div>';
+  const sel = $('mapSel'), cur = sel.value;
+  sel.innerHTML = '<option value="">участок мира по зерну боя</option><option value="__world">мир на выбор (место — на карте мира)</option>' + names.map(n => `<option value="${esc(n)}">моя: ${esc(n)} (${MAPS[n].aw}×${MAPS[n].ah})</option>`).join('');
+  sel.value = names.includes(cur) || cur === '__world' ? cur : '';
+}
+function meDraw(){
+  const cv2 = $('meCv'), c = cv2.getContext('2d'), m = ME;
+  meCS = Math.max(6, Math.min(36, Math.floor(900 / Math.max(m.aw, m.ah))));
+  cv2.width = m.aw * meCS; cv2.height = m.ah * meCS;
+  const city = m.theme === 1, g = city ? [74,78,90] : [58,92,60];
+  for (let y = 0; y < m.ah; y++) for (let x = 0; x < m.aw; x++){
+    const i = y * m.aw + x, h = m.L.height[i], px = x * meCS, py = y * meCS, n = ((x * 7 + y * 13) % 5) * 2;
+    c.fillStyle = `rgb(${g[0] + h * 18 + n},${g[1] + h * 18 + n},${g[2] + h * 18 + n})`; c.fillRect(px, py, meCS, meCS);
+    if (m.L.diff[i]){ c.fillStyle = 'rgba(86,62,30,.5)'; c.fillRect(px, py, meCS, meCS); }
+    if (m.L.water[i]){ c.fillStyle = '#2d6fa3'; c.fillRect(px, py, meCS, meCS); }
+    if (m.L.pit[i]){ c.fillStyle = '#07080c'; c.fillRect(px, py, meCS, meCS); }
+    if (m.L.wall[i]){ c.fillStyle = '#2a2d36'; c.fillRect(px, py, meCS, meCS); c.fillStyle = '#4a4f5e'; c.fillRect(px, py, meCS, Math.max(2, meCS * .3)); }
+    if (m.L.climb[i]){ c.fillStyle = '#7d7568'; c.beginPath(); c.arc(px + meCS / 2, py + meCS / 2, meCS * .36, 0, 7); c.fill(); }
+    if (m.L.tree[i]){ c.fillStyle = '#2f6a33'; c.beginPath(); c.arc(px + meCS / 2, py + meCS / 2, meCS * .46, 0, 7); c.fill(); c.strokeStyle = 'rgba(0,0,0,.4)'; c.lineWidth = 1; c.stroke(); }
+    if (m.L.haz[i]){ c.fillStyle = ['', '#e2572a', '#7ccf2e', '#7e8f57', '#9fd8ff', '#5868d8', '#4b3a63'][m.L.haz[i]]; c.globalAlpha = .75; c.fillRect(px, py, meCS, meCS); c.globalAlpha = 1; }
+    if (m.L.dark[i]){ c.fillStyle = 'rgba(6,8,28,.5)'; c.fillRect(px, py, meCS, meCS); }
+    if (h){ c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 1; c.strokeRect(px + .5, py + .5, meCS - 1, meCS - 1); if (meCS >= 16){ c.fillStyle = 'rgba(255,255,255,.7)'; c.font = `700 ${Math.round(meCS * .38)}px system-ui`; c.textAlign = 'right'; c.textBaseline = 'top'; c.fillText(h, px + meCS - 2, py + 1); } }
+    if (m.L.door[i]){ c.fillStyle = m.L.door[i] === 1 ? '#6b4423' : 'rgba(160,112,64,.55)'; c.fillRect(px + meCS * .2, py + meCS * .2, meCS * .6, meCS * .6); }
+    if (m.L.strong[i]){ c.fillStyle = '#17191f'; c.fillRect(px, py, meCS, meCS); c.fillStyle = '#565c6c'; c.fillRect(px, py, meCS, Math.max(2, meCS * .3)); }
+    if (m.L.ladder[i]){ c.strokeStyle = '#c9a46a'; c.lineWidth = 2; c.beginPath(); c.moveTo(px + meCS * .3, py + 2); c.lineTo(px + meCS * .3, py + meCS - 2); c.moveTo(px + meCS * .7, py + 2); c.lineTo(px + meCS * .7, py + meCS - 2); for (let k = 1; k <= 3; k++){ c.moveTo(px + meCS * .3, py + meCS * k / 4); c.lineTo(px + meCS * .7, py + meCS * k / 4); } c.stroke(); }
+    if (m.L.deck[i]){ c.fillStyle = 'rgba(150,112,60,.5)'; c.fillRect(px, py, meCS, meCS); c.strokeStyle = 'rgba(240,200,120,.9)'; c.lineWidth = 1; c.strokeRect(px + 1.5, py + 1.5, meCS - 3, meCS - 3); if (meCS >= 16){ c.fillStyle = '#ffe2a0'; c.font = `700 ${Math.round(meCS * .34)}px system-ui`; c.textAlign = 'left'; c.textBaseline = 'bottom'; c.fillText('▲' + m.L.deck[i], px + 2, py + meCS - 1); } }
+  }
+  if (meCS >= 10){ c.strokeStyle = 'rgba(255,255,255,.07)'; c.beginPath(); for (let x = 0; x <= m.aw; x++){ c.moveTo(x * meCS + .5, 0); c.lineTo(x * meCS + .5, m.ah * meCS); } for (let y = 0; y <= m.ah; y++){ c.moveTo(0, y * meCS + .5); c.lineTo(m.aw * meCS, y * meCS + .5); } c.stroke(); }
+  [['A', '#2f7de1'], ['B', '#e0553f']].forEach(([l, col], k) => { const st = m.starts[k]; if (!st) return; c.fillStyle = col; c.beginPath(); c.arc((st[0] + .5) * meCS, (st[1] + .5) * meCS, Math.max(5, meCS * .42), 0, 7); c.fill(); c.strokeStyle = '#fff'; c.lineWidth = 2; c.stroke(); c.fillStyle = '#fff'; c.font = `800 ${Math.max(9, meCS * .5)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(l, (st[0] + .5) * meCS, (st[1] + .5) * meCS + 1); });
+}
+function mePaint(e, erase){
+  const r = $('meCv').getBoundingClientRect(), m = ME;
+  const cx = Math.floor((e.clientX - r.left) * ($('meCv').width / r.width) / meCS), cy = Math.floor((e.clientY - r.top) * ($('meCv').height / r.height) / meCS);
+  const b = +$('meBrush').value, off = Math.floor((b - 1) / 2);
+  for (let dy = 0; dy < b; dy++) for (let dx = 0; dx < b; dx++){
+    const x = cx - off + dx, y = cy - off + dy; if (x < 0 || y < 0 || x >= m.aw || y >= m.ah) continue;
+    const i = y * m.aw + x, t = meTool, L = m.L;
+    if (t === 'startA' || t === 'startB'){ if (!erase) { m.starts[t === 'startA' ? 0 : 1] = [x, y]; L.wall[i] = 0; L.pit[i] = 0; } else if (m.starts[t === 'startA' ? 0 : 1]) m.starts[t === 'startA' ? 0 : 1] = null; continue; }
+    if (t === 'erase'){ LAYERS.forEach(k => L[k][i] = 0); m.starts = m.starts.map(s => s && s[0] === x && s[1] === y ? null : s); continue; }
+    if (/^z\d$/.test(t)){ if (erase) L.haz[i] = 0; else if (!L.wall[i] && !L.pit[i]) L.haz[i] = +t[1]; continue; }
+    const lv = +$('meLevel').value || 0;
+    if (t === 'h'){ if (erase) L.height[i] = 0; else if (!L.pit[i] && !L.wall[i]){ L.height[i] = lv; if (L.deck[i] && L.deck[i] <= lv) L.deck[i] = 0; } continue; }
+    if (t === 'doorC' || t === 'doorO'){ if (erase) L.door[i] = 0; else if (!L.wall[i] && !L.pit[i]){ L.door[i] = t === 'doorC' ? 1 : 2; L.tree[i] = L.climb[i] = 0; } continue; }
+    if (t === 'strong'){ if (erase) L.strong[i] = 0; else { L.wall[i] = 1; L.strong[i] = 1; L.door[i] = 0; L.tree[i] = 0; } continue; }
+    if (t === 'deck'){ if (erase) L.deck[i] = 0; else if (!L.wall[i] && lv > L.height[i]) L.deck[i] = lv; continue; }
+    if (erase){ L[t][i] = 0; continue; }
+    if (t === 'wall'){ L.wall[i] = 1; L.pit[i] = 0; L.water[i] = 0; L.climb[i] = 0; L.height[i] = 0; L.tree[i] = 0; }
+    else if (t === 'tree'){ if (!L.wall[i] && !L.pit[i] && !L.water[i]){ L.tree[i] = 1; L.climb[i] = 0; } }
+    else if (t === 'pit'){ L.pit[i] = 1; L.wall[i] = 0; L.water[i] = 0; L.height[i] = 0; L.climb[i] = 0; }
+    else if (t === 'water'){ L.water[i] = 1; L.wall[i] = 0; L.pit[i] = 0; }
+    else if (t === 'climb'){ if (!L.wall[i] && !L.pit[i]){ L.climb[i] = 1; L.tree[i] = 0; } }
+    else L[t][i] = 1;
+  }
+  meDraw();
+}
+$('meTools').addEventListener('click', e => { const c = e.target.closest('[data-tool]'); if (c){ meTool = c.dataset.tool; meShow(); } });
+const meCvEl = $('meCv');
+meCvEl.addEventListener('contextmenu', e => e.preventDefault());
+meCvEl.addEventListener('pointerdown', e => { mePainting = e.button === 2 ? 2 : 1; meCvEl.setPointerCapture(e.pointerId); mePaint(e, mePainting === 2); });
+meCvEl.addEventListener('pointermove', e => { if (mePainting) mePaint(e, mePainting === 2); });
+meCvEl.addEventListener('pointerup', () => { mePainting = 0; });
+$('meName').oninput = () => { ME.name = $('meName').value; };
+$('meTheme').onchange = () => { ME.theme = +$('meTheme').value; meDraw(); };
+$('meResize').onclick = () => {
+  const aw = Math.max(5, Math.min(200, +$('meW').value || 20)), ah = Math.max(5, Math.min(200, +$('meH').value || 14)), n = meNew(aw, ah, ME.theme); n.name = ME.name;
+  for (let y = 0; y < Math.min(ah, ME.ah); y++) for (let x = 0; x < Math.min(aw, ME.aw); x++) LAYERS.forEach(k => n.L[k][y * aw + x] = ME.L[k][y * ME.aw + x]);
+  n.starts = ME.starts.map(s => s && s[0] < aw && s[1] < ah ? s : null); if (!(n.starts[0] && n.starts[1])) n.starts = [null, null];
+  ME = n; meDraw(); meMsg('Размер изменён.');
+};
+$('meClear').onclick = () => { const n = meNew(ME.aw, ME.ah, ME.theme); n.name = ME.name; ME = n; meDraw(); };
+$('meBorder').onclick = () => { for (let x = 0; x < ME.aw; x++){ ME.L.wall[x] = 1; ME.L.wall[(ME.ah - 1) * ME.aw + x] = 1; } for (let y = 0; y < ME.ah; y++){ ME.L.wall[y * ME.aw] = 1; ME.L.wall[y * ME.aw + ME.aw - 1] = 1; } meDraw(); };
+$('meRandom').onclick = async () => {
+  const r = await api({cmd:'genmap', seed: 1 + Math.floor(Math.random() * 99999), w: +$('meW').value || 0, h: +$('meH').value || 0, theme: +$('meTheme').value});
+  if (r.type === 'map'){ ME = meFromJson(r.map, ME.name); meShow(); meMsg('Случайная заготовка: правьте как нужно.'); } else meMsg(r.err || 'ошибка', 'err');
+};
+async function meValidate(){
+  const r = await api({cmd:'checkmap', map: meToJson()});
+  if (r.type === 'mapcheck'){ meMsg(r.ok ? 'Карта подходит для боя.' : r.err, r.ok ? 'ok' : 'err'); return r.ok; }
+  meMsg(r.err || 'ошибка', 'err'); return false;
+}
+$('meCheck').onclick = meValidate;
+$('meSave').onclick = async () => {
+  ME.name = ($('meName').value || 'Моя арена').trim() || 'Моя арена';
+  if (!(await meValidate())) return;
+  MAPS[ME.name] = meToJson(); try { localStorage.setItem('dnd_maps', JSON.stringify(MAPS)); } catch (e) {}
+  meList(); meMsg('Сохранено: ' + ME.name, 'ok');
+};
+$('meList').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.open){ ME = meFromJson(MAPS[b.dataset.open], b.dataset.open); meShow(); }
+  else if (b.dataset.play){ $('mapSel').value = b.dataset.play; showTab(2); }
+  else if (b.dataset.del && confirm('Удалить карту «' + b.dataset.del + '»?')){ delete MAPS[b.dataset.del]; try { localStorage.setItem('dnd_maps', JSON.stringify(MAPS)); } catch (er) {} meList(); }
+});
+$('meExport').onclick = () => { const blob = new Blob([JSON.stringify(Object.assign({name: ME.name}, meToJson()), null, 1)], {type:'application/json'}), a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (ME.name || 'map') + '.json'; a.click(); };
+$('meImport').onclick = () => $('meFile').click();
+$('meFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const j = JSON.parse(await f.text()); ME = meFromJson(j, j.name || f.name.replace(/\.json$/, '')); meShow(); meMsg('Карта прочитана: проверьте и сохраните.'); } catch (err) { meMsg('Не удалось прочитать: ' + err.message, 'err'); } };
+meList();
+
+// ====================================================================================================================
+// 3. Бой (общий код рисования подставляется сервером)
+// ====================================================================================================================
+let MAP = null, AW = 1, AH = 1, BOSS = [], FR = [];
+const cv = $('cv'), ctx = cv.getContext('2d'), stage = $('stage');
+let dpr = Math.max(1, devicePixelRatio || 1), terrain = null;
+let curIdx = 0, prevIdx = 0, stepT0 = -1e9, playing = false, speed = 1.4, fxs = [], holdUntil = 0;
+const ANIM_MS = 520, HOLD_MS = 160;
+const ease = t => 1 - Math.pow(1 - t, 3);
+const G = {active:false, me:0, pending:null, req:null, mode:'move', busy:false, over:false, logged:0};
+const viewActive = () => G.active && $('s3').classList.contains('on');
+/*RENDER_JS*/
+
+// ---- воспроизведение кадров: кадры приходят порциями, рисовальщик сам идёт по ним ----
+function step(delta){
+  const n = curIdx + delta; if (n < 0 || n >= FR.length) return;
+  prevIdx = curIdx; curIdx = n; stepT0 = performance.now();
+  onEnter(n, true);
+}
+function pause(){ playing = false; onCaughtUp(); }
+function seek(i){ prevIdx = curIdx = i; stepT0 = -1e9; fxs = []; cam.snap = true; onEnter(i, false); }
+function onEnter(i, animate){
+  const fr = FR[i];
+  $('banner').classList.toggle('on', !!fr.chase);
+  if (fr.chase) $('banner').textContent = `🏃 ПОГОНЯ · ${BOSS[fr.prey].title} убегает`;
+  drawCards(i);
+  if (animate && i > 0) spawnFx(i);
+  logUpTo(i);
+}
+function logUpTo(i){
+  const host = $('log');
+  while (G.logged <= i){
+    const k = G.logged++, L = frameLog(k);
+    noteSeen(k);
+    if (k > 0 && (k === 1 || L.round !== frameLog(k - 1).round)) host.insertAdjacentHTML('beforeend', `<div class="rnd">Раунд ${L.round}</div>`);
+    host.insertAdjacentHTML('beforeend', `<div class="ln ${L.cls}">${L.lines.join('<br>')}${L.evs.join('')}</div>`);
+  }
+  host.scrollTop = host.scrollHeight;
+}
+// что игрок видел у врага в этом бою: удары оружием и применённые способности
+function noteSeen(k){
+  const fr = FR[k]; if (!G.seen || !fr || k === 0) return;
+  const A = fr.actor, f = A >= 0 ? fr.f[A] : null; if (!f || f.team === FR[k].f[G.me].team) return;
+  if (fr.act === 'attack-melee') G.seen.melee = true;
+  if (fr.act === 'attack-ranged') G.seen.ranged = true;
+  const sp = specOf(A, fr); if (sp && fr.abil >= 0) G.seen.abil[(f.kind < 2 ? 'b' : 'm') + fr.abil] = sp;
+}
+function seenHTML(){
+  const z = G.seen; if (!z) return '';
+  const r = [];
+  if (z.melee || z.ranged) r.push('⚔ бьёт оружием' + (z.melee && z.ranged ? ' вблизи и издали' : (z.melee ? ' вблизи' : ' издали')));
+  Object.values(z.abil).forEach(sp => r.push(`✨ «${esc(sp.title)}»${sp.desc ? ` <span class="small">— ${esc(sp.desc)}</span>` : ''}`));
+  return `<div class="seen"><div class="small">Замечено в бою:</div>${r.length ? r.map(x => `<div>${x}</div>`).join('') : '<div class="small">пока ничего</div>'}</div>`;
+}
+function drawCards(i){
+  const fr = FR[i], me = G.me;
+  if (G.room){   // команды: моя карточка и список остальных главных бойцов
+    const row = k => { const f = fr.f[k], b = BOSS[k], pct = Math.max(0, 100 * f.hp / f.maxHp);
+      return `<div style="margin:4px 0"><span class="chip" style="background:${teamCol(f.team)}">${f.team + 1}</span> ${esc(b.title)}${k === me ? ' (вы)' : ''}${f.hp <= 0 ? ' ☠' : ''}<div class="hpbar"><i style="width:${pct}%"></i></div><span class="small">${Math.max(0, f.hp)}/${f.maxHp} ХП · КД ${f.ac}${f.cond.length ? ' · ' + f.cond.map(esc).join(', ') : ''}</span></div>`; };
+    const n = BOSS.length;
+    $('cardMe').className = 'card pcard'; $('cardMe').innerHTML = `<h4>Ваша команда</h4>` + [...Array(n).keys()].filter(k => fr.f[k].team === fr.f[me].team).map(row).join('');
+    $('cardEnemy').className = 'card pcard'; $('cardEnemy').innerHTML = `<h4>Противники</h4>` + [...Array(n).keys()].filter(k => fr.f[k].team !== fr.f[me].team).map(row).join('') + seenHTML();
+    return;
+  }
+  [[me, 'cardMe'], [1 - me, 'cardEnemy']].forEach(([k, id]) => {
+    const f = fr.f[k], b = BOSS[k], el = $(id);
+    el.className = 'card pcard ' + SIDE[k];
+    const pct = Math.max(0, 100 * f.hp / f.maxHp), mins = fr.f.filter((m, idx) => idx >= 2 && m.kind - 2 === k && m.hp > 0).length;
+    const conds = f.cond.map(c => `<span class="pill">${esc(c)}</span>`).join('') + (f.exh ? `<span class="pill">истощение ${f.exh}</span>` : '');
+    el.innerHTML = `<h4><span class="chip ${SIDE[k]}">${k === me ? 'вы' : 'враг'}</span>${esc(b.title)}${f.hp <= 0 ? ' ☠' : ''}</h4>
+      ${k !== me && G.enemyBrain ? `<div class="small">🧠 играет: ${esc(G.enemyBrain)}</div>` : ''}
+      <div class="hpbar"><i style="width:${pct}%"></i></div>
+      <div class="small"><b class="tnum">${Math.max(0, f.hp)}</b> / ${f.maxHp} ХП${f.temp ? ` · +${f.temp} врем.` : ''} · КД <b>${f.ac}</b> · скорость <b>${f.spd}</b>${b.minion ? ` · приспешников ${mins}` : ''}</div>
+      <div style="margin-top:6px">${conds || '<span class="small">без состояний</span>'}</div>${k !== me ? seenHTML() : ''}`;
+  });
+}
+// ---- комната: бой нескольких команд (опрос сервера раз в секунду) ----
+let TEAMS = [];
+const ROOM = {code:'', n:0, timer:null, key:'', v:null, lobbyHtml:''};
+const TEAM_COL = ['#3d8bff','#ff5a45','#3fbf6a','#e5b83a','#b36bff','#30c5c5','#ff8ad8','#a0a0a0'];
+function teamCol(t){ return TEAM_COL[t % TEAM_COL.length]; }
+try { $('rmName').value = localStorage.getItem('dnd_rmname') || ''; } catch (e) {}
+async function roomCall(o){ const v = await api(Object.assign({code: ROOM.code, since: ROOM.n}, o)); roomFeed(v); return v; }
+// долгий опрос: сервер держит запрос, пока в комнате ничего не изменилось (до 20 с) — ответ приходит сразу после хода
+// любого игрока. Нет связи (туннель упал) — плашка и повтор с паузой; персонаж и место берегут сервер и имя игрока
+function connBanner(on){
+  let el = $('connBar');
+  if (!el){ el = document.createElement('div'); el.id = 'connBar'; el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99;padding:8px;text-align:center;background:#b33;color:#fff;font-weight:700;display:none'; document.body.appendChild(el); }
+  el.textContent = '⚠ Нет связи с сервером — переподключаюсь… (если ссылка сменилась, откройте новую и войдите под тем же именем: вы вернётесь в бой)';
+  el.style.display = on ? 'block' : 'none';
+}
+async function roomPoll(){
+  clearTimeout(ROOM.timer); if (!ROOM.code) return;
+  const my = ROOM.pollId = (ROOM.pollId || 0) + 1;
+  const v = await api({cmd:'room_poll', code: ROOM.code, since: ROOM.n, ver: ROOM.v ? ROOM.v.ver : undefined});
+  if (my !== ROOM.pollId) return;   // запущен новый опрос
+  const net = v && v.type === 'error' && /нет связи|Failed|NetworkError|JSON/.test(v.err || '');
+  connBanner(net);
+  if (v && v.type === 'error' && !net && /нет такой комнаты/.test(v.err || '')){ toast('Комната закрыта (сервер перезапускался?)'); ROOM.code = ''; $('rmJoin').style.display = ''; return; }
+  if (!net) roomFeed(v);
+  ROOM.timer = setTimeout(roomPoll, net ? 3000 : 50);
+}
+function roomFeed(v){
+  if (!v) return;
+  if (v.type === 'error'){   // ход не дошёл (связь, «не ваш ход») — панель снова доступна, без перезагрузки
+    toast(v.err);
+    if (G.room && G.req && !G.over){ G.busy = false; renderTurn(); }
+    return;
+  }
+  if (v.type !== 'room') return;
+  ROOM.v = v; ROOM.code = v.code;
+  if (v.status === 'lobby' || (!G.room && !v.init)) roomLobby(v);
+  if (v.init && G.room !== v.code){   // бой начался: экран боя
+    G.room = v.code; G.wNames = null; G.active = false; G.over = false; G.busy = false; G.mode = 'move'; G.logged = 0; G.shown = null; G.pending = null; G.req = null;
+    $('log').innerHTML = ''; $('result').classList.remove('on');
+    const ini = v.init; MAP = ini.map; AW = MAP.aw; AH = MAP.ah; BOSS = ini.bosses; TEAMS = ini.team; G.me = Math.max(0, ini.seat.indexOf(v.seat)); FR = []; terrain = null;
+    BOSS.forEach(b => { b.minion = b.minion || null; }); G.enemyBrain = 'правило-бот';
+    const late = v.frames.length > 3;   // вернулся посреди боя: история сразу, без проигрывания
+    FR = late ? v.frames.slice() : v.frames.slice(0, 1); ROOM.n = v.frames.length; G.active = true; G.seen = {melee:false, ranged:false, abil:{}}; G.sentAt = FR.length;
+    showTab(3); fitPlay(); camReset(); setCamMode(cam.mode); seek(late ? FR.length - 1 : 0);
+    if (late) logUpTo(FR.length - 1);
+    ROOM.key = ''; roomTurn(v, late ? [] : v.frames.slice(1), true); return;
+  }
+  if (G.room === v.code && G.active){
+    roomTurn(v, v.frames);
+    if (v.status === 'lobby'){ G.room = ''; }   // хозяин вернул комнату в лобби (ошибка движка)
+  }
+}
+const v0 = () => ROOM.v || {};
+async function roomLeave(){
+  await api({cmd:'room_leave', code: ROOM.code});
+  clearTimeout(ROOM.timer); ROOM.code = ''; ROOM.n = 0; ROOM.v = null; ROOM.lobbyHtml = ''; G.room = ''; G.active = false; clearInterval(turnTimer);
+  $('rmBox').innerHTML = ''; $('rmJoin').style.display = ''; $('result').classList.remove('on'); showTab(6);
+}
+function roomTurn(v, frames, first){
+  if (!first){   // ответы могут прийти вперемешку (опрос и свой ход): берём только кадры, которых ещё нет
+    const start = v.nframes - frames.length;
+    if (v.nframes < ROOM.n) return;   // устаревший ответ
+    frames = frames.slice(Math.max(0, ROOM.n - start));
+  }
+  ROOM.n = Math.max(ROOM.n, v.nframes);
+  const key = (v.req ? JSON.stringify(v.req) : '') + '|' + (v.end ? 'e' : '') + '|' + v.waiting;
+  if (!frames.length && key === ROOM.key) return;
+  ROOM.key = key;
+  const r = v.req ? {type:'turn', req:v.req} : (v.end ? Object.assign({type:'end'}, v.end) : {type:'wait', waiting:v.waiting});
+  r.frames = frames;
+  receive(r);
+}
+function roomLobby(v){
+  const host = v.host, mine = v.members.find(m => m.me);
+  const nT = Math.max(2, ...v.members.map(m => m.team + 2));
+  const teamSel = (m) => `<select data-rmteam="${m.i}" ${m.me || (host && m.bot != null) ? '' : 'disabled'}>${[...Array(Math.min(64, nT)).keys()].map(t => `<option value="${t}" ${t === m.team ? 'selected' : ''}>команда ${t + 1}</option>`).join('')}</select>`;
+  let h = `<div class="row" style="margin:10px 0"><span>Код комнаты: <b style="font-size:24px;letter-spacing:3px">${esc(v.code)}</b></span><span class="small">${v.status === 'fight' ? 'идёт бой' : (v.status === 'end' ? 'бой окончен' : 'ждём игроков')}</span>${v.err ? `<span class="err">${esc(v.err)}</span>` : ''}</div>`;
+  h += `<table class="small" style="width:100%"><tr><th style="text-align:left">Кто</th><th>Команда</th><th>Готов</th><th></th></tr>` + v.members.map(m => `<tr><td><span class="chip" style="background:${teamCol(m.team)}">${m.team + 1}</span> ${esc(m.name)}${m.me ? ' (вы)' : ''}${m.bot != null ? ` · бот, бюджет ${m.bot}` : ''}</td><td>${teamSel(m)}</td><td style="text-align:center">${m.ready ? '✔' : '—'}</td><td>${host && !m.me ? `<button data-rmkick="${m.i}" class="danger">✕</button>` : ''}</td></tr>`).join('') + `</table>`;
+  h += `<div class="row" style="margin-top:10px"><button id="rmMine" class="primary">Взять моего персонажа («${esc(S.name || '')}»)</button>${mine && mine.ready ? '<span class="small">персонаж выбран ✔</span>' : '<span class="small">персонаж не выбран</span>'}</div>`;
+  if (host) h += `<div class="row" style="margin-top:10px"><b>Хозяин:</b> бот — бюджет <input type="number" id="rmBotB" value="${(lastPrice && lastPrice.ok && S.budget) || 500}" style="width:80px"> в команду <input type="number" id="rmBotT" value="2" min="1" max="64" style="width:50px"><button id="rmBot">+ бот</button>
+    <label>Предел раундов ${'<select id="rmRounds"><option value="10">10</option><option value="20">20</option><option value="50" selected>50</option><option value="0">без предела (500)</option></select>'}</label>
+    <button class="primary" id="rmStart" ${v.status === 'fight' ? 'disabled' : ''}>⚔ Начать бой</button></div>
+    <div class="small">Карта — как во вкладке «Соперник» (своя карта или участок мира); по умолчанию — случайный участок мира.</div>`;
+  else h += `<div class="small" style="margin-top:10px">Бой начинает хозяин комнаты.</div>`;
+  h += `<div class="row" style="margin-top:12px"><button id="rmLeave" class="danger">🚪 Выйти из комнаты</button>${v.status === 'fight' && !G.room ? `<button id="rmBack">⚔ Вернуться в бой</button>` : ''}</div>`;
+  if (v.status === 'fight' && !G.room) h += `<div class="small">Бой уже идёт — дождитесь следующего.</div>`;
+  if (ROOM.lobbyHtml !== h){   // перерисовать, только если что-то изменилось (иначе стирается ввод)
+    const fo = document.activeElement && document.activeElement.id, val = fo && $(fo) ? $(fo).value : null;
+    ROOM.lobbyHtml = h; $('rmBox').innerHTML = h;
+    if (fo && $(fo) && val != null){ $(fo).value = val; $(fo).focus(); }
+  }
+  $('rmJoin').style.display = 'none';
+}
+$('rmCreate').onclick = async () => { try { localStorage.setItem('dnd_rmname', $('rmName').value); } catch (e) {} ROOM.n = 0; G.room = ''; await api({cmd:'room_create', name: $('rmName').value || S.name}).then(v => { roomFeed(v); roomPoll(); }); };
+$('rmEnter').onclick = async () => { try { localStorage.setItem('dnd_rmname', $('rmName').value); } catch (e) {} ROOM.code = $('rmCode').value.trim().toUpperCase(); ROOM.n = 0; G.room = ''; const v = await roomCall({cmd:'room_join', name: $('rmName').value || S.name}); if (v.type === 'room') roomPoll(); else ROOM.code = ''; };
+$('rmBox').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.id === 'rmLeave'){ if (confirm('Выйти из комнаты?' + (v0().status === 'fight' ? ' Ваш герой останется в бою, его ходы будут завершаться сами.' : ''))) await roomLeave(); return; }
+  if (b.id === 'rmBack'){ G.room = ''; ROOM.n = 0; await roomCall({cmd:'room_poll'}); return; }
+  if (b.id === 'rmMine'){ if (!lastPrice || !lastPrice.ok){ toast('Персонаж не собран: проверьте вкладку «Персонаж»'); return; } await roomCall({cmd:'room_set', char: toChar(), name: $('rmName').value || S.name}); }
+  if (b.id === 'rmBot') await roomCall({cmd:'room_bot', budget: +$('rmBotB').value, team: Math.max(0, +$('rmBotT').value - 1)});
+  if (b.dataset.rmkick) await roomCall({cmd:'room_kick', i: +b.dataset.rmkick});
+  if (b.id === 'rmStart'){
+    const o = {cmd:'room_start', rounds: +$('rmRounds').value, seed: 1 + Math.floor(Math.random() * 99999)};
+    const mname = $('mapSel').value; if (mname && MAPS[mname]) o.map = MAPS[mname];
+    if (mname === '__world') o.world = {seed: $('wSeed').value.trim() || '1', size: +$('wSize').value, x: WPICK ? WPICK[0] : -1, y: WPICK ? WPICK[1] : -1, w: +$('wW').value, h: +$('wH').value};
+    ROOM.n = 0; G.room = ''; await roomCall(o);
+  }
+});
+$('rmBox').addEventListener('change', async e => {
+  const t = e.target.closest('[data-rmteam]'); if (!t) return;
+  const m = ROOM.v.members[+t.dataset.rmteam];
+  if (m.me) await roomCall({cmd:'room_set', team: +t.value});
+  else toast('Команду бота меняют, убрав его и добавив заново');
+});
+const toast = (t, ms = 3500) => { const e = $('toast'); e.textContent = t; e.classList.toggle('on', !!t); clearTimeout(toast.t); if (t) toast.t = setTimeout(() => e.classList.remove('on'), ms); };
+
+async function startGame(){
+  if (!lastPrice || !lastPrice.ok){ showTab(1); return; }
+  $('oppErr').innerHTML = '';
+  $('btnFight').disabled = true;
+  const msg = {cmd:'start', char: toChar(), seed: +$('seed').value, opp: oppCfg(), side: +$('side').value};
+  const mname = $('mapSel').value; if (mname && MAPS[mname]) msg.map = MAPS[mname];
+  if (mname === '__world') msg.world = {seed: $('wSeed').value.trim() || '1', size: +$('wSize').value, x: WPICK ? WPICK[0] : -1, y: WPICK ? WPICK[1] : -1, w: +$('wW').value, h: +$('wH').value};
+  const r = await api(msg);
+  $('btnFight').disabled = false;
+  if (r.type === 'error'){ $('oppErr').innerHTML = `<div class="err">${esc(r.err)}</div>`; return; }
+  // новая игра
+  G.active = false; G.over = false; G.busy = false; G.mode = 'move'; G.logged = 0; G.shown = null; G.pending = null; G.req = null; G.wNames = null; $('log').innerHTML = ''; $('result').classList.remove('on');
+  const ini = r.init;
+  MAP = ini.map; AW = MAP.aw; AH = MAP.ah; BOSS = ini.bosses; G.me = ini.me; FR = []; terrain = null;
+  BOSS.forEach((b, k) => { b.minion = b.minion || null; });
+  G.enemyBrain = ini.enemyBrain || '';
+  FR = r.frames.slice(0, 1); G.active = true;
+  G.seen = {melee:false, ranged:false, abil:{}}; G.sentAt = 1;
+  showTab(3); fitPlay(); camReset(); setCamMode(cam.mode); seek(0);
+  receive(r, 1);
+}
+// порция ответа движка: кадры добавляются, потом (когда рисовальщик всё показал) — ход игрока или итог
+function receive(r, skip = 0){
+  G.busy = true; $('turn').innerHTML = '<div class="hint">…</div>';
+  if (r.type === 'error'){ toast(r.err); G.busy = false; if (G.req && !G.over) renderTurn(); return; }   // вернуть кнопки хода, иначе панель так и останется «…»
+  const frames = r.frames.slice(skip);
+  FR.push(...frames);
+  G.pending = r;
+  if (curIdx < FR.length - 1){ playing = true; holdUntil = performance.now() + 60; }
+  else onCaughtUp();
+}
+function onCaughtUp(){
+  const r = G.pending; if (!r || G.shown === r) return;
+  if (curIdx < FR.length - 1) return;
+  G.shown = r;
+  if (r.type === 'wait') { G.req = null; G.busy = true; $('turn').innerHTML = `<div class="hint">⏳ Ходит: <b>${esc(r.waiting || 'бот')}</b>… <button class="danger" data-leave="1">🚪 Выйти из боя</button></div>`; return; }
+  if (r.type === 'end') { clearInterval(turnTimer); showEnd(r); }
+  else { G.req = r.req; G.busy = false; renderTurn(); if (r.req.msg) toast(r.req.msg); startTurnTimer(); }
+}
+async function cmd(c){
+  if (G.busy || G.over) return;
+  G.busy = true; clearInterval(turnTimer); toast('');
+  G.sentAt = FR.length;
+  if (G.room){ const v = await api(Object.assign({cmd:'room_step', code:G.room, since:ROOM.n}, c)); roomFeed(v); return; }
+  const r = await api(Object.assign({cmd:'step'}, c));
+  receive(r);
+}
+function showEnd(r){
+  G.over = true; G.busy = true;
+  if (G.room){   // бой команд: победила команда (или ничья по очкам)
+    const myT = TEAMS[G.me], win = r.result === myT, draw = r.result < 0;
+    // очки нужны только при пределе раундов: доля оставшихся хитов команды (0…1) + 1 за каждого убитого врага
+    const sc = r.reason !== 5 ? '' : `<p class="small">Очки = доля оставшихся хитов команды (от 0 до 1) + 1 за каждого убитого врага</p>` +
+      (r.scores || []).map((v, t) => `<div>Команда ${t + 1}${t === myT ? ' (ваша)' : ''}: <b>${(+v).toFixed(2)}</b></div>`).join('');
+    $('turn').innerHTML = `<div class="hint">Бой окончен.</div>`;
+    const box = $('result').querySelector('.box');
+    box.innerHTML = `<h2 style="color:${draw ? '#ddd' : (win ? '#5fd08a' : '#ff7b7b')}">${draw ? 'Ничья' : (win ? 'Победа команды!' : 'Победила команда ' + (r.result + 1))}</h2>
+      <p>${r.reason === 5 ? 'Предел раундов — победа по очкам (доля хитов команды + убитые враги)' : 'Осталась одна команда'}</p><p class="small">${r.rounds} раундов</p>${sc}
+      <div class="btns"><button class="primary" id="rLobby">В комнату</button><button id="rHide">Посмотреть поле</button></div>`;
+    $('result').classList.add('on');
+    $('rLobby').onclick = () => { $('result').classList.remove('on'); showTab(6); }; $('rHide').onclick = () => $('result').classList.remove('on');
+    return;
+  }
+  const win = r.result === G.me, draw = r.result === 2;
+  const why = ['Оба живы после предохранителя (500 раундов)', win ? 'Вы победили: соперник повержен' : 'Вы повержены', win ? 'Соперник вышел за край арены: побег — это поражение' : 'Вы вышли за край арены: побег — это поражение',
+    win ? 'Соперник оторвался от погони: побег — это поражение' : 'Вы оторвались от погони: побег — это поражение', win ? 'Соперник выбился из сил: он «ушёл» и проиграл' : 'Вы ушли от выбившегося из сил соперника — и проиграли'][r.reason] || '';
+  $('turn').innerHTML = `<div class="hint">Бой окончен.</div>`;
+  const box = $('result').querySelector('.box');
+  box.innerHTML = `<h2 style="color:${draw ? '#ddd' : (win ? '#5fd08a' : '#ff7b7b')}">${draw ? 'Ничья' : (win ? 'Победа!' : 'Поражение')}</h2><p>${why}</p><p class="small">${r.rounds} раундов</p>
+    <div class="btns"><button class="primary" id="rAgain">Ещё раз (другой соперник)</button><button id="rSame">Тот же соперник</button><button id="rEdit">К персонажу</button><button id="rHide">Посмотреть поле</button></div>`;
+  $('result').classList.add('on');
+  $('rAgain').onclick = () => { $('seed').value = 1 + Math.floor(Math.random() * 99999); prevKey = ''; startGame(); };
+  $('rSame').onclick = startGame; $('rEdit').onclick = () => showTab(1); $('rHide').onclick = () => $('result').classList.remove('on');
+}
+
+// выйти из боя: в комнате — герой остаётся, его ходы завершаются сами; одиночный бой — бросить
+async function leaveFight(){
+  if (G.room){ if (confirm('Выйти из боя? Ваш герой останется, его ходы будут завершаться сами.')) await roomLeave(); return; }
+  if (!confirm('Бросить этот бой?')) return;
+  G.active = false; G.over = true; clearInterval(turnTimer); G.req = null; $('turn').innerHTML = '<div class="hint">Бой брошен.</div>'; showTab(1);
+}
+// ---- панель хода ----
+const REQ = () => G.req;
+function myPos(){ const f = FR[curIdx].f[G.req ? G.req.me : G.me]; return f; }   // ходящий: свой герой или свой миньон
+function renderTurn(){
+  const q = G.req, el = $('turn'); if (!q) return;
+  const atkOk = q.weapon.armed && (q.actionFree || q.weapon.atkLeft > 0);
+  if (G.mode === 'attack' && !atkOk) G.mode = 'move';
+  if (G.mode.startsWith('spell:')){ const a = q.abils[+G.mode.slice(6)]; if (!a || !a.avail) G.mode = 'move'; }
+  const mv = q.speed0 ? Math.min(100, 100 * q.speedLeft / Math.max(q.speed0, q.speedLeft)) : 0;
+  const tt = +$('turnTime').value;
+  let h = `<div class="tbar"><b>${q.me === G.me ? 'Ваш ход' : 'Ход вашего приспешника'} · раунд ${q.round}</b>${tt ? `<span class="timer" id="timer">⏱ ${tt} с</span>` : ''}<span>Движение: <b class="tnum">${q.speedLeft}</b> фт</span><div class="mv"><i style="width:${mv}%"></i></div>
+    <span><span class="dot ${q.actionFree ? 'free' : ''}"></span>действие</span><span><span class="dot ${q.bonusFree ? 'free b' : ''}"></span>бонусное</span>
+    <button class="primary endb" data-c="end" title="Клавиша E или Enter">⏭ Завершить ход</button><button class="danger" data-leave="1" title="Выйти из боя">🚪</button></div>`;
+  // порядок ходов (инициатива из первого кадра боя); живые, текущий ходящий выделен
+  const ini = (FR[0] && (FR[0].ev || []).find(e => e.k === 'init')) || (FR[1] && (FR[1].ev || []).find(e => e.k === 'init'));
+  if (ini){ const fl = FR[FR.length - 1].f; h += `<div class="small" style="margin:4px 0">⏱ Порядок ходов: ${ini.order.filter(([k]) => fl[k] && fl[k].hp > 0).map(([k, v]) => k === q.me ? `<b>${nameOf(k, fl)} (${v})</b>` : `${nameOf(k, fl)} (${v})`).join(' → ')}</div>`; }
+  // что сделал соперник с вашего прошлого решения
+  const rec = [];
+  for (let k = Math.max(1, G.sentAt || 1); k < FR.length; k++){ const fr = FR[k]; if (fr.actor >= 0 && fr.f[fr.actor] && fr.f[fr.actor].team !== fr.f[G.me].team){ const L = frameLog(k); rec.push(`<div class="ln ${L.cls}">${L.lines.join('<br>')}${L.evs.join('')}</div>`); } }
+  if (rec.length) h += `<div class="recap"><b>Пока вы ждали</b>${rec.slice(-5).join('')}</div>`;
+  h += `<div class="acts">`;
+  h += `<button data-m="move" class="sp ${G.mode === 'move' ? 'sel' : ''}" title="Клавиша M; клик по клетке — идти, по врагу в досягаемости — удар"><span>🦶 Идти</span><small>клик по полю</small></button>`;
+  const wTag = !q.weapon.armed ? 'безоружны' : (q.weapon.atkLeft > 0 ? `ещё атак: ${q.weapon.atkLeft} (можно идти и сменить цель)` : `${q.weapon.attacks > 1 ? q.weapon.attacks + ' атаки по одной' : '1 атака'}, ${q.weapon.range} фт`);
+  h += `<button data-m="attack" class="sp ${G.mode === 'attack' ? 'sel' : ''}" ${atkOk ? '' : 'disabled'} title="Клавиша A; затем клик по врагу"><span>⚔ Оружие</span><small>${esc(wTag)}</small></button>`;
+  q.abils.forEach(a => {
+    const sp = a.title ? a : BOSS[G.me].abil[a.k];
+    const tag = [a.react ? 'реакция, сама' : (a.bonus ? 'бонус' : 'действие'), a.self ? (a.tele ? 'прыжок ' + a.tele + ' фт' : 'на себя') : (a.ground ? 'по клетке, ' : '') + a.range + ' фт' + (a.radius ? ', радиус ' + a.radius : '') + (a.wallLen ? ', барьер ' + a.wallLen + ' кл.' : ''), a.uses >= 0 ? a.uses + ' ост.' : ''].filter(Boolean).join(' · ');
+    h += `<button class="sp ${G.mode === 'spell:' + a.k ? 'sel' : ''}" data-spell="${a.k}" ${a.avail ? '' : 'disabled'} title="${esc(a.why || ((S.abilities[a.k] || {})._desc ? S.abilities[a.k]._desc + ' — ' : '') + (sp.desc || ''))} (клавиша ${a.k + 1})"><span>✨ ${esc(sp.title)}</span><small>${esc(tag)}</small></button>`;
+  });
+  if (q.alts && q.alts.length){   // запасное оружие: 1-я смена за ход бесплатно, 2-я — бонусным, 3-я — действием
+    const can = q.swaps === 0 || (q.swaps === 1 && q.bonusFree) || (q.swaps === 2 && q.actionFree), cost = ['бесплатно', 'бонусное действие', 'действие'][q.swaps] || 'нельзя';
+    h += q.alts.map(a => `<button class="sp" data-swap="${a.k}" ${can ? '' : 'disabled'} title="Сменить оружие (${cost})"><span>🔁 ${esc(wpnNames()[a.k + 1] || 'Запасное')}</span><small>${esc(a.t)}</small></button>`).join('');
+  }
+  h += `</div><div class="acts minor">
+    <button data-c="dash" ${q.actionFree ? '' : 'disabled'} title="Действие: движения вдвое больше">💨 Рывок</button>
+    <button data-c="dodge" ${q.actionFree ? '' : 'disabled'} title="Действие: атаки по вам с помехой до вашего хода">🛡 Уклонение</button>
+    <button data-c="disengage" ${q.actionFree ? '' : 'disabled'} title="Действие: уход без провоцированных атак">🏃 Отход</button>
+    <button data-c="help" ${q.actionFree && q.enemies.some(en => en.dist <= 5) ? '' : 'disabled'} title="Враг вплотную: первая атака вашего союзника по нему — с преимуществом">🤝 Помощь</button>
+    <button data-c="ready" ${q.actionFree && q.weapon.armed ? '' : 'disabled'} title="Когда враг войдёт в досягаемость, ударите реакцией">⏳ Подготовка</button>
+    ${q.surgeLeft > 0 ? `<button data-c="surge" ${!q.actionFree ? '' : 'disabled'}>⚡ Всплеск (${q.surgeLeft})</button>` : ''}
+    ${q.conc >= 0 ? `<button data-c="dropconc" title="Бесплатно: эффекты концентрации снимаются">🧘 Снять концентрацию</button>` : ''}
+    <button data-c="toward" title="Идти к ближайшему врагу">🎯 К врагу</button>
+    ${(q.doors || []).map(d => `<button data-door="${d[0]},${d[1]}" title="Взаимодействие: первое за ход бесплатно, дальше — действием">🚪 ${d[2] === 1 ? 'Открыть' : 'Закрыть'} дверь</button>`).join('')}
+    ${q.fly ? `<button data-alt="1" ${q.fly.can && q.fly.alt < q.fly.max && q.speedLeft >= 10 ? '' : 'disabled'} title="10 фт движения за уровень; уход вверх из досягаемости ближника провоцирует атаку">🪽 Выше</button><button data-alt="-1" ${q.fly.alt > 0 && q.speedLeft >= 10 ? '' : 'disabled'} title="10 фт движения за уровень">⬇ Ниже</button><span class="tag" title="Высота полёта над землёй">${q.fly.alt ? 'в воздухе ' + q.fly.alt * 10 + ' фт' : 'на земле'}</span>` : ''}</div>
+    <div class="msg" id="tmsg"></div><div class="hint">${modeHint()}</div>`;
+  el.innerHTML = h;
+  if (Math.abs(el.offsetHeight - lastTurnH) > 40 && viewActive()) fitPlay();
+}
+// ---- таймер хода (реальное время): по истечении ход заканчивается сам ----
+let turnTimer = null;
+function startTurnTimer(){
+  clearInterval(turnTimer);
+  const tt = +$('turnTime').value; if (!tt || G.over) return;
+  const t0 = performance.now();
+  turnTimer = setInterval(() => {
+    const left = Math.ceil(tt - (performance.now() - t0) / 1000), el = $('timer');
+    if (G.busy || !G.req || G.over){ clearInterval(turnTimer); return; }
+    if (el){ el.textContent = '⏱ ' + Math.max(0, left) + ' с'; el.classList.toggle('low', left <= 5); }
+    if (left <= 0){ clearInterval(turnTimer); toast('Время хода вышло: ход передан сопернику.'); cmd({c:'end'}); }
+  }, 250);
+}
+function modeHint(){
+  const q = G.req;
+  if (G.mode === 'move') return 'Режим «идти»: щёлкните клетку на поле (движение тратит скорость; труднопроходимая местность и подъём дороже; уход из досягаемости ближнего врага даёт ему провоцированную атаку, кроме действия «Отход»).';
+  if (G.mode === 'attack') return 'Щёлкните врага — одна атака (красные кольца — цели в дальности и в прямой видимости). Остальные атаки действия — следующими щелчками; между ними можно идти. Щелчок по стене, дереву или укрытию — удар по объекту (у объектов есть КД и хиты).';
+  if (G.mode.startsWith('spell:')){ const a = q.abils[+G.mode.slice(6)]; return a && a.ground ? 'Щёлкните клетку на поле: там встанет барьер или сработает область (превью — по курсору).' : (a && a.self && a.tele ? 'Щёлкните клетку, куда прыгнуть.' : (a && a.self && a.ally ? `Щёлкните себя или союзника (до ${a.range} фт).` : 'Щёлкните врага — цель способности.')); }
+  return '';
+}
+$('turn').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || G.busy || !G.req) return;
+  if (b.dataset.m){ G.mode = b.dataset.m; renderTurn(); return; }
+  if (b.dataset.spell != null){
+    const k = +b.dataset.spell, a = G.req.abils[k];
+    if (a.ground){ G.mode = 'spell:' + k; renderTurn(); return; }
+    if (a.self && !a.tele && !a.ally){ cmd({c:'spell', k}); return; }   // на себя — цели нет; «и на союзника» — щелчок по себе или союзнику
+    G.mode = G.mode === 'spell:' + k ? 'move' : 'spell:' + k; renderTurn(); return;   // цель — кликом по полю; повторное нажатие — отмена
+  }
+  if (b.dataset.door){ const [x, y] = b.dataset.door.split(',').map(Number); cmd({c:'door', x, y}); return; }
+  if (b.dataset.alt){ cmd({c:'alt', dir: +b.dataset.alt}); return; }
+  if (b.dataset.swap != null){ const k = +b.dataset.swap, nm = wpnNames(); [nm[0], nm[k + 1]] = [nm[k + 1], nm[0]]; cmd({c:'swap', k}); return; }   // имена меняются местами, как оружие в движке
+  if (b.dataset.leave){ leaveFight(); return; }
+  if (b.dataset.c === 'toward'){
+    const me = myPos(), en = G.req.enemies.slice().sort((x, y) => x.dist - y.dist)[0]; if (!en) return;
+    const ef = FR[curIdx].f[en.i]; cmd({c:'move', x: ef.x, y: ef.y}); return;
+  }
+  if (b.dataset.c === 'help'){   // Помощь — против ближайшего врага вплотную
+    const en = G.req.enemies.filter(e => e.dist <= 5).sort((x, y) => x.dist - y.dist)[0]; if (!en) return;
+    cmd({c:'help', tgt: en.i}); return;
+  }
+  if (b.dataset.c) cmd({c: b.dataset.c});
+});
+// Оружие по кнопке: если единственная цель в дальности — бьём сразу
+$('turn').addEventListener('dblclick', () => {});
+function weaponClick(){ const q = G.req; const ok = q.enemies.filter(en => !en.charm && en.dist <= q.weapon.range && en.los); if (ok.length === 1) cmd({c:'attack', tgt: ok[0].i, reckless: q.weapon.reckless}); else { G.mode = 'attack'; renderTurn(); } }
+
+// ---- клики по полю ----
+function cellAt(e){
+  const r = cv.getBoundingClientRect(), px = (e.clientX - r.left) * (cvW() / r.width), py = (e.clientY - r.top) * (cvH() / r.height);
+  return {x: Math.floor((px - cvW() / 2) / cam.cell + cam.x), y: Math.floor((py - cvH() / 2) / cam.cell + cam.y)};
+}
+// имена оружия в бою: [в руках, запасные…]; смена меняет местами (как swapWeapon в движке)
+function wpnNames(){
+  if (!G.wNames || G.wNamesFor !== G.req){ if (!G.wNames) G.wNames = ['Основное', ...(S.altWeapons || []).map((q, i) => q.name || 'Запасное ' + (i + 1))]; G.wNamesFor = G.req; }
+  return G.wNames;
+}
+// свой боец (или союзник) в клетке — цель способности «и на союзника»
+function allyAt(c){
+  const fr = FR[curIdx], my = fr.f[G.req ? G.req.me : G.me].team; let best = null;
+  fr.f.forEach((f, k) => { if (f.hp <= 0 || f.team !== my || f.fled) return; const n = f.n || 1; if (c.x >= f.x && c.x < f.x + n && c.y >= f.y && c.y < f.y + n) best = k; });
+  return best;
+}
+function enemyAt(c){
+  const fr = FR[curIdx]; let best = null, bd = 1e9;
+  const gap = (a, n, b) => Math.max(0, b - (a + n - 1), a - b);   // клетка — до квадрата крупного (n×n от x, y)
+  fr.f.forEach((f, k) => { if (f.hp <= 0 || f.team === fr.f[G.me].team || f.fled) return; const n = f.n || 1, d = Math.max(gap(f.x, n, c.x), gap(f.y, n, c.y)); if (d <= 0 && d < bd){ bd = d; best = k; } });
+  if (best == null) fr.f.forEach((f, k) => { if (f.hp <= 0 || f.team === fr.f[G.me].team || f.fled) return; const n = f.n || 1, d = Math.hypot(f.x + (n - 1) / 2 - c.x, f.y + (n - 1) / 2 - c.y) - (n - 1) / 2; if (d < 1.6 && d < bd){ bd = d; best = k; } });
+  return best;
+}
+cv.addEventListener('click', e => {
+  if (e.shiftKey) return;   // Shift + перетаскивание — сдвиг обзора, не ход
+  if (G.busy || !G.req || G.over) return;
+  const c = cellAt(e), q = G.req;
+  if (G.mode === 'move'){ const en = enemyAt(c); if (en != null && (q.actionFree || q.weapon.atkLeft > 0) && q.weapon.armed){ const E = q.enemies.find(x => x.i === en); if (E && E.dist <= q.weapon.range && E.los){ cmd({c:'attack', tgt: en, reckless: q.weapon.reckless}); return; } } cmd({c:'move', x:c.x, y:c.y}); return; }
+  if (G.mode === 'attack'){
+    const en = enemyAt(c);
+    if (en == null){ if (isObjCell(c.x, c.y)) cmd({c:'hitobj', x:c.x, y:c.y}); else toast('Щёлкните по врагу или по объекту (стена, дерево, укрытие).'); return; }
+    cmd({c:'attack', tgt: en, reckless: q.weapon.reckless}); return;
+  }
+  if (G.mode.startsWith('spell:')){
+    const k = +G.mode.slice(6), a = q.abils[k];
+    if ((a.self && a.tele) || a.ground){ cmd({c:'spell', k, x:c.x, y:c.y}); return; }
+    if (a.self && a.ally){ const al = allyAt(c); if (al == null){ toast('Щёлкните себя или союзника.'); return; } cmd({c:'spell', k, tgt: al}); return; }
+    const en = enemyAt(c); if (en == null){ toast('Щёлкните по врагу.'); return; } cmd({c:'spell', k, tgt: en});
+  }
+});
+// объект в клетке (стена, дерево, укрытие) и не разрушен (обломки — в изменениях арены, вид 4)
+function isObjCell(x, y){
+  if (x < 0 || y < 0 || x >= AW || y >= AH) return false;
+  const fr = FR[curIdx]; if (fr.dyn && fr.dyn.some(d => d[0] === x && d[1] === y && d[2] === 4)) return false;
+  return ['wall', 'tree', 'climb'].some(k => MAP[k] && MAP[k][y] && MAP[k][y][x] === '1');
+}
+let hover = null;
+cv.addEventListener('mousemove', e => { hover = cellAt(e); });
+// свободный обзор: колесо — масштаб к курсору, правая кнопка или Shift + перетаскивание — сдвиг (обычный щелчок — ход)
+cv.addEventListener('wheel', e => {
+  e.preventDefault(); setCamMode('free');
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const wx = cam.fx + (mx - cvW() / 2) / cam.fcell, wy = cam.fy + (my - cvH() / 2) / cam.fcell;
+  cam.fcell = Math.max(2, Math.min(80, cam.fcell * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  cam.fx = wx - (mx - cvW() / 2) / cam.fcell; cam.fy = wy - (my - cvH() / 2) / cam.fcell;
+}, {passive: false});
+let panFrom = null;
+cv.addEventListener('mousedown', e => { if (e.button === 2 || e.shiftKey){ setCamMode('free'); panFrom = {x: e.clientX, y: e.clientY, fx: cam.fx, fy: cam.fy}; e.preventDefault(); } });
+addEventListener('mousemove', e => { if (panFrom){ cam.fx = panFrom.fx - (e.clientX - panFrom.x) / cam.fcell; cam.fy = panFrom.fy - (e.clientY - panFrom.y) / cam.fcell; } });
+addEventListener('mouseup', () => { if (panFrom) setTimeout(() => { panFrom = null; }, 0); });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+// во весь экран: настоящий полный экран, а если браузер не даёт (встроенные окна) — блок поля на всё окно
+function setBig(on){ $('stage').parentElement.classList.toggle('bigfield', on); fitStage(); $('fullBtn').textContent = on || document.fullscreenElement ? '⛶ Свернуть' : '⛶ Во весь экран'; }
+$('fullBtn').onclick = () => {
+  const box = $('stage').parentElement;
+  if (document.fullscreenElement) document.exitFullscreen();
+  else if (box.classList.contains('bigfield')) setBig(false);
+  else box.requestFullscreen().catch(() => setBig(true));
+};
+document.addEventListener('fullscreenchange', () => setBig(false));
+addEventListener('keydown', e => { if (e.key === 'Escape' && $('stage').parentElement.classList.contains('bigfield')) setBig(false); });
+cv.addEventListener('mouseleave', () => { hover = null; });
+// подсветка: дальность хода, допустимые цели, клетка под курсором
+// туман войны: маска видимых клеток из последнего запроса хода (бит на клетку, base64) -> холст 1 пиксель = 1 клетка
+let fogKey = '', fogC = null;
+function fogCanvas(){
+  const q = G.req; if (!q || !q.vis || !$('fogOn').checked || G.over) return null;
+  if (q.vis !== fogKey){
+    fogKey = q.vis; const W = q.visW, H = q.visH, bin = atob(q.vis);
+    fogC = document.createElement('canvas'); fogC.width = W; fogC.height = H;
+    const c = fogC.getContext('2d'), img = c.createImageData(W, H);
+    for (let k = 0; k < W * H; k++){ const seen = (bin.charCodeAt(k >> 3) >> (k & 7)) & 1; img.data[4 * k + 3] = seen ? 0 : 255; }
+    c.putImageData(img, 0, 0);
+  }
+  return fogC;
+}
+function overlayDraw(now){
+  if (!G.req || G.busy || G.over || !FR.length) return;
+  const q = G.req, fr = FR[curIdx], me = fr.f[q.me], cell = cam.cell;
+  const cx = PX(me.x + (me.n || 1) / 2), cy = PY(me.y + (me.n || 1) / 2);
+  if (G.mode === 'move' && q.speedLeft >= 5){
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, q.speedLeft / 5 * cell, 0, 7); ctx.fillStyle = 'rgba(95,208,138,.10)'; ctx.fill(); ctx.strokeStyle = 'rgba(95,208,138,.65)'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); ctx.stroke(); ctx.restore();
+  }
+  let range = 0;
+  if (G.mode === 'attack') range = q.weapon.range; else if (G.mode.startsWith('spell:')){ const a = q.abils[+G.mode.slice(6)]; range = a.self ? (a.ally ? a.range : 0) : a.range; }
+  if (range){
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, (range / 5 + ((me.n || 1) - 1) / 2) * cell, 0, 7); ctx.strokeStyle = 'rgba(255,214,90,.7)'; ctx.lineWidth = 2; ctx.setLineDash([4, 6]); ctx.stroke(); ctx.restore();
+    const ga = G.mode.startsWith('spell:') ? q.abils[+G.mode.slice(6)] : null;
+    if (!(ga && ga.ground)) q.enemies.forEach(en => {
+      const f = fr.f[en.i]; if (!f || f.hp <= 0) return; const n = f.n || 1, ok = en.dist <= range && en.los && !en.charm, r = Math.max(f.kind < 2 ? RB() : RM(), n > 1 ? n * cell * .42 : 0) + 8 + Math.sin(now / 160) * 2;
+      ctx.save(); ctx.beginPath(); ctx.arc(PX(f.x + n / 2), PY(f.y + n / 2), r, 0, 7); ctx.strokeStyle = ok ? '#ff5d5d' : 'rgba(180,180,190,.6)'; ctx.lineWidth = ok ? 4 : 2; ctx.stroke(); ctx.restore();
+    });
+  }
+  const ga2 = G.mode.startsWith('spell:') ? q.abils[+G.mode.slice(6)] : null;
+  if (ga2 && ga2.ground && hover && hover.x >= 0 && hover.y >= 0 && hover.x < AW && hover.y < AH){   // превью: область и клетки барьера
+    const hx = PX(hover.x + .5), hy = PY(hover.y + .5);
+    if (ga2.radius){ ctx.save(); ctx.beginPath(); ctx.arc(hx, hy, ga2.radius / 5 * cell, 0, 7); ctx.fillStyle = 'rgba(255,120,80,.16)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,140,90,.8)'; ctx.lineWidth = 2; ctx.stroke(); ctx.restore(); }
+    if (ga2.wallLen){
+      const dx = hover.x - me.x, dy = hover.y - me.y, ax = Math.abs(dx), ay = Math.abs(dy), sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1;
+      let px = 1, py = 0; if (ax === 0 && ay === 0){ px = 1; py = 0; } else if (ax >= 2 * ay){ px = 0; py = 1; } else if (ay >= 2 * ax){ px = 1; py = 0; } else { px = -sy; py = sx; }
+      ctx.save(); ctx.fillStyle = 'rgba(190,160,255,.55)'; ctx.strokeStyle = '#d6c4ff'; ctx.lineWidth = 2;
+      for (let i = -Math.floor((ga2.wallLen - 1) / 2); i <= Math.floor(ga2.wallLen / 2); i++){ const x = hover.x + px * i, y = hover.y + py * i; if (x < 0 || y < 0 || x >= AW || y >= AH) continue; ctx.fillRect(PX(x), PY(y), cell, cell); ctx.strokeRect(PX(x) + 1, PY(y) + 1, cell - 2, cell - 2); }
+      ctx.restore();
+    }
+  }
+  if (hover && hover.x >= 0 && hover.y >= 0 && hover.x < AW && hover.y < AH){
+    ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 2; ctx.strokeRect(PX(hover.x), PY(hover.y), cell, cell);
+    const d = 5 * Math.max(Math.abs(hover.x - me.x), Math.abs(hover.y - me.y)); ctx.font = '700 13px system-ui'; ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.lineWidth = 4; ctx.textAlign = 'left';
+    ctx.strokeText(d + ' фт', PX(hover.x) + cell + 4, PY(hover.y) + 14); ctx.fillText(d + ' фт', PX(hover.x) + cell + 4, PY(hover.y) + 14); ctx.restore();
+  }
+}
+addEventListener('keydown', e => {
+  if (!viewActive() || G.busy || !G.req || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'e' || e.key === 'E' || e.key === 'Enter'){ cmd({c:'end'}); }
+  else if (e.key === 'm' || e.key === 'M'){ G.mode = 'move'; renderTurn(); }
+  else if (e.key === 'a' || e.key === 'A'){ const b = document.querySelector('#turn [data-m=attack]'); if (b && !b.disabled) b.click(); }
+  else if (/^[1-9]$/.test(e.key)){ const b = document.querySelector(`#turn [data-spell="${+e.key - 1}"]`); if (b && !b.disabled) b.click(); }
+});
+addEventListener('resize', () => { if (G.active) fitPlay(); });
+// карта по ширине колонки, но не выше окна минус панель хода (панель хода всегда на виду)
+let lastTurnH = 0;
+function fitPlay(){
+  fitStage();
+  lastTurnH = $('turn').offsetHeight;
+  const H = Math.max(300, innerHeight - lastTurnH - 120);
+  if (cv.height / dpr > H){ cv.height = Math.round(H * dpr); cv.style.height = H + 'px'; }
+  cam.snap = true;
+}
+
+$('btnFight').onclick = startGame;
+$('tempo').onchange = () => { speed = +$('tempo').value; }; speed = +$('tempo').value;
+// ====================================================================================================================
+// Запуск
+// ====================================================================================================================
+(async function init(){
+  // игрок по имени: персонаж с сервера (если в этом браузере его нет) и возврат в свою комнату или бой
+  let hadLocal = false; try { hadLocal = !!localStorage.getItem('dnd_char'); } catch (e) {}
+  const pn = playerName(true);
+  let pl = null;
+  if (pn){ pl = await api({cmd:'player_load', name:pn}); if (pl && pl.s && !hadLocal) try { S = Object.assign(JSON.parse(JSON.stringify(DEFAULT_CHAR)), migrateChar(pl.s)); localStorage.setItem('dnd_char', JSON.stringify(S)); } catch (e) {} }
+  if (pn) $('rmName').value = pn;
+  await loadCatalog();
+  if (!CAT){ $('form').innerHTML = '<div class="card err">Нет связи с движком. Запустите: python3 play_server.py</div>'; return; }
+  buildForm();
+  if (pl && pl.room){ ROOM.code = pl.room; ROOM.n = 0; G.room = ''; const v = await roomCall({cmd:'room_join', name:pn}); if (v && v.type === 'room'){ toast('Вы снова в комнате ' + v.code); if (v.status !== 'fight') showTab(6); roomPoll(); } else ROOM.code = ''; }
+  doPrice();
+  $('seed').value = 1 + Math.floor(Math.random() * 99999);
+  startLoop();
+})();
+</script>
+</body>
+</html>

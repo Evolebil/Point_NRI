@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Арена Боссов — просмотр сборки и боя</title>
+<style>
+:root{
+  --bg:#f3f1ec; --bg2:#ebe8e1; --panel:#ffffff; --panel2:#f7f5f0; --line:#d9d4c8; --text:#1d1f26; --muted:#6a6e7a;
+  --a:#2f7de1; --a-soft:#2f7de122; --b:#e0553f; --b-soft:#e0553f22; --gold:#b7860b; --good:#2e9a5b; --bad:#d23b3b;
+  --shadow:0 1px 2px rgba(20,20,30,.08),0 8px 24px rgba(20,20,30,.06);
+  --stage:#1a1d26;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1117; --bg2:#141720; --panel:#181c26; --panel2:#1d2230; --line:#2a3042; --text:#e9eaf0; --muted:#8e94a8;
+    --a:#5aa9ff; --a-soft:#5aa9ff22; --b:#ff7a63; --b-soft:#ff7a6322; --gold:#f2c14e; --good:#5fd08a; --bad:#ff6b6b;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1117; --bg2:#141720; --panel:#181c26; --panel2:#1d2230; --line:#2a3042; --text:#e9eaf0; --muted:#8e94a8;
+  --a:#5aa9ff; --a-soft:#5aa9ff22; --b:#ff7a63; --b-soft:#ff7a6322; --gold:#f2c14e; --good:#5fd08a; --bad:#ff6b6b;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45;font-size:15.5px}
+body{padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+button{font:inherit;color:inherit;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer;transition:transform .08s,background .15s,border-color .15s}
+button:hover{border-color:var(--muted)} button:active{transform:translateY(1px)}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:var(--gold);color:#1b1500;border-color:transparent;font-weight:600}
+button.primary:hover{filter:brightness(1.08)}
+button.icon{padding:8px 11px;min-width:40px}
+.tnum{font-variant-numeric:tabular-nums}
+
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 16px 10px;max-width:1760px;margin:0 auto}
+header h1{font-size:18px;margin:0;letter-spacing:.04em;text-transform:uppercase}
+header .meta{color:var(--muted);font-size:13px}
+.tabs{display:flex;gap:6px;margin-left:auto}
+.tab{border-radius:999px;padding:7px 16px;font-size:14px}
+.tab[aria-selected="true"]{background:var(--text);color:var(--bg);border-color:transparent}
+main{max-width:1760px;margin:0 auto;padding:0 16px 40px}
+.scene{display:none} .scene.on{display:block}
+
+/* ---------- сборка ---------- */
+.build-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 14px}
+.build-top .spacer,.transport .spacer{flex:1}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.cols{grid-template-columns:1fr}}
+.col{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}
+.col .head{padding:14px 16px 12px;border-bottom:1px solid var(--line);position:relative}
+.col.A .head{background:linear-gradient(120deg,var(--a-soft),transparent 70%)}
+.col.B .head{background:linear-gradient(120deg,var(--b-soft),transparent 70%)}
+.chip{display:inline-block;font-size:12px;font-weight:700;border-radius:6px;padding:1px 8px;margin-right:8px;color:#fff}
+.chip.A{background:var(--a)} .chip.B{background:var(--b)}
+.col h2{margin:0;font-size:20px}
+.col .sub{color:var(--muted);font-size:13px;margin-top:2px}
+.meter{padding:12px 16px 4px}
+.meter .nums{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--muted)}
+.meter .big{font-size:30px;font-weight:700;color:var(--text)}
+.stack{height:16px;border-radius:8px;background:var(--bg2);border:1px solid var(--line);overflow:hidden;display:flex;margin-top:6px}
+.stack i{display:block;height:100%;transition:width .35s cubic-bezier(.2,.8,.2,1)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted);padding:8px 16px 0}
+.legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;background:var(--c);vertical-align:-1px}
+.items{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;min-height:200px;max-height:520px;overflow:auto}
+.item{display:grid;grid-template-columns:34px 1fr auto;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:10px;padding:8px 10px;animation:pop .38s cubic-bezier(.2,.9,.3,1.2)}
+@keyframes pop{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+.item .ic{font-size:20px;text-align:center}
+.item .lb{font-weight:600;font-size:14px}
+.item .dt{font-size:12px;color:var(--muted);margin-top:1px}
+.item .co{font-weight:700;font-size:15px;white-space:nowrap}
+.item .co small{color:var(--muted);font-weight:500}
+.item.neg .co{color:var(--good)}
+.sheet{padding:14px 16px 16px;border-top:1px solid var(--line);display:none;gap:14px;align-items:center;flex-wrap:wrap;background:var(--panel2)}
+.sheet.on{display:flex;animation:pop .5s}
+.sheet svg{flex:0 0 auto;color:var(--text)}
+.facts{flex:1 1 180px;display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:13px;margin:0}
+.facts dt{color:var(--muted)} .facts dd{margin:0;font-weight:600}
+
+/* ---------- бой ---------- */
+.fight{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:16px;align-items:start}
+@media(max-width:1000px){.fight{grid-template-columns:1fr}}
+.stagebox{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:12px;min-width:0}
+.stage{position:relative;background:var(--stage);border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center}
+canvas{display:block;max-width:100%}
+.banner{position:absolute;left:50%;top:10px;transform:translateX(-50%);padding:6px 16px;border-radius:999px;font-weight:800;letter-spacing:.06em;font-size:16px;color:#1b1000;background:#f2c14e;box-shadow:0 4px 20px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .25s;white-space:nowrap}
+.banner.on{opacity:1;animation:pulse 1.2s infinite}
+@keyframes pulse{50%{transform:translateX(-50%) scale(1.05)}}
+.result{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;background:rgba(8,10,16,.74);backdrop-filter:blur(3px);padding:20px;cursor:pointer}
+.result.on{display:flex;animation:pop .5s}
+.result .box{max-width:460px;color:#f2f2f6}
+.result h3{font-size:28px;margin:0 0 6px}
+.result p{margin:4px 0;color:#c9ccd8}
+.transport{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:7px 10px;background:transparent}
+.seg button[aria-pressed="true"]{background:var(--text);color:var(--bg)}
+.timeline{margin-top:10px;position:relative;cursor:pointer;touch-action:none}
+.timeline canvas{width:100%;height:84px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
+.lbl{font-size:12px;color:var(--muted);margin-top:6px;display:flex;gap:14px;flex-wrap:wrap}
+.lbl b{color:var(--text)}
+.sidecol{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow)}
+.card.A{border-top:3px solid var(--a)} .card.B{border-top:3px solid var(--b)}
+.card h4{margin:0;font-size:18px;display:flex;align-items:center;gap:6px}
+.card .small,.small{font-size:12px;color:var(--muted)}
+.hpbar{height:18px;border-radius:7px;background:var(--bg2);border:1px solid var(--line);position:relative;overflow:hidden;margin:8px 0 4px}
+.hpbar i{position:absolute;left:0;top:0;bottom:0;transition:width .35s}
+.hpbar .tmp{background:#9aa4b8aa}
+.card.A .hpbar .f{background:var(--a)} .card.B .hpbar .f{background:var(--b)}
+.hpbar .ghost{background:#fff6;transition:width .9s .25s}
+.stat6{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-top:8px;text-align:center;font-size:12px;color:var(--muted)}
+.stat6 b{display:block;font-size:14px;color:var(--text)}
+.pills{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;min-height:22px}
+.pill{font-size:11px;border-radius:999px;padding:2px 8px;background:var(--panel2);border:1px solid var(--line)}
+.pill.bad{background:#d23b3b22;border-color:#d23b3b66;color:var(--bad)}
+.pips{display:inline-flex;gap:3px;vertical-align:middle}
+.pips i{width:9px;height:9px;border-radius:50%;border:1px solid var(--muted);display:block}
+.pips i.on{background:var(--bad);border-color:var(--bad)}
+.row2{display:flex;justify-content:space-between;gap:8px;font-size:13.5px;margin-top:6px;color:var(--muted);flex-wrap:wrap}
+.row2 b{color:var(--text)}
+.abil{margin-top:8px;font-size:12.5px}
+.abil summary{cursor:pointer;color:var(--muted)}
+.abil .ab{margin-top:6px;padding:6px 8px;background:var(--panel2);border-radius:8px}
+.abil .ab b{display:block;font-size:13px}
+.abil .ab span{color:var(--muted)}
+.legend2{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin-top:8px}
+.legend2 span::before{content:"";display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;background:var(--c);vertical-align:-2px;border:1px solid rgba(128,128,140,.5)}
+.log{height:440px;overflow:auto;padding:4px 0;position:relative}
+.logh{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.logh h4{margin:0}
+.rnd{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:10px 0 3px;padding-top:6px;border-top:1px dashed var(--line)}
+.ln{padding:6px 9px;border-radius:8px;font-size:14px;cursor:pointer;border-left:3px solid transparent;margin:1px 0}
+.ln:hover{background:var(--panel2)}
+.ln.cur{background:var(--panel2);box-shadow:inset 0 0 0 1px var(--gold)}
+.ln.A{border-left-color:var(--a)} .ln.B{border-left-color:var(--b)}
+.ln .ev{display:block;font-size:12px;margin-top:2px}
+.ln .ev.chase{color:var(--gold)} .ln .ev.bad{color:var(--bad)} .ln .ev.good{color:var(--good)} .ln .ev.mut{color:var(--muted)}
+.dmg{color:var(--bad);font-weight:600} .heal{color:var(--good);font-weight:600}
+.who.A{color:var(--a);font-weight:600} .who.B{color:var(--b);font-weight:600}
+kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;background:var(--panel2)}
+.hint{color:var(--muted);font-size:12px;margin-top:10px}
+@media (prefers-reduced-motion: reduce){.item,.sheet.on,.result.on{animation:none}.banner.on{animation:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Арена Боссов</h1>
+  <span class="meta" id="meta"></span>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab1" aria-selected="true">1 · Сборка</button>
+    <button class="tab" role="tab" id="tab2" aria-selected="false">2 · Бой</button>
+  </div>
+</header>
+<main>
+<section class="scene on" id="scene1">
+  <div class="build-top">
+    <button class="primary" id="bPlay">▶ Собрать боссов</button>
+    <button id="bSkip">Показать сразу</button>
+    <div class="seg" id="bSpeed" aria-label="Скорость сборки">
+      <button data-s="0.5" aria-pressed="false">0.5×</button><button data-s="1" aria-pressed="true">1×</button><button data-s="2" aria-pressed="false">2×</button><button data-s="4" aria-pressed="false">4×</button>
+    </div>
+    <span class="spacer"></span>
+    <button class="primary" id="toFight" style="display:none">К бою →</button>
+  </div>
+  <div class="cols" id="cols"></div>
+  <p class="hint">Каждая покупка стоит столько очков, сколько даёт таблица цен из правил. Сначала характеристики, КД, оружие, способности и пассивы; всё, что осталось, босс тратит на здоровье (2 очка за ХП).</p>
+</section>
+
+<section class="scene" id="scene2">
+  <div class="fight">
+    <div class="stagebox">
+      <div class="stage" id="stage">
+        <canvas id="cv"></canvas>
+        <div class="banner" id="banner"></div>
+        <div class="result" id="result"><div class="box"></div></div>
+      </div>
+      <div class="transport">
+        <button class="icon" id="tFirst" title="В начало (Home)">⏮</button>
+        <button class="icon" id="tPrev" title="Шаг назад (←)">◀</button>
+        <button class="primary icon" id="tPlay" title="Играть / пауза (пробел)" style="min-width:104px">▶ Играть</button>
+        <button class="icon" id="tNext" title="Шаг вперёд (→)">▶|</button>
+        <button class="icon" id="tLast" title="В конец (End)">⏭</button>
+        <button id="camBtn" title="Режим камеры">🎥 Камера</button>
+        <span class="spacer"></span>
+        <div class="seg" id="tSpeed" aria-label="Скорость боя">
+          <button data-s="0.5" aria-pressed="false">0.5×</button><button data-s="1" aria-pressed="true">1×</button><button data-s="2" aria-pressed="false">2×</button><button data-s="4" aria-pressed="false">4×</button>
+        </div>
+      </div>
+      <div class="timeline" id="tl"><canvas id="tlc"></canvas></div>
+      <div class="lbl" id="stateLbl"></div>
+      <div class="legend2"><span style="--c:#2d6fa3">ручей (труднопроходим)</span><span style="--c:#07080c">ущелье</span><span style="--c:#7a5a34">мост</span><span style="--c:#6f9a6f">возвышенность</span><span style="--c:#3b404d">стена</span><span style="--c:#7d7568">укрытие</span><span style="--c:#56401e">грязь (труднопроходима)</span><span style="--c:#1a1d3a">тьма</span><span style="--c:#f2c14e">край арены: выход = побег = поражение</span></div>
+      <p class="hint"><kbd>пробел</kbd> пауза · <kbd>←</kbd><kbd>→</kbd> шаг · клик по графику или по строке журнала — перемотка. График: здоровье боссов (%), золотая полоса — погоня, ромбики — начало погони, истощение, побег.</p>
+    </div>
+    <div class="sidecol">
+      <div class="card A" id="cardA"></div>
+      <div class="card B" id="cardB"></div>
+      <div class="card"><div class="logh"><h4>Журнал боя</h4><span class="small" id="logCount"></span></div><div class="log" id="log"></div></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+const REPLAY = {"seed":11,"budget":1600,"bosses":[{"title":"Повелевающий Хранитель","budget":1600,"stats":[7,7,6,5,9,2],"ac":14,"hp":117,"int":5,"main":"МДР","speed":60,"fly":false,"total":1599,"items":[{"cat":"stat","label":"СИЛ 7","detail":"модификатор -2; ниже десяти: очки возвращаются","cost":-27},{"cat":"stat","label":"ЛОВ 7","detail":"модификатор -2; ниже десяти: очки возвращаются","cost":-27},{"cat":"stat","label":"ТЕЛ 6","detail":"модификатор -2; ниже десяти: очки возвращаются","cost":-34},{"cat":"stat","label":"ИНТ 5","detail":"модификатор -3; ниже десяти: очки возвращаются","cost":-40},{"cat":"stat","label":"МДР 9","detail":"модификатор -1; ниже десяти: очки возвращаются","cost":-10},{"cat":"stat","label":"ХАР 2","detail":"модификатор -4; ниже десяти: очки возвращаются","cost":-52},{"cat":"ac","label":"КД 14","detail":"9 КД-очков","cost":45},{"cat":"weapon","label":"Оружие","detail":"3к12 дробящий, дальнее 50 фт","cost":154},{"cat":"ability","label":"Кислотный волна","detail":"[действие] 2 раз(а) за бой; атака (—), дальн. 5 фт, радиус 25 фт: урон 2к12 (кислота) + труднопроходимая местность в области -- 82 очк.","cost":82},{"cat":"ability","label":"Щит из воздуха","detail":"[бонус] на себя: +1 к КД на 5 р. -- 2 очк.","cost":2},{"cat":"ability","label":"Некротический залп","detail":"[действие] 3 раз(а) за бой; спасбросок (ТЕЛ), дальн. 50 фт: урон 2к12 (некротика) -- 100 очк.","cost":100},{"cat":"passive","label":"Иммунитет: некротика","detail":"урон не проходит","cost":28},{"cat":"passive","label":"Условная защита","detail":"резист к немагическому физическому пока ХП выше половины","cost":160},{"cat":"passive","label":"Иммунитет: испуган","detail":"","cost":5},{"cat":"passive","label":"Иммунитет: отравлен","detail":"","cost":5},{"cat":"passive","label":"Иммунитет: ослеплён","detail":"","cost":5},{"cat":"passive","label":"Иммунитет: замедлен","detail":"","cost":5},{"cat":"passive","label":"Скорость","detail":"+30 фт","cost":152},{"cat":"minions","label":"Призыв приспешников","detail":"8 копий шаблона, одновременно до 2","cost":812},{"cat":"hp","label":"Хиты 117","detail":"2 очка за каждый ХП: всё, что осталось, идёт в здоровье","cost":234}],"wType":1,"wRange":50,"reach":5,"auraRad":0,"abil":[{"title":"Кислотный волна","desc":"[действие] 2 раз(а) за бой; атака (—), дальн. 5 фт, радиус 25 фт: урон 2к12 (кислота) + труднопроходимая местность в области -- 82 очк.","range":5,"radius":25,"self":false,"ground":false,"wallLen":0,"dtype":0},{"title":"Щит из воздуха","desc":"[бонус] на себя: +1 к КД на 5 р. -- 2 очк.","range":0,"radius":0,"self":true,"ground":false,"wallLen":0,"dtype":3},{"title":"Некротический залп","desc":"[действие] 3 раз(а) за бой; спасбросок (ТЕЛ), дальн. 50 фт: урон 2к12 (некротика) -- 100 очк.","range":50,"radius":0,"self":false,"ground":false,"wallLen":0,"dtype":6}],"text":"  Статы: СИЛ 7 ЛОВ 7 ТЕЛ 6 ИНТ 5 МДР 9 ХАР 2 | КД 14 | ХП 117 | главная: МДР | стоимость 1929\n  Оружие: 3к12, дальн. 50 фт, атак за действие: 1, боеприпасное (ЛОВ) (154 очк.)\n  Тип урона оружия: дробящий (немагическое)\n  Пассивы: иммунитет: некротика; резист к немагическому физическому пока ХП выше половины; скорость +30; иммунитет: испуган; иммунитет: отравлен; иммунитет: ослеплён; иммунитет: замедлен;\n  Способность: [действие] 2 раз(а) за бой; атака (—), дальн. 5 фт, радиус 25 фт: урон 2к12 (кислота) + труднопроходимая местность в области -- 82 очк.\n  Способность: [бонус] на себя: +1 к КД на 5 р. -- 2 очк.\n  Способность: [действие] 3 раз(а) за бой; спасбросок (ТЕЛ), дальн. 50 фт: урон 2к12 (некротика) -- 100 очк.\n  Миньоны: 8 копий одного шаблона (стоимость шаблона 1409), одновременно до 2\n  Шаблон миньона:\n  Статы: СИЛ 22 ЛОВ 13 ТЕЛ 9 ИНТ 10 МДР 11 ХАР 14 | КД 21 | ХП 232 | главная: СИЛ | стоимость 1409\n  Оружие: безоружный\n  Ячейки заклинаний: 1 ур. ×2;\n  Условия/реакции: добивание (цель: испуган): +3к6, раз в ход;\n  Тип урона оружия: рубящий (немагическое)\n  Пассивы: иммунитет: огонь, яд;\n  Способность: [бонус] на себя: тьма вокруг себя, радиус 10 фт -- 2 очк.\n  Способность: [бонус] ячейка 1 ур.; на себя: невидимость на 2 р. -- 3 очк.\n  Способность: [действие] на себя: телепорт 20 фт -- 1 очк.\n","minion":{"title":"Приспешник","budget":1600,"stats":[22,13,9,10,11,14],"ac":21,"hp":232,"int":10,"main":"СИЛ","speed":30,"fly":false,"total":1103,"items":[{"cat":"stat","label":"СИЛ 22","detail":"модификатор +6; выше десяти: платим","cost":198},{"cat":"stat","label":"ЛОВ 13","detail":"модификатор +1; выше десяти: платим","cost":36},{"cat":"stat","label":"ТЕЛ 9","detail":"модификатор -1; ниже десяти: очки возвращаются","cost":-10},{"cat":"stat","label":"ИНТ 10","detail":"модификатор +0; десять бесплатно","cost":0},{"cat":"stat","label":"МДР 11","detail":"модификатор +0; выше десяти: платим","cost":11},{"cat":"stat","label":"ХАР 14","detail":"модификатор +2; выше десяти: платим","cost":50},{"cat":"ac","label":"КД 21","detail":"22 КД-очков","cost":253},{"cat":"ability","label":"Покров тьмы","detail":"[бонус] на себя: тьма вокруг себя, радиус 10 фт -- 2 очк.","cost":2},{"cat":"ability","label":"Невидимость","detail":"[бонус] ячейка 1 ур.; на себя: невидимость на 2 р. -- 3 очк.","cost":3},{"cat":"ability","label":"Прыжок сквозь пространство","detail":"[действие] на себя: телепорт 20 фт -- 1 очк.","cost":1},{"cat":"passive","label":"Иммунитет: огонь","detail":"урон не проходит","cost":60},{"cat":"passive","label":"Иммунитет: яд","detail":"урон не проходит","cost":29},{"cat":"passive","label":"Добивание","detail":"+3к6 по цели с состоянием «испуган»","cost":4},{"cat":"passive","label":"Ячейки заклинаний 1 ур.","detail":"×2","cost":2},{"cat":"hp","label":"Хиты 232","detail":"2 очка за каждый ХП: всё, что осталось, идёт в здоровье","cost":464}],"wType":11,"wRange":5,"reach":5,"auraRad":0,"abil":[{"title":"Покров тьмы","desc":"[бонус] на себя: тьма вокруг себя, радиус 10 фт -- 2 очк.","range":0,"radius":0,"self":true,"ground":false,"wallLen":0,"dtype":3},{"title":"Невидимость","desc":"[бонус] ячейка 1 ур.; на себя: невидимость на 2 р. -- 3 очк.","range":0,"radius":0,"self":true,"ground":false,"wallLen":0,"dtype":3},{"title":"Прыжок сквозь пространство","desc":"[действие] на себя: телепорт 20 фт -- 1 очк.","range":0,"radius":0,"self":true,"ground":false,"wallLen":0,"dtype":3}],"text":"  Статы: СИЛ 22 ЛОВ 13 ТЕЛ 9 ИНТ 10 МДР 11 ХАР 14 | КД 21 | ХП 232 | главная: СИЛ | стоимость 1409\n  Оружие: безоружный\n  Ячейки заклинаний: 1 ур. ×2;\n  Условия/реакции: добивание (цель: испуган): +3к6, раз в ход;\n  Тип урона оружия: рубящий (немагическое)\n  Пассивы: иммунитет: огонь, яд;\n  Способность: [бонус] на себя: тьма вокруг себя, радиус 10 фт -- 2 очк.\n  Способность: [бонус] ячейка 1 ур.; на себя: невидимость на 2 р. -- 3 очк.\n  Способность: [действие] на себя: телепорт 20 фт -- 1 очк.\n"},"minionCount":8,"summonCap":2},{"title":"Меткий Клинок","budget":1600,"stats":[4,11,4,8,3,4],"ac":14,"hp":100,"int":8,"main":"ЛОВ","speed":30,"fly":false,"total":1599,"items":[{"cat":"stat","label":"СИЛ 4","detail":"модификатор -3; ниже десяти: очки возвращаются","cost":-45},{"cat":"stat","label":"ЛОВ 11","detail":"модификатор +0; выше десяти: платим","cost":11},{"cat":"stat","label":"ТЕЛ 4","detail":"модификатор -3; ниже десяти: очки возвращаются","cost":-45},{"cat":"stat","label":"ИНТ 8","detail":"модификатор -1; ниже десяти: очки возвращаются","cost":-19},{"cat":"stat","label":"МДР 3","detail":"модификатор -4; ниже десяти: очки возвращаются","cost":-49},{"cat":"stat","label":"ХАР 4","detail":"модификатор -3; ниже десяти: очки возвращаются","cost":-45},{"cat":"ac","label":"КД 14","detail":"8 КД-очков","cost":36},{"cat":"weapon","label":"Оружие","detail":"1к10 рубящий, дальнее 85 фт, атак за действие: 3","cost":261},{"cat":"weapon","label":"Довесок к удару","detail":"+3к10 яд и сбит с ног на 1 р., раз в ход","cost":316},{"cat":"weapon","label":"Запасное оружие","detail":"1к4 дробящий, ближнее, атак за действие: 4","cost":160},{"cat":"ability","label":"Подсечка","detail":"[действие] атака (ЛОВ), дальн. 5 фт: + сбит с ног (до след. хода цели) -- 42 очк.","cost":42},{"cat":"ability","label":"Заклятие","detail":"[действие] спасбросок (ЛОВ), дальн. 85 фт: + подсвечен (атаки по нему с преимуществом) на 5 р. -- 89 очк.","cost":89},{"cat":"ability","label":"Заточка оружия","detail":"[действие] концентрация; на себя: бафф +3к4 к оружию на 4 р. -- 1 очк.","cost":1},{"cat":"ability","label":"Ядовитый взрыв (ослеплён) с отбросом","detail":"[действие] 3 раз(а) за бой; концентрация; атака (ЛОВ), дальн. 90 фт, радиус 5 фт: урон 10к6 (яд) + ослеплён на 9 р. + толчок 25 фт -- 147 очк.","cost":147},{"cat":"ability","label":"Некротический залп (ослеплён)","detail":"[действие] ячейка 4 ур.; спасбросок (ТЕЛ), дальн. 75 фт: урон 2к10 (некротика) + ослеплён на 1 р. -- 46 очк.","cost":46},{"cat":"ability","label":"Рубящий удар (испуган)","detail":"[действие] 2 раз(а) за бой; спасбросок (МДР), дальн. 5 фт: урон 4к8 (рубящий) + испуган на 2 р. -- 86 очк.","cost":86},{"cat":"ability","label":"Некротический залп (отравлен)","detail":"[действие] 1 раз(а) за бой; спасбросок (ТЕЛ), дальн. 65 фт: урон 2к6 (некротика) + отравлен на 4 р. -- 40 очк.","cost":40},{"cat":"ability","label":"Дробящий удар","detail":"[действие] концентрация; спасбросок (ТЕЛ), дальн. 5 фт: урон 1к6 (дробящий) -- 12 очк.","cost":12},{"cat":"ability","label":"Огненный залп","detail":"[бонус] 2 раз(а) за бой; концентрация; атака (—), дальн. 95 фт: урон 1к6 (огонь) -- 12 очк.","cost":12},{"cat":"ability","label":"Наценка за число способностей","detail":"способностей больше трёх: 9","cost":68},{"cat":"passive","label":"Уязвимость: дробящий","detail":"урон вдвое больше, очки возвращаются","cost":-85},{"cat":"passive","label":"Резист: яд","detail":"урон вдвое меньше","cost":15},{"cat":"passive","label":"Иммунитет: схвачен","detail":"","cost":5},{"cat":"passive","label":"Владение спасброском ХАР","detail":"+2 к спасброску","cost":5},{"cat":"passive","label":"Всплеск действий","detail":"×1","cost":331},{"cat":"passive","label":"Ячейки заклинаний 4 ур.","detail":"×1","cost":4},{"cat":"hp","label":"Хиты 100","detail":"2 очка за каждый ХП: всё, что осталось, идёт в здоровье","cost":200}],"wType":11,"wRange":85,"reach":5,"auraRad":0,"abil":[{"title":"Подсечка","desc":"[действие] атака (ЛОВ), дальн. 5 фт: + сбит с ног (до след. хода цели) -- 42 очк.","range":5,"radius":0,"self":false,"ground":false,"wallLen":0,"dtype":3},{"title":"Заклятие","desc":"[действие] спасбросок (ЛОВ), дальн. 85 фт: + подсвечен (атаки по нему с преимуществом) на 5 р. -- 89 очк.","range":85,"radius":0,"self":false,"ground":false,"wallLen":0,"dtype":3},{"title":"Заточка оружия","desc":"[действие] концентрация; на себя: бафф +3к4 к оружию на 4 р. -- 1 очк.","range":0,"radius":0,"self":true,"ground":false,"wallLen":0,"dtype":3},{"title":"Ядовитый взрыв (ослеплён) с отбросом","desc":"[действие] 3 раз(а) за бой; концентрация; атака (ЛОВ), дальн. 90 фт, радиус 5 фт: урон 10к6 (яд) + ослеплён на 9 р. + толчок 25 фт -- 147 очк.","range":90,"radius":5,"self":false,"ground":false,"wallLen":0,"dtype":8},{"title":"Некротический залп (ослеплён)","desc":"[действие] ячейка 4 ур.; спасбросок (ТЕЛ), дальн. 75 фт: урон 2к10 (некротика) + ослеплён на 1 р. -- 46 очк.","range":75,"radius":0,"self":false,"ground":false,"wallLen":0,"dtype":6},{"title":"Рубящий удар (испуган)","desc":"[действие] 2 раз(а) за бой; спасбросок (МДР), дальн. 5 фт: урон 4к8 (рубящий) + испуган на 2 р. -- 86 очк.","range":5,"radius":0,"self":false,"ground":false,"wallLen":0,"dtype":11},{"title":"Некротический залп (отравлен)","desc":"[действие] 1 раз(а) за бой; спасбросок (ТЕЛ), дальн. 65 фт: урон 2к6 (некротика) + отравлен на 4 р. -- 40 очк.","range":65,"radius":0,"self":false,"ground":false,"wallLen":0,"dtype":6},{"title":"Дробящий удар","desc":"[действие] концентрация; спасбросок (ТЕЛ), дальн. 5 фт: урон 1к6 (дробящий) -- 12 очк.","range":5,"radius":0,"self":false,"ground":false,"wallLen":0,"dtype":1},{"title":"Огненный залп","desc":"[бонус] 2 раз(а) за бой; концентрация; атака (—), дальн. 95 фт: урон 1к6 (огонь) -- 12 очк.","range":95,"radius":0,"self":false,"ground":false,"wallLen":0,"dtype":3}],"text":"  Статы: СИЛ 4 ЛОВ 11 ТЕЛ 4 ИНТ 8 МДР 3 ХАР 4 | КД 14 | ХП 100 | главная: ЛОВ | стоимость 1929\n  Оружие: 1к10, дальн. 85 фт, атак за действие: 3, метательное (СИЛ) (261 очк.)\n  Довесок к удару (раз в ход): +3к10 (яд) + сбит с ног на 1 р. (спасбросок СИЛ) (316 очк.)\n  Ячейки заклинаний: 4 ур. ×1;\n  Условия/реакции: всплеск действий ×1;\n  Запасное оружие: 1к4 (дробящий), дальн. 5 фт, атак: 4 (160 очк.)\n  Тип урона оружия: рубящий (немагическое)\n  Пассивы: резист: яд; УЯЗВИМОСТЬ: дробящий; владение спасброском ХАР; иммунитет: схвачен;\n  Способность: [действие] атака (ЛОВ), дальн. 5 фт: + сбит с ног (до след. хода цели) -- 42 очк.\n  Способность: [действие] спасбросок (ЛОВ), дальн. 85 фт: + подсвечен (атаки по нему с преимуществом) на 5 р. -- 89 очк.\n  Способность: [действие] концентрация; на себя: бафф +3к4 к оружию на 4 р. -- 1 очк.\n  Способность: [действие] 3 раз(а) за бой; концентрация; атака (ЛОВ), дальн. 90 фт, радиус 5 фт: урон 10к6 (яд) + ослеплён на 9 р. + толчок 25 фт -- 147 очк.\n  Способность: [действие] ячейка 4 ур.; спасбросок (ТЕЛ), дальн. 75 фт: урон 2к10 (некротика) + ослеплён на 1 р. -- 46 очк.\n  Способность: [действие] 2 раз(а) за бой; спасбросок (МДР), дальн. 5 фт: урон 4к8 (рубящий) + испуган на 2 р. -- 86 очк.\n  Способность: [действие] 1 раз(а) за бой; спасбросок (ТЕЛ), дальн. 65 фт: урон 2к6 (некротика) + отравлен на 4 р. -- 40 очк.\n  Способность: [действие] концентрация; спасбросок (ТЕЛ), дальн. 5 фт: урон 1к6 (дробящий) -- 12 очк.\n  Способность: [бонус] 2 раз(а) за бой; концентрация; атака (—), дальн. 95 фт: урон 1к6 (огонь) -- 12 очк.\n"}],"builders":["Случайный генератор","Случайный генератор"],"ctrl":[false,false],"result":0,"reason":1,"rounds":6,"map":{"w":100,"aw":30,"ah":20,"theme":0,"wall":["000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000"],"climb":["000000000000001100000000000000","000000000000001100000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000"],"diff":["000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000"],"dark":["000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000111000","000000000000000000000000111000","000000000000000000000000111000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000"],"water":["000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000"],"pit":["000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000","000000001110000000000000000000"],"height":["000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000","000000000000000000000000000000"]},"frames":[
+{"round":0,"actor":-1,"act":"none","target":-1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":28,"y":15,"hp":117,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]}]},
+{"round":1,"actor":0,"act":"summon","target":-1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":16,"y":19,"hp":117,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":27,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":28,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":1,"actor":1,"act":"buff","target":-1,"abil":2,"chase":0,"prey":-1,"ev":[],"f":[{"x":16,"y":19,"hp":117,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":27,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":28,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":2,"actor":0,"act":"attack-ranged","target":1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":117,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":27,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":28,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":2,"actor":2,"act":"teleport","target":-1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":117,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":17,"y":16,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":28,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":2,"actor":3,"act":"teleport","target":-1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":117,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":17,"y":16,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":18,"y":16,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":2,"actor":1,"act":"attack-ranged","target":0,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":102,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":17,"y":16,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":18,"y":16,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":3,"actor":0,"act":"attack-ranged","target":1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":102,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":17,"y":16,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":18,"y":16,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":3,"actor":2,"act":"teleport","target":-1,"abil":1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":102,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":7,"y":13,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":18,"y":16,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":3,"actor":3,"act":"teleport","target":-1,"abil":1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":102,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":7,"y":13,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":8,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":3,"actor":1,"act":"attack-ranged","target":0,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":["сбит с ног"]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":7,"y":13,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":8,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":4,"actor":0,"act":"attack-ranged","target":1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":100,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":7,"y":13,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":8,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":4,"actor":2,"act":"attack-melee","target":1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":93,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":4,"y":10,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":8,"y":14,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":4,"actor":3,"act":"attack-melee","target":1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":86,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":4,"y":10,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":4,"y":9,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":4,"actor":1,"act":"buff","target":-1,"abil":2,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":86,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":4,"y":10,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":4,"y":9,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":5,"actor":0,"act":"attack-ranged","target":1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":48,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":4,"y":10,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":4,"y":9,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":5,"actor":2,"act":"attack-melee","target":1,"abil":1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":41,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":4,"y":10,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":4,"y":9,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":5,"actor":3,"act":"attack-melee","target":1,"abil":1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":34,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":4,"y":10,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":4,"y":9,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":5,"actor":1,"act":"buff","target":-1,"abil":2,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":34,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":4,"y":10,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":4,"y":9,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":6,"actor":0,"act":"attack-ranged","target":1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":2,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":4,"y":10,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":4,"y":9,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]},
+{"round":6,"actor":2,"act":"attack-melee","target":1,"abil":-1,"chase":0,"prey":-1,"ev":[],"f":[{"x":13,"y":17,"hp":68,"maxHp":117,"ac":14,"team":0,"kind":0,"temp":0,"exh":0,"dash":0,"dashLim":1,"spd":60,"fled":0,"cond":[]},{"x":3,"y":9,"hp":-5,"maxHp":100,"ac":14,"team":1,"kind":1,"temp":0,"exh":0,"dash":0,"dashLim":0,"spd":30,"fled":0,"cond":[]},{"x":4,"y":10,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]},{"x":4,"y":9,"hp":232,"maxHp":232,"ac":21,"team":0,"kind":2,"temp":0,"exh":0,"dash":0,"dashLim":3,"spd":30,"fled":0,"cond":[]}]}
+]};
+
+
+// ============================== общие данные ==============================
+const R = REPLAY, BOSS = R.bosses, MAP = R.map, FR = R.frames;
+const STAT_N = ['СИЛ','ЛОВ','ТЕЛ','ИНТ','МДР','ХАР'];
+const DT_COL = ['#9be15d','#cdbba0','#8fd8ff','#ff8a3d','#c58bff','#fff06a','#9a74d6','#e4e4e4','#7bd88f','#ff7bd5','#fff2a8','#f0f0f0','#9fb4ff'];
+const CAT = {
+  stat:{ic:'💪',c:'#8e7cc3',n:'Характеристики'}, ac:{ic:'🛡️',c:'#5b9bd5',n:'КД'}, weapon:{ic:'⚔️',c:'#d9822b',n:'Оружие'},
+  ability:{ic:'✨',c:'#d95fa8',n:'Способности'}, passive:{ic:'🧿',c:'#3fb0a0',n:'Пассивы'}, aura:{ic:'🔥',c:'#e5b83a',n:'Аура'},
+  minions:{ic:'👥',c:'#8aa04a',n:'Приспешники'}, hp:{ic:'❤️',c:'#d23b3b',n:'Здоровье'}
+};
+const SIDE = ['A','B'];
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function brainOf(i){
+  const b = BOSS[i];
+  if (b.int >= 12) return R.ctrl[i] ? 'нейросеть (GRU), ИНТ ' + b.int : 'умный бот, ИНТ ' + b.int;
+  if (b.int <= 3) return 'инстинкты, ИНТ ' + b.int;
+  if (b.int <= 7) return 'простая тактика, ИНТ ' + b.int;
+  return 'бот-тактик, ИНТ ' + b.int;
+}
+$('meta').textContent = 'бюджет ' + R.budget + ' очков · зерно ' + R.seed + ' · арена ' + MAP.aw + '×' + MAP.ah + ' клеток (' + MAP.aw*5 + '×' + MAP.ah*5 + ' фт) · ' + (MAP.theme ? 'город' : 'дикая местность');
+document.title = 'Арена Боссов: ' + BOSS[0].title + ' против ' + BOSS[1].title;
+
+// ============================== вкладки ==============================
+function showScene(n){
+  $('scene1').classList.toggle('on', n===1); $('scene2').classList.toggle('on', n===2);
+  $('tab1').setAttribute('aria-selected', n===1); $('tab2').setAttribute('aria-selected', n===2);
+  if (n===2){ fitStage(); drawTimeline(); }
+  else pause();
+}
+$('tab1').onclick = () => showScene(1); $('tab2').onclick = () => showScene(2);
+$('toFight').onclick = () => { showScene(2); setTimeout(() => play(), 350); };
+
+// ============================== сцена 1: сборка ==============================
+const cols = $('cols');
+const colEls = [0,1].map(i => {
+  const b = BOSS[i];
+  const el = document.createElement('div'); el.className = 'col ' + SIDE[i];
+  el.innerHTML = `
+    <div class="head"><h2><span class="chip ${SIDE[i]}">${SIDE[i]}</span>${esc(b.title)}</h2>
+      <div class="sub">Сборщик: ${esc(R.builders[i])} · боец: ${esc(brainOf(i))}</div></div>
+    <div class="meter"><div class="nums"><span><span class="big tnum" data-spent>0</span> <span class="tnum">из ${b.budget} очков</span></span><span data-left class="tnum"></span></div>
+      <div class="stack" data-stack></div></div>
+    <div class="legend" data-legend></div>
+    <div class="items" data-items></div>
+    <div class="sheet" data-sheet></div>`;
+  cols.appendChild(el);
+  return el;
+});
+const build = {pos:[0,0], spent:[0,0], seg:[{},{}], timer:null, speed:1, done:false};
+function legendFor(i){
+  const used = {}; BOSS[i].items.forEach(it => used[it.cat] = 1);
+  colEls[i].querySelector('[data-legend]').innerHTML = Object.keys(CAT).filter(k => used[k]).map(k => `<span style="--c:${CAT[k].c}">${CAT[k].n}</span>`).join('');
+}
+function addItem(i, k){
+  const it = BOSS[i].items[k], cat = CAT[it.cat] || CAT.passive, host = colEls[i].querySelector('[data-items]');
+  const d = document.createElement('div'); d.className = 'item' + (it.cost < 0 ? ' neg' : '');
+  d.style.setProperty('--c', cat.c);
+  d.innerHTML = `<div class="ic">${cat.ic}</div><div><div class="lb">${esc(it.label)}</div>${it.detail ? `<div class="dt">${esc(it.detail)}</div>` : ''}</div><div class="co tnum">${it.cost > 0 ? '−' : '+'}${Math.abs(it.cost)} <small>оч.</small></div>`;
+  host.appendChild(d); host.scrollTop = host.scrollHeight;
+  build.spent[i] += it.cost; build.seg[i][it.cat] = (build.seg[i][it.cat] || 0) + it.cost;
+  paintMeter(i);
+}
+function paintMeter(i){
+  const b = BOSS[i], el = colEls[i];
+  el.querySelector('[data-spent]').textContent = build.spent[i];
+  const left = b.budget - build.spent[i];
+  el.querySelector('[data-left]').textContent = left > 0 ? 'осталось ' + left : (left === 0 && build.spent[i] > 0 ? 'бюджет исчерпан до единицы' : '');
+  el.querySelector('[data-stack]').innerHTML = Object.keys(CAT).filter(k => build.seg[i][k] > 0).map(k => `<i title="${CAT[k].n}" style="width:${100*build.seg[i][k]/b.budget}%;background:${CAT[k].c}"></i>`).join('');
+}
+function radar(i){
+  const b = BOSS[i], S = 150, c = S/2, r = 52, col = i ? 'var(--b)' : 'var(--a)';
+  const pts = b.stats.map((v,k) => { const a = -Math.PI/2 + k*Math.PI/3, f = Math.min(1, v/30); return [c + Math.cos(a)*r*f, c + Math.sin(a)*r*f]; });
+  const ring = f => b.stats.map((_,k) => { const a = -Math.PI/2 + k*Math.PI/3; return (c + Math.cos(a)*r*f).toFixed(1) + ',' + (c + Math.sin(a)*r*f).toFixed(1); }).join(' ');
+  const labels = b.stats.map((v,k) => { const a = -Math.PI/2 + k*Math.PI/3; return `<text x="${(c + Math.cos(a)*(r+18)).toFixed(1)}" y="${(c + Math.sin(a)*(r+16) + 4).toFixed(1)}" text-anchor="middle" font-size="11" fill="currentColor" opacity=".85">${STAT_N[k]} <tspan font-weight="700">${v}</tspan></text>`; }).join('');
+  return `<svg width="${S+30}" height="${S}" viewBox="-15 0 ${S+30} ${S}" role="img" aria-label="Характеристики">
+    <polygon points="${ring(1)}" fill="none" stroke="currentColor" opacity=".2"/><polygon points="${ring(.66)}" fill="none" stroke="currentColor" opacity=".13"/><polygon points="${ring(.33)}" fill="none" stroke="currentColor" opacity=".1"/>
+    <polygon points="${pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')}" fill="${col}" fill-opacity=".28" stroke="${col}" stroke-width="2"/>${labels}</svg>`;
+}
+function showSheet(i){
+  const b = BOSS[i], sh = colEls[i].querySelector('[data-sheet]');
+  sh.innerHTML = radar(i) + `<dl class="facts"><dt>Здоровье</dt><dd>${b.hp} ХП</dd><dt>КД</dt><dd>${b.ac}</dd><dt>Скорость</dt><dd>${b.speed} фт${b.fly ? ', полёт' : ''}</dd>
+    <dt>Главная</dt><dd>${b.main}</dd><dt>Ум</dt><dd>${esc(brainOf(i))}</dd><dt>Способностей</dt><dd>${b.abil.length}</dd>${b.minion ? `<dt>Приспешники</dt><dd>до ${b.summonCap} одновременно</dd>` : ''}</dl>`;
+  sh.classList.add('on');
+}
+function finishBuild(){
+  clearInterval(build.timer); build.done = true;
+  for (let i = 0; i < 2; i++){ for (; build.pos[i] < BOSS[i].items.length; build.pos[i]++) addItem(i, build.pos[i]); showSheet(i); }
+  $('toFight').style.display = ''; $('bPlay').textContent = '↻ Собрать заново';
+}
+function resetBuild(){
+  clearInterval(build.timer);
+  build.pos = [0,0]; build.spent = [0,0]; build.seg = [{},{}]; build.done = false;
+  for (let i = 0; i < 2; i++){ colEls[i].querySelector('[data-items]').innerHTML = ''; colEls[i].querySelector('[data-sheet]').classList.remove('on'); paintMeter(i); legendFor(i); }
+  $('toFight').style.display = 'none';
+}
+function buildTick(){
+  let any = false;
+  for (let i = 0; i < 2; i++) if (build.pos[i] < BOSS[i].items.length){ addItem(i, build.pos[i]++); any = true; }
+  if (!any) finishBuild();
+}
+function startBuild(){
+  resetBuild(); $('bPlay').textContent = '⏳ Идёт сборка…';
+  build.timer = setInterval(buildTick, 520 / build.speed); buildTick();
+}
+$('bPlay').onclick = startBuild;
+$('bSkip').onclick = () => { resetBuild(); finishBuild(); };
+$('bSpeed').onclick = e => {
+  const s = e.target.dataset.s; if (!s) return; build.speed = +s;
+  [...$('bSpeed').children].forEach(b => b.setAttribute('aria-pressed', b.dataset.s === s));
+  if (build.timer && !build.done && build.pos.some(p => p > 0)){ clearInterval(build.timer); build.timer = setInterval(buildTick, 520 / build.speed); }
+};
+resetBuild();
+
+// ============================== сцена 2: бой ==============================
+const cv = $('cv'), ctx = cv.getContext('2d'), stage = $('stage');
+const tlc = $('tlc'), tctx = tlc.getContext('2d');
+let dpr = Math.max(1, devicePixelRatio || 1), terrain = null;
+const AW = MAP.aw, AH = MAP.ah;
+
+addEventListener('resize', () => { if ($('scene2').classList.contains('on')){ fitStage(); drawTimeline(); } });
+
+// ---- кадры ----
+const NF = FR.length;
+const viewActive = () => $('scene2').classList.contains('on');
+const logHost = $('log');
+function buildLog(){
+  let html = '', lastRound = -1;
+  FR.forEach((fr, i) => {
+    const L = frameLog(i); logRows[i] = L;
+    if (L.round !== lastRound && i > 0){ html += `<div class="rnd">Раунд ${L.round}</div>`; lastRound = L.round; }
+    html += `<div class="ln ${L.cls}" data-i="${i}">${L.lines.join('<br>')}${L.evs.join('')}</div>`;
+  });
+  logHost.innerHTML = html; $('logCount').textContent = (NF - 1) + ' кадров';
+}
+logHost.onclick = e => { const l = e.target.closest('.ln'); if (l){ pause(); seek(+l.dataset.i); } };
+
+function drawCards(i){
+  const fr = FR[i];
+  [0,1].forEach(k => {
+    const f = fr.f[k], b = BOSS[k], el = $(k ? 'cardB' : 'cardA');
+    const pct = Math.max(0, 100 * f.hp / f.maxHp), tmpPct = Math.min(100 - pct, 100 * f.temp / f.maxHp);
+    const mins = fr.f.filter((m,idx) => idx >= 2 && m.kind - 2 === k && m.hp > 0).length;
+    const pips = [1,2,3,4,5].map(n => `<i class="${f.exh >= n ? 'on' : ''}"></i>`).join('');
+    const conds = f.cond.map(c => `<span class="pill bad" title="${esc(COND_HELP[c] || '')}">${esc(c)}</span>`).join('') + (f.exh ? `<span class="pill bad">истощение ${f.exh}: ${EXH_TXT[f.exh]}</span>` : '') + (f.fled ? '<span class="pill bad">сбежал</span>' : '');
+    el.innerHTML = `<h4><span class="chip ${SIDE[k]}">${SIDE[k]}</span>${esc(b.title)}${f.hp <= 0 ? ' ☠' : ''}</h4>
+      <div class="small">${esc(R.builders[k])} · ${esc(brainOf(k))}</div>
+      <div class="hpbar"><i class="ghost" style="width:${pct}%"></i><i class="f" style="width:${pct}%"></i>${f.temp ? `<i class="tmp" style="left:${pct}%;width:${tmpPct}%"></i>` : ''}</div>
+      <div class="row2"><span><b class="tnum">${Math.max(0, f.hp)}</b> / ${f.maxHp} ХП${f.temp ? ` · +${f.temp} врем.` : ''}</span><span>КД <b>${f.ac}</b> · скорость <b>${f.spd}</b></span></div>
+      <div class="row2"><span>Рывки в погоне: <b class="tnum">${f.dash}</b> (безопасно ${f.dashLim})</span><span>Истощение <span class="pips">${pips}</span></span></div>
+      <div class="stat6">${b.stats.map((v,j) => `<div>${STAT_N[j]}<b>${v}</b></div>`).join('')}</div>
+      ${b.minion ? `<div class="row2"><span>Приспешников на поле</span><b>${mins}</b></div>` : ''}
+      <div class="pills">${conds || '<span class="small">без состояний</span>'}</div>
+      ${b.abil.length || b.wRange ? `<details class="abil"><summary>Оружие и способности (${b.abil.length})</summary>${weaponLine(b)}${b.abil.map(a => `<div class="ab"><b>${esc(a.title)}</b><span>${esc(a.desc)}</span></div>`).join('')}</details>` : ''}`;
+  });
+}
+
+function weaponLine(b){
+  const m = b.text.match(/  Оружие[^\n]*/);
+  return m ? `<div class="ab"><b>Оружие</b><span>${esc(m[0].trim())}</span></div>` : '';
+}
+// ---- график здоровья ----
+function drawTimeline(){
+  const w = tlc.clientWidth || 600, h = 84; tlc.width = Math.round(w*dpr); tlc.height = Math.round(h*dpr);
+  const t = tctx; t.setTransform(dpr,0,0,dpr,0,0); t.clearRect(0,0,w,h);
+  const cs = getComputedStyle(document.documentElement), col = [cs.getPropertyValue('--a').trim(), cs.getPropertyValue('--b').trim()];
+  const X = i => 6 + (w - 12) * (NF > 1 ? i / (NF - 1) : 0), Y = v => 8 + (h - 16) * (1 - v);
+  t.strokeStyle = 'rgba(128,128,140,.25)'; t.lineWidth = 1; t.beginPath(); for (const v of [0,.5,1]){ t.moveTo(6, Y(v)); t.lineTo(w-6, Y(v)); } t.stroke();
+  t.fillStyle = 'rgba(242,193,78,.18)'; let st = -1;
+  FR.forEach((fr,i) => { if (fr.chase && st < 0) st = i; if ((!fr.chase || i === NF-1) && st >= 0){ t.fillRect(X(st), 4, Math.max(2, X(i) - X(st)), h - 8); st = -1; } });
+  [0,1].forEach(k => {
+    t.strokeStyle = col[k]; t.lineWidth = 2.2; t.lineJoin = 'round'; t.beginPath();
+    FR.forEach((fr,i) => { const f = fr.f[k], v = Math.max(0, f.hp) / f.maxHp; i ? t.lineTo(X(i), Y(v)) : t.moveTo(X(i), Y(v)); }); t.stroke();
+  });
+  FR.forEach((fr,i) => (fr.ev || []).forEach(e => {
+    const c = e.k === 'chase' ? '#f2c14e' : (e.k === 'exh' ? '#ff6b6b' : (e.k === 'fled' ? '#ffffff' : null)); if (!c) return;
+    t.fillStyle = c; t.beginPath(); t.moveTo(X(i), 2); t.lineTo(X(i)+4, 8); t.lineTo(X(i), 14); t.lineTo(X(i)-4, 8); t.closePath(); t.fill();
+  }));
+  const cx = X(curIdx); t.strokeStyle = cs.getPropertyValue('--text').trim(); t.lineWidth = 1.5; t.beginPath(); t.moveTo(cx, 0); t.lineTo(cx, h); t.stroke();
+}
+function seekFromEvent(e){ const r = tlc.getBoundingClientRect(), x = (e.clientX - r.left) / r.width; pause(); seek(Math.round(Math.max(0, Math.min(1, x)) * (NF - 1))); }
+let dragging = false;
+$('tl').onpointerdown = e => { dragging = true; $('tl').setPointerCapture(e.pointerId); seekFromEvent(e); };
+$('tl').onpointermove = e => { if (dragging) seekFromEvent(e); };
+$('tl').onpointerup = () => dragging = false;
+
+// ---- воспроизведение ----
+let curIdx = 0, prevIdx = 0, stepT0 = -1e9, playing = false, speed = 1, fxs = [], holdUntil = 0, resultTimer = null;
+const ANIM_MS = 620, HOLD_MS = 380;
+const ease = t => 1 - Math.pow(1 - t, 3);
+function seek(i){ i = Math.max(0, Math.min(NF - 1, i)); prevIdx = curIdx = i; stepT0 = -1e9; fxs = []; cam.snap = true; enter(i, false); }
+function step(delta){
+  const n = curIdx + delta; if (n < 0 || n >= NF) return;
+  if (delta > 0){ prevIdx = curIdx; curIdx = n; stepT0 = performance.now(); enter(n, true); }
+  else seek(n);
+}
+function play(){ if (curIdx >= NF - 1) seek(0); playing = true; $('tPlay').textContent = '⏸ Пауза'; holdUntil = performance.now() + 250; }
+function pause(){ playing = false; $('tPlay').textContent = '▶ Играть'; }
+$('tPlay').onclick = () => playing ? pause() : play();
+$('tFirst').onclick = () => { pause(); seek(0); }; $('tLast').onclick = () => { pause(); seek(NF - 1); };
+$('tPrev').onclick = () => { pause(); step(-1); }; $('tNext').onclick = () => { pause(); step(1); };
+$('tSpeed').onclick = e => { const s = e.target.dataset.s; if (!s) return; speed = +s; [...$('tSpeed').children].forEach(b => b.setAttribute('aria-pressed', b.dataset.s === s)); };
+$('result').onclick = () => $('result').classList.remove('on');
+addEventListener('keydown', e => {
+  if (!$('scene2').classList.contains('on')) return;
+  if (e.key === ' ') { e.preventDefault(); playing ? pause() : play(); }
+  else if (e.key === 'ArrowRight'){ pause(); step(1); } else if (e.key === 'ArrowLeft'){ pause(); step(-1); }
+  else if (e.key === 'Home'){ pause(); seek(0); } else if (e.key === 'End'){ pause(); seek(NF - 1); }
+});
+
+function enter(i, animate){
+  drawCards(i); drawTimeline();
+  document.querySelectorAll('.ln.cur').forEach(n => n.classList.remove('cur'));
+  const row = logHost.querySelector(`.ln[data-i="${i}"]`);
+  if (row){ row.classList.add('cur'); const top = row.offsetTop, vis = logHost.scrollTop; if (top < vis + 20 || top > vis + logHost.clientHeight - 80) logHost.scrollTo({top: Math.max(0, top - 90), behavior: animate ? 'smooth' : 'auto'}); }
+  const fr = FR[i], d = distFt(fr.f[0], fr.f[1]);
+  $('banner').classList.toggle('on', !!fr.chase);
+  if (fr.chase) $('banner').textContent = `🏃 ПОГОНЯ · ${BOSS[fr.prey].title} убегает · ${d} фт`;
+  $('stateLbl').innerHTML = `<span>Раунд <b>${fr.round}</b></span><span>Кадр <b>${i}</b> / ${NF - 1}</span><span>Дистанция <b>${d} фт</b></span>` + (fr.chase ? '<span><b style="color:var(--gold)">идёт погоня</b></span>' : '');
+  clearTimeout(resultTimer); $('result').classList.remove('on');
+  if (i === NF - 1) showResult(animate);
+  if (animate && i > 0) spawnFx(i);
+}
+function showResult(animate){
+  const w = R.result, reasons = ['Оба живы после предохранителя (500 раундов)', 'Противник повержен', 'Противник вышел за край арены: побег — это поражение', 'Противник оторвался от погони: побег — это поражение', 'Преследователь выбился из сил, беглец ушёл и проиграл'];
+  const box = $('result').querySelector('.box');
+  box.innerHTML = w === 2 ? `<h3>Ничья</h3><p>${reasons[0]}</p><p class="small">${R.rounds} раундов</p>`
+    : `<h3 style="color:${w ? '#ff8d78' : '#7dbbff'}">Победа: ${esc(BOSS[w].title)}</h3><p>${reasons[R.reason]}</p><p class="small">${R.rounds} раундов · сборщик: ${esc(R.builders[w])}</p><p class="small">щёлкните, чтобы убрать</p>`;
+  const on = () => $('result').classList.add('on');
+  if (animate) resultTimer = setTimeout(on, ANIM_MS / speed + 600); else on();
+}
+
+/*RENDER_BEGIN*/
+// ---- кадры, события, журнал ----
+const distFt = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) * 5;
+const nameOf = (idx, f) => {
+  const fi = f[idx]; if (!fi) return '?';
+  if (fi.kind < 2) return `<span class="who ${SIDE[fi.kind]}">${esc(BOSS[fi.kind].title)}</span>`;
+  return `<span class="who ${SIDE[fi.kind-2]}">приспешник ${SIDE[fi.kind-2]}</span>`;
+};
+function specOf(idx, fr){
+  const f = fr.f[idx]; if (!f || fr.abil < 0) return null;
+  const b = f.kind < 2 ? BOSS[f.kind] : (BOSS[f.kind-2].minion || null);
+  return b && b.abil[fr.abil] ? b.abil[fr.abil] : null;
+}
+const COND_HELP = {'опутан':'не может двигаться','сбит с ног':'лежит','испуган':'боится','оглушён':'не действует','парализован':'не действует','ослеплён':'не видит','отравлен':'помеха','замедлен':'скорость вдвое','схвачен':'скорость 0'};
+const EXH_TXT = ['', 'помеха на проверки', 'скорость вдвое', 'помеха на атаки и спасброски', 'максимум ХП вдвое', 'скорость 0'];
+const FLED_TXT = ['', 'вышел за край арены', 'оторвался от преследователя', 'преследователь выбился из сил'];
+const logRows = [];
+function frameLog(i){
+  const fr = FR[i], pv = i > 0 ? FR[i-1] : null;
+  if (!pv) return {round:0, cls:'', lines:[`Расстановка. Дистанция между боссами ${distFt(fr.f[0], fr.f[1])} фт.`], evs:[]};
+  const lines = [], evs = [], A = fr.actor, f = fr.f, p = pv.f;
+  if (A >= 0 && f[A]){
+    const me = nameOf(A, f), t = fr.target >= 0 ? nameOf(fr.target, f) : '';
+    const moved = p[A] ? Math.max(Math.abs(f[A].x - p[A].x), Math.abs(f[A].y - p[A].y)) * 5 : 0;
+    const sp = specOf(A, fr);
+    let what = '';
+    switch (fr.act){
+      case 'attack-melee': what = `бьёт ${t} вблизи`; break;
+      case 'attack-ranged': what = `стреляет в ${t}`; break;
+      case 'ability-melee': case 'ability-ranged': case 'ability-area': what = `применяет «${esc(sp ? sp.title : 'способность')}»${t ? ' на ' + t : ''}`; break;
+      case 'heal': what = 'лечит себя'; break; case 'hide': what = 'прячется'; break; case 'buff': what = 'заправляет оружие'; break;
+      case 'statbuff': what = 'усиливает себя'; break; case 'temp': what = 'получает временные хиты'; break; case 'acbuff': what = 'ставит щит'; break;
+      case 'darkness': what = 'накрывает себя тьмой'; break; case 'invisible': what = 'становится невидимым'; break;
+      case 'flee': what = 'в ужасе бежит прочь'; break; case 'dodge': what = 'уклоняется (держит оборону)'; break;
+      case 'disengage': what = 'отходит без провокации'; break; case 'teleport': what = 'телепортируется'; break;
+      case 'summon': what = 'призывает приспешников'; break; case 'stunned': what = 'не может действовать'; break;
+      case 'ability-ground': what = `применяет «${esc(sp ? sp.title : 'способность')}» по клетке ${fr.cell ? fr.cell[0] + ',' + fr.cell[1] : ''}`; break;
+      case 'dash': what = 'делает Рывок'; break; case 'move': what = ''; break;
+      case 'legendary-move': what = 'легендарное движение'; break; case 'idle': what = 'выжидает'; break;
+    }
+    if (fr.legendary) what = '<i>легендарное действие:</i> ' + what;
+    let txt = `${me}`;
+    if (moved > 0 && fr.act !== 'teleport') txt += ` идёт ${moved} фт` + (what ? ' и' : '');
+    if (what) txt += ' ' + what; else if (moved === 0) txt += ' ничего не делает';
+    lines.push(txt);
+  }
+  for (let k = 0; k < f.length; k++){
+    const a = f[k], b = p[k];
+    if (!b){ evs.push(`<span class="ev good">${nameOf(k, f)} появляется</span>`); continue; }
+    const dh = a.hp + a.temp - (b.hp + b.temp);
+    if (b.hp > 0 && a.hp <= 0) evs.push(`<span class="ev bad"><span class="dmg">−${Math.max(0, b.hp + b.temp - a.temp)}</span> ☠ ${nameOf(k, f)} повержен</span>`);
+    else if (dh < 0) evs.push(`<span class="ev"><span class="dmg">−${-dh}</span> ${nameOf(k, f)} <span class="small">(${Math.max(0,a.hp)}/${a.maxHp})</span></span>`);
+    else if (dh > 0) evs.push(`<span class="ev"><span class="heal">+${dh}</span> ${nameOf(k, f)} <span class="small">(${a.hp}/${a.maxHp})</span></span>`);
+    const nc = a.cond.filter(c => !b.cond.includes(c));
+    if (nc.length && a.hp > 0) evs.push(`<span class="ev mut">${nameOf(k, f)} теперь: ${nc.map(esc).join(', ')}</span>`);
+  }
+  if (fr.net){   // что «задумала» нейросеть-боец в этот ход
+    const ST = ['обычная стойка','держит позицию','сближается вплотную','кайтинг (держит дистанцию)','отступает','отход (действие)','уклонение','сначала лечение и баффы','без самобаффов'], TG = ['цель на усмотрение бота','бьёт босса','бьёт приспешника','бьёт слабейшего'];
+    const me = f[A >= 0 ? A : 0], b = me && me.kind < 2 ? BOSS[me.kind] : null, ab = b && fr.net.pf >= 1 ? b.abil[fr.net.pf - 1] : null;
+    evs.push(`<span class="ev mut">🧠 нейросеть: ${ST[fr.net.st] || '?'}; ${TG[fr.net.tg] || '?'}; приоритет — ${fr.net.pf < 0 ? 'без предпочтений' : (fr.net.pf === 0 ? 'оружие' : '«' + esc(ab ? ab.title : 'способность') + '»')}</span>`);
+  }
+  for (const e of fr.ev || []){
+    if (e.k === 'chase') evs.push(`<span class="ev chase">🏃 ПОГОНЯ: ${nameOf(e.prey, f)} убегает, ${nameOf(1 - e.prey, f)} преследует (провоцированных атак нет)</span>`);
+    else if (e.k === 'chaseEnd') evs.push(`<span class="ev chase">🏁 Погоня окончена: ${e.why === 'caught' ? 'преследователь догнал' : 'беглец развернулся навстречу'}</span>`);
+    else if (e.k === 'exh') evs.push(`<span class="ev bad">💨 ${nameOf(e.who, f)}: истощение ${e.lv} — ${EXH_TXT[e.lv]}</span>`);
+    else if (e.k === 'comp') evs.push(`<span class="ev chase">🎲 Осложнение (d20=${e.roll}) «${esc(e.t)}»: ${nameOf(e.who, f)} — ${esc(e.fx)}</span>`);
+    else if (e.k === 'fled') evs.push(`<span class="ev bad">🚪 ${nameOf(e.who, f)} сбежал (${FLED_TXT[e.why]}) — и проигрывает</span>`);
+  }
+  if (!lines.length && evs.length) lines.push('<span class="small">конец раунда</span>');
+  return {round: fr.round, cls: A >= 0 && f[A] ? SIDE[f[A].kind % 2] : '', lines, evs};
+}
+function hash(x,y){ let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ 0x5bd1e995; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function ch(layer, x, y){ return !!(layer && layer[y] && layer[y][x] === '1'); }
+function isGap(x,y){   // клетка моста: не ущелье/вода/стена, но по обе стороны полоса
+  if (ch(MAP.pit,x,y) || ch(MAP.water,x,y) || ch(MAP.wall,x,y)) return false;
+  for (const L of [MAP.pit, MAP.water]){
+    const near = (dx,dy) => { for (let k=1;k<=3;k++) if (ch(L,x+dx*k,y+dy*k)) return true; return false; };
+    if ((near(-1,0) && near(1,0)) || (near(0,-1) && near(0,1))) return true;
+  }
+  return false;
+}
+function buildTerrain(){
+  const TC = Math.max(14, Math.min(48, Math.floor(2600 / Math.max(AW, AH))));   // пикселей на клетку в текстуре рельефа
+  const W = AW*TC, H = AH*TC;
+  terrain = document.createElement('canvas'); terrain.width = Math.ceil(W); terrain.height = Math.ceil(H);
+  const t = terrain.getContext('2d');
+  const city = !!MAP.theme, g1 = city ? [74,78,90] : [58,92,60], lift = [0, 16, 30];
+  const hAt = (x,y) => (MAP.height && MAP.height[y] && +MAP.height[y][x]) || 0;
+  for (let y=0;y<AH;y++) for (let x=0;x<AW;x++){
+    const px = x*TC, py = y*TC, h = hAt(x,y), n = (hash(x,y)-.5)*10;
+    const c = g1.map(v => Math.max(0, Math.min(255, v + lift[h] + n)));
+    t.fillStyle = `rgb(${c[0]|0},${c[1]|0},${c[2]|0})`; t.fillRect(px, py, TC+.5, TC+.5);
+    if (city && TC >= 8 && (x+y)%2===0){ t.fillStyle = 'rgba(255,255,255,.035)'; t.fillRect(px,py,TC,TC); }
+    if (!city && TC >= 10 && hash(x*7+1,y*13+1) > .82){ t.fillStyle = 'rgba(20,50,20,.35)'; t.fillRect(px+TC*.3, py+TC*.3, Math.max(1,TC*.12), Math.max(1,TC*.28)); }
+  }
+  for (let y=0;y<AH;y++) for (let x=0;x<AW;x++){   // уступы плато
+    const h = hAt(x,y); if (!h) continue;
+    if (hAt(x,y+1) < h){ t.fillStyle = 'rgba(20,14,8,.55)'; t.fillRect(x*TC, (y+1)*TC - Math.max(2,TC*.28), TC, Math.max(2,TC*.28)); }
+    if (hAt(x+1,y) < h){ t.fillStyle = 'rgba(20,14,8,.3)'; t.fillRect((x+1)*TC - Math.max(1,TC*.12), y*TC, Math.max(1,TC*.12), TC); }
+    if (hAt(x,y-1) < h){ t.fillStyle = 'rgba(255,255,255,.12)'; t.fillRect(x*TC, y*TC, TC, Math.max(1,TC*.1)); }
+  }
+  for (let y=0;y<AH;y++) for (let x=0;x<AW;x++){   // труднопроходимая местность (не вода): грязь
+    if (!ch(MAP.diff,x,y) || ch(MAP.water,x,y)) continue;
+    t.fillStyle = 'rgba(86,62,30,.42)'; t.fillRect(x*TC, y*TC, TC, TC);
+    if (TC >= 8){ t.fillStyle = 'rgba(40,26,10,.4)'; for (let k=0;k<3;k++) t.fillRect(x*TC + hash(x+k,y)*TC*.8, y*TC + hash(x,y+k)*TC*.8, TC*.14, TC*.14); }
+  }
+  for (let y=0;y<AH;y++) for (let x=0;x<AW;x++){   // ущелье
+    if (!ch(MAP.pit,x,y)) continue;
+    t.fillStyle = '#07080c'; t.fillRect(x*TC, y*TC, TC+.5, TC+.5);
+    const grd = t.createLinearGradient(x*TC, y*TC, x*TC, (y+1)*TC); grd.addColorStop(0,'rgba(60,40,30,.5)'); grd.addColorStop(1,'rgba(0,0,0,0)');
+    t.fillStyle = grd; t.fillRect(x*TC, y*TC, TC, TC);
+    t.fillStyle = 'rgba(190,150,110,.55)';
+    if (!ch(MAP.pit,x,y-1)) t.fillRect(x*TC, y*TC, TC, Math.max(1,TC*.1));
+    if (!ch(MAP.pit,x-1,y)) t.fillRect(x*TC, y*TC, Math.max(1,TC*.08), TC);
+    if (!ch(MAP.pit,x+1,y)) t.fillRect((x+1)*TC - Math.max(1,TC*.08), y*TC, Math.max(1,TC*.08), TC);
+  }
+  for (let y=0;y<AH;y++) for (let x=0;x<AW;x++){   // мост
+    if (!isGap(x,y)) continue;
+    t.fillStyle = '#7a5a34'; t.fillRect(x*TC, y*TC, TC+.5, TC+.5);
+    if (TC >= 6){ t.fillStyle = 'rgba(40,24,8,.55)'; const horiz = ch(MAP.pit,x,y-1)||ch(MAP.pit,x,y+1)||ch(MAP.water,x,y-1)||ch(MAP.water,x,y+1);
+      for (let k=0;k<4;k++){ if (horiz) t.fillRect(x*TC + k*TC/4, y*TC, Math.max(1,TC*.04), TC); else t.fillRect(x*TC, y*TC + k*TC/4, TC, Math.max(1,TC*.04)); } }
+  }
+  for (let y=0;y<AH;y++) for (let x=0;x<AW;x++){   // стены
+    if (!ch(MAP.wall,x,y)) continue;
+    t.fillStyle = '#23262f'; t.fillRect(x*TC, y*TC, TC+.5, TC+.5);
+    t.fillStyle = '#3b404d'; t.fillRect(x*TC, y*TC, TC, Math.max(1.5,TC*.3));
+    t.fillStyle = 'rgba(0,0,0,.45)'; t.fillRect(x*TC, (y+1)*TC - Math.max(1,TC*.16), TC, Math.max(1,TC*.16));
+    if (TC >= 10){ t.strokeStyle = 'rgba(0,0,0,.35)'; t.lineWidth = 1; t.strokeRect(x*TC+.5, y*TC+.5, TC-1, TC-1); }
+  }
+  for (let y=0;y<AH;y++) for (let x=0;x<AW;x++){   // укрытия: бочки, валуны
+    if (!ch(MAP.climb,x,y)) continue;
+    const cx = (x+.5)*TC, cy = (y+.5)*TC, r = TC*.4;
+    t.fillStyle = 'rgba(0,0,0,.3)'; t.beginPath(); t.ellipse(cx+TC*.06, cy+TC*.14, r, r*.82, 0, 0, 7); t.fill();
+    t.fillStyle = city ? '#8a6a40' : '#7d7568'; t.beginPath(); t.ellipse(cx, cy, r, r*.88, 0, 0, 7); t.fill();
+    t.fillStyle = 'rgba(255,255,255,.2)'; t.beginPath(); t.ellipse(cx - r*.2, cy - r*.25, r*.5, r*.3, -.4, 0, 7); t.fill();
+    t.strokeStyle = 'rgba(0,0,0,.45)'; t.lineWidth = Math.max(1, TC*.06); t.beginPath(); t.ellipse(cx, cy, r, r*.88, 0, 0, 7); t.stroke();
+  }
+  if (TC >= 12){ t.strokeStyle = 'rgba(255,255,255,.05)'; t.lineWidth = 1; t.beginPath();
+    for (let x=0;x<=AW;x++){ t.moveTo(x*TC+.5, 0); t.lineTo(x*TC+.5, AH*TC); }
+    for (let y=0;y<=AH;y++){ t.moveTo(0, y*TC+.5); t.lineTo(AW*TC, y*TC+.5); } t.stroke(); }
+  for (let y=0;y<AH;y++) for (let x=0;x<AW;x++) if (ch(MAP.dark,x,y)){ t.fillStyle = 'rgba(6,8,28,.55)'; t.fillRect(x*TC, y*TC, TC+.5, TC+.5); }
+}
+function fitStage(){
+  const avail = stage.parentElement.clientWidth - 24;
+  const W = Math.max(300, Math.min(avail > 0 ? avail : 900, 1250));
+  const H = Math.max(360, Math.min(Math.round(innerHeight * .8), 880, Math.round(W * .9)));
+  cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr); cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  cam.snap = true;
+}
+// ---- камера: вся арена или слежение за боссами ----
+const cam = {x: 0, y: 0, cell: 10, mode: 'fit', snap: true};
+function camReset(){ cam.x = AW / 2; cam.y = AH / 2; cam.mode = Math.max(AW, AH) > 30 ? 'follow' : 'fit'; cam.snap = true; }
+const cvW = () => cv.width / dpr, cvH = () => cv.height / dpr;
+const fitCell = () => Math.max(2, Math.min((cvW() - 36) / AW, (cvH() - 36) / AH));
+function camTarget(){
+  if (cam.mode === 'fit') return {x: AW/2, y: AH/2, cell: fitCell()};
+  const fr = FR[curIdx], pv = FR[prevIdx], pts = [];
+  [0,1].forEach(k => { const f = fr.f[k]; if (f && !f.fled) { pts.push([f.x, f.y]); const p = pv.f[k]; if (p) pts.push([p.x, p.y]); } });
+  if (!pts.length) return {x: AW/2, y: AH/2, cell: fitCell()};
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
+  const spanX = Math.max(14, maxx - minx + 8), spanY = Math.max(14, maxy - miny + 8);
+  const c = Math.max(fitCell(), Math.min(cvW() / spanX, cvH() / spanY, 64));
+  return {x: (minx + maxx) / 2 + .5, y: (miny + maxy) / 2 + .5, cell: c};
+}
+function camUpdate(){
+  const t = camTarget();
+  if (cam.snap){ cam.x = t.x; cam.y = t.y; cam.cell = t.cell; cam.snap = false; return; }
+  const k = .14; cam.x += (t.x - cam.x) * k; cam.y += (t.y - cam.y) * k; cam.cell += (t.cell - cam.cell) * k;
+}
+const PX = x => cvW() / 2 + (x - cam.x) * cam.cell;      // клетка (с дробной частью) -> пиксель
+const PY = y => cvH() / 2 + (y - cam.y) * cam.cell;
+const cc = f => [PX(f.x + .5), PY(f.y + .5)];             // центр клетки бойца
+function setCamMode(m){ cam.mode = m; cam.snap = false; $('camBtn').textContent = m === 'fit' ? '🔍 Камера: вся арена' : '🎥 Камера: следить'; }
+$('camBtn').onclick = () => setCamMode(cam.mode === 'fit' ? 'follow' : 'fit');
+
+// ---- эффекты кадра ----
+const RB = () => Math.min(Math.max(cam.cell * .6, 18), 54);   // радиус токена босса в пикселях (крупный)
+const RM = () => Math.min(Math.max(cam.cell * .38, 11), 32);  // радиус приспешника
+function spawnFx(i){
+  const fr = FR[i], pv = FR[i-1], now = performance.now(), A = fr.actor, dur = ANIM_MS / speed;
+  fr.f.forEach((f, k) => {
+    const b = pv.f[k];
+    if (!b){ fxs.push({t0: now, dur: 700, kind:'spawn', k}); return; }
+    const dh = f.hp + f.temp - (b.hp + b.temp);
+    if (dh !== 0) fxs.push({t0: now + (A >= 0 && A !== k ? dur * .55 : dur * .3), dur: 1200, kind:'num', k, v: dh});
+    f.cond.filter(c => !b.cond.includes(c)).forEach((c, n) => fxs.push({t0: now + dur * .6 + n * 150, dur: 1400, kind:'cond', k, text: c}));
+    if (f.exh > b.exh) fxs.push({t0: now + dur * .5, dur: 1500, kind:'cond', k, text: 'истощение ' + f.exh});
+  });
+  if (A >= 0 && fr.target >= 0 && fr.f[A] && fr.f[fr.target] && fr.act !== 'summon'){
+    let col = '#ffd54d', area = 0;
+    const sp = specOf(A, fr);
+    if (sp){ col = DT_COL[sp.dtype] || col; area = sp.radius; }
+    else if (fr.f[A].kind < 2 && BOSS[fr.f[A].kind].wType !== undefined) col = DT_COL[BOSS[fr.f[A].kind].wType] || col;
+    fxs.push({t0: now + dur * .25, dur: 460, kind: fr.act === 'attack-melee' || fr.act === 'ability-melee' ? 'slash' : 'bolt', a: A, t: fr.target, col});
+    if (fr.act === 'ability-area') fxs.push({t0: now + dur * .55, dur: 800, kind:'ring', k: fr.target, r: Math.max(1, area / 5), col});
+  } else if (A >= 0 && fr.act === 'ability-ground' && fr.cell){
+    const sp = specOf(A, fr), col = sp ? (DT_COL[sp.dtype] || '#c58bff') : '#c58bff';
+    fxs.push({t0: now + dur * .2, dur: 500, kind:'cellbolt', a: A, cx: fr.cell[0], cy: fr.cell[1], col});
+    fxs.push({t0: now + dur * .5, dur: 900, kind:'cellring', cx: fr.cell[0], cy: fr.cell[1], r: Math.max(1, (sp ? sp.radius : 5) / 5), col});
+  } else if (A >= 0 && fr.act === 'teleport') fxs.push({t0: now, dur: 500, kind:'flash', k: A, from: pv.f[A]});
+  else if (A >= 0 && ['heal','buff','statbuff','temp','acbuff','hide','invisible','darkness'].includes(fr.act)) fxs.push({t0: now + 80, dur: 800, kind:'aura', k: A, col: fr.act === 'heal' ? '#5fd08a' : '#9ab8ff'});
+}
+
+// ---- рисование поля ----
+const lerp = (a, b, t) => a + (b - a) * t;
+function posAt(k, t){
+  const b = FR[curIdx].f[k], a = FR[prevIdx].f[k];
+  if (!b) return null;
+  const useA = a && !(FR[curIdx].act === 'teleport' && FR[curIdx].actor === k) ? a : b;
+  return {x: lerp(useA.x, b.x, t), y: lerp(useA.y, b.y, t)};
+}
+function drawToken(f, px, py, isActor){
+  const boss = f.kind < 2, r = boss ? RB() : RM();
+  const side = f.kind % 2, c1 = side ? '#ff9a85' : '#7cbcff', c2 = side ? '#a82c1a' : '#1a54a8';
+  if (f.hp <= 0 && !boss) return;
+  ctx.save();
+  if (f.hp <= 0) ctx.globalAlpha *= .55;
+  if (isActor && f.hp > 0){ ctx.beginPath(); ctx.arc(px, py, r + 9, 0, 7); ctx.fillStyle = 'rgba(255,214,90,.30)'; ctx.fill(); }
+  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(px + 2, py + r * .8, r * .95, r * .4, 0, 0, 7); ctx.fill();
+  const gr = ctx.createRadialGradient(px - r*.35, py - r*.35, r*.1, px, py, r);
+  gr.addColorStop(0, f.hp <= 0 ? '#999' : c1); gr.addColorStop(1, f.hp <= 0 ? '#444' : c2);
+  ctx.beginPath(); ctx.arc(px, py, r, 0, 7); ctx.fillStyle = gr; ctx.fill();
+  ctx.lineWidth = boss ? 3.5 : 2.2; ctx.strokeStyle = isActor ? '#ffd54d' : 'rgba(255,255,255,.92)'; if (!boss) ctx.setLineDash([5,3]); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `800 ${Math.round(r * (boss ? 1.1 : .95))}px system-ui`;
+  ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.35)'; const glyph = f.hp <= 0 ? '✖' : (boss ? SIDE[side] : '•'); ctx.strokeText(glyph, px, py + 1); ctx.fillText(glyph, px, py + 1);
+  if (f.fled && f.hp > 0){ ctx.font = '800 14px system-ui'; ctx.textBaseline = 'alphabetic'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.strokeText('сбежал', px, py - r - 26); ctx.fillText('сбежал', px, py - r - 26); }
+  if (f.hp > 0){
+    const bw = Math.max(boss ? 64 : 36, r * 2.4), bh = boss ? 9 : 6, bx = px - bw / 2, by = py - r - (boss ? 17 : 12);
+    ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+    const p = Math.max(0, f.hp / f.maxHp); ctx.fillStyle = p > .5 ? '#5fd08a' : (p > .25 ? '#f2c14e' : '#ff5d5d'); ctx.fillRect(bx, by, bw * p, bh);
+    if (f.temp){ ctx.fillStyle = '#c5cde2'; ctx.fillRect(bx + bw * p, by, Math.min(bw * (1 - p), bw * f.temp / f.maxHp), bh); }
+    if (boss){ ctx.fillStyle = '#fff'; ctx.font = '700 12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.85)'; const t = `${Math.max(0, f.hp)}/${f.maxHp}`; ctx.strokeText(t, px, by - 5); ctx.fillText(t, px, by - 5); }
+    if (boss && f.exh){ for (let n = 0; n < f.exh; n++){ ctx.fillStyle = '#ff5d5d'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(px - (f.exh - 1) * 6 + n * 12, by - 24, 4, 0, 7); ctx.fill(); ctx.stroke(); } }
+    if (f.cond.length && boss){ ctx.fillStyle = '#fff'; ctx.font = '700 13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.lineWidth = 4; const txt = f.cond.slice(0,2).join(' · '); ctx.strokeText(txt, px, py + r + 18); ctx.fillText(txt, px, py + r + 18); }
+  }
+  ctx.restore();
+}
+let __lastRender = 0;
+// цикл рисования: requestAnimationFrame, плюс страховка таймером (в фоновой вкладке анимация браузером останавливается, а ход игры не должен вставать)
+function startLoop(){
+  const loop = t => { render(performance.now()); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+  setInterval(() => { const now = performance.now(); if (now - __lastRender > 300) render(now); }, 120);
+}
+function render(now){
+  __lastRender = now;
+  if (!viewActive()) return;
+  const tt = stepT0 < -1e8 ? 1 : Math.min(1, (now - stepT0) / (ANIM_MS / speed)), t = ease(tt);
+  camUpdate();
+  const W = cvW(), H = cvH(), cell = cam.cell;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#12151c'; ctx.fillRect(0, 0, W, H);
+  if (!terrain) buildTerrain();
+  const x0 = PX(0), y0 = PY(0), aw = AW * cell, ah = AH * cell;
+  ctx.fillStyle = '#0a0c11'; ctx.fillRect(x0 - 10, y0 - 10, aw + 20, ah + 20);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(terrain, x0, y0, aw, ah);
+  ctx.strokeStyle = 'rgba(242,193,78,.75)'; ctx.lineWidth = 3; ctx.setLineDash([10,6]); ctx.strokeRect(x0 - 6, y0 - 6, aw + 12, ah + 12); ctx.setLineDash([]);
+  if (MAP.water){
+    const tm = now / 700, vx0 = Math.max(0, Math.floor((0 - x0) / cell)), vx1 = Math.min(AW, Math.ceil((W - x0) / cell)), vy0 = Math.max(0, Math.floor((0 - y0) / cell)), vy1 = Math.min(AH, Math.ceil((H - y0) / cell));
+    ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, aw, ah); ctx.clip();
+    for (let y = vy0; y < vy1; y++) for (let x = vx0; x < vx1; x++) if (ch(MAP.water,x,y)){
+      const px = x0 + x*cell, py = y0 + y*cell, wob = Math.sin(tm + x*.9 + y*.5);
+      ctx.fillStyle = `rgb(${38 + wob*6|0},${105 + wob*10|0},${160 + wob*10|0})`; ctx.fillRect(px, py, cell+.6, cell+.6);
+      if (cell >= 9){ ctx.strokeStyle = 'rgba(255,255,255,.3)'; ctx.lineWidth = Math.max(1, cell * .05); ctx.beginPath(); const yy = py + cell*(.35 + .25*Math.sin(tm*1.3 + x)); ctx.moveTo(px + cell*.15, yy); ctx.quadraticCurveTo(px + cell*.5, yy - cell*.12, px + cell*.85, yy); ctx.stroke(); }
+    }
+    ctx.restore();
+  }
+  const fr = FR[curIdx], A = fr.actor;
+  if (fr.dyn){   // изменения арены от способностей: временные стены, местность, тьма
+    for (const d of fr.dyn){
+      const px = PX(d[0]), py = PY(d[1]);
+      if (d[2] === 1){
+        ctx.fillStyle = '#4b3f73'; ctx.fillRect(px, py, cell + .6, cell + .6);
+        ctx.fillStyle = 'rgba(190,160,255,.45)'; ctx.fillRect(px, py, cell + .6, Math.max(2, cell * .3));
+        ctx.strokeStyle = 'rgba(210,190,255,.9)'; ctx.lineWidth = 2; ctx.strokeRect(px + 1, py + 1, cell - 2, cell - 2);
+      } else if (d[2] === 2){ ctx.fillStyle = 'rgba(86,62,30,.5)'; ctx.fillRect(px, py, cell + .6, cell + .6); }
+      else { ctx.fillStyle = 'rgba(6,8,28,.55)'; ctx.fillRect(px, py, cell + .6, cell + .6); }
+    }
+  }
+  if (fr.chase){
+    const a = posAt(0, t), b = posAt(1, t);
+    if (a && b){ ctx.save(); ctx.strokeStyle = 'rgba(242,193,78,.9)'; ctx.setLineDash([10,7]); ctx.lineDashOffset = -now / 35; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(PX(a.x + .5), PY(a.y + .5)); ctx.lineTo(PX(b.x + .5), PY(b.y + .5)); ctx.stroke(); ctx.restore(); }
+  }
+  if (A >= 0 && FR[prevIdx].f[A] && stepT0 > -1e8){
+    const p0 = FR[prevIdx].f[A], p1 = fr.f[A];
+    if (p0.x !== p1.x || p0.y !== p1.y){ ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.setLineDash([5,6]); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(PX(p0.x + .5), PY(p0.y + .5)); ctx.lineTo(PX(p1.x + .5), PY(p1.y + .5)); ctx.stroke(); ctx.restore(); }
+  }
+  [0,1].forEach(k => {
+    const f = fr.f[k]; if (f.hp <= 0 || !(BOSS[k].auraRad > 0)) return;
+    const p = posAt(k, t), r = BOSS[k].auraRad / 5 * cell;
+    ctx.beginPath(); ctx.arc(PX(p.x + .5), PY(p.y + .5), r, 0, 7); ctx.fillStyle = k ? 'rgba(255,100,70,.12)' : 'rgba(90,160,255,.12)'; ctx.fill();
+    ctx.strokeStyle = k ? 'rgba(255,120,90,.55)' : 'rgba(100,170,255,.55)'; ctx.lineWidth = 2; ctx.stroke();
+  });
+  const order = fr.f.map((f, k) => k).sort((a, b) => (fr.f[a].kind < 2) - (fr.f[b].kind < 2));
+  order.forEach(k => {
+    const f = fr.f[k], p = posAt(k, t); if (!p) return;
+    let px = PX(p.x + .5), py = PY(p.y + .5), alpha = 1;
+    if (f.fled === 1 && FR[prevIdx].f[k] && !FR[prevIdx].f[k].fled && stepT0 > -1e8){   // шагнул за край арены
+      const m = Math.min(f.x, AW - 1 - f.x, f.y, AH - 1 - f.y), dx = m === f.x ? -1 : (m === AW - 1 - f.x ? 1 : 0), dy = m === f.y ? -1 : (m === AH - 1 - f.y ? 1 : 0);
+      px += dx * cell * 2 * t; py += dy * cell * 2 * t; alpha = 1 - t * .7;
+    }
+    ctx.globalAlpha = alpha;
+    drawToken(f, px, py, k === A && stepT0 > -1e8 && tt < 1);
+    ctx.globalAlpha = 1;
+  });
+  fxs = fxs.filter(e => now < e.t0 + e.dur);
+  fxs.forEach(e => {
+    const u = (now - e.t0) / e.dur; if (u < 0) return;
+    const f = e.k !== undefined ? fr.f[e.k] : null, rb = f && f.kind >= 2 ? RM() : RB();
+    if (e.kind === 'num' && f){
+      const p = posAt(e.k, 1), x = PX(p.x + .5), y = PY(p.y + .5) - rb - 34 - u * 36;
+      ctx.save(); ctx.globalAlpha = 1 - Math.pow(u, 3); ctx.font = `900 ${Math.round(Math.min(40, Math.max(24, cell * 1.1)))}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.lineJoin = 'round';
+      const txt = (e.v < 0 ? '−' : '+') + Math.abs(e.v); ctx.strokeText(txt, x, y); ctx.fillStyle = e.v < 0 ? '#ff6b6b' : '#5fd08a'; ctx.fillText(txt, x, y); ctx.restore();
+    } else if (e.kind === 'cond' && f){
+      const p = posAt(e.k, 1), x = PX(p.x + .5), y = PY(p.y + .5) + rb + 36 + u * 26;
+      ctx.save(); ctx.globalAlpha = 1 - Math.pow(u, 2.5); ctx.font = '800 16px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.strokeText(e.text, x, y); ctx.fillStyle = '#ffd54d'; ctx.fillText(e.text, x, y); ctx.restore();
+    } else if (e.kind === 'slash'){
+      const a = fr.f[e.a], b = fr.f[e.t]; if (!a || !b) return;
+      const [ax, ay] = cc(a), [bx, by] = cc(b);
+      ctx.save(); ctx.globalAlpha = 1 - u; ctx.strokeStyle = e.col; ctx.lineWidth = 7 + (1 - u) * 5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(lerp(ax, bx, .4), lerp(ay, by, .4)); ctx.lineTo(lerp(ax, bx, .5 + u * .4), lerp(ay, by, .5 + u * .4)); ctx.stroke();
+      ctx.beginPath(); ctx.arc(bx, by, rb * (.6 + u * .9), 0, 7); ctx.stroke(); ctx.restore();
+    } else if (e.kind === 'bolt'){
+      const a = fr.f[e.a], b = fr.f[e.t]; if (!a || !b) return;
+      const [ax, ay] = cc(a), [bx, by] = cc(b), x = lerp(ax, bx, u), y = lerp(ay, by, u);
+      ctx.save(); ctx.strokeStyle = e.col; ctx.globalAlpha = .55; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(lerp(ax, bx, Math.max(0, u - .3)), lerp(ay, by, Math.max(0, u - .3))); ctx.lineTo(x, y); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = e.col; ctx.shadowColor = e.col; ctx.shadowBlur = 18; ctx.beginPath(); ctx.arc(x, y, Math.max(7, rb * .32), 0, 7); ctx.fill(); ctx.restore();
+    } else if (e.kind === 'ring' && f){
+      const [x, y] = cc(f); ctx.save(); ctx.globalAlpha = (1 - u) * .85; ctx.strokeStyle = e.col; ctx.fillStyle = e.col + '33'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(x, y, e.r * cell * (.3 + .7 * Math.min(1, u * 2.2)), 0, 7); ctx.fill(); ctx.stroke(); ctx.restore();
+    } else if (e.kind === 'cellbolt'){
+      const a = fr.f[e.a]; if (!a) return;
+      const [ax, ay] = cc(a), bx = PX(e.cx + .5), by = PY(e.cy + .5), x = lerp(ax, bx, u), y = lerp(ay, by, u);
+      ctx.save(); ctx.strokeStyle = e.col; ctx.globalAlpha = .55; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(lerp(ax, bx, Math.max(0, u - .3)), lerp(ay, by, Math.max(0, u - .3))); ctx.lineTo(x, y); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = e.col; ctx.shadowColor = e.col; ctx.shadowBlur = 18; ctx.beginPath(); ctx.arc(x, y, Math.max(7, RB() * .32), 0, 7); ctx.fill(); ctx.restore();
+    } else if (e.kind === 'cellring'){
+      const x = PX(e.cx + .5), y = PY(e.cy + .5); ctx.save(); ctx.globalAlpha = (1 - u) * .85; ctx.strokeStyle = e.col; ctx.fillStyle = e.col + '33'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(x, y, e.r * cell * (.3 + .7 * Math.min(1, u * 2.2)), 0, 7); ctx.fill(); ctx.stroke(); ctx.restore();
+    } else if (e.kind === 'flash'){
+      const x = PX(e.from.x + .5), y = PY(e.from.y + .5); ctx.save(); ctx.globalAlpha = 1 - u; ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y, rb * (.8 + u * 1.2), 0, 7); ctx.stroke(); ctx.restore();
+    } else if (e.kind === 'aura' && f){
+      const [x, y] = cc(f); ctx.save(); ctx.globalAlpha = (1 - u) * .75; ctx.strokeStyle = e.col; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y, rb * (1 + u * .9), 0, 7); ctx.stroke(); ctx.restore();
+    } else if (e.kind === 'spawn' && f){
+      const [x, y] = cc(f); ctx.save(); ctx.globalAlpha = 1 - u; ctx.strokeStyle = '#d6a8ff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y, rb * (2 - u), 0, 7); ctx.stroke(); ctx.restore();
+    }
+  });
+  if (typeof overlayDraw === 'function') overlayDraw(now);
+  if (playing && tt >= 1 && now >= holdUntil){
+    if (curIdx >= FR.length - 1) pause();
+    else { step(1); holdUntil = now + (ANIM_MS + HOLD_MS) / speed; }
+  }
+}
+/*RENDER_END*/
+
+// ============================== запуск ==============================
+buildLog();
+fitStage();
+camReset(); setCamMode(cam.mode);
+enter(0, false);
+startLoop();
+if (window.ResizeObserver) new ResizeObserver(() => { if ($('scene2').classList.contains('on')) drawTimeline(); }).observe($('tl'));
+</script>
+</body>
+</html>
