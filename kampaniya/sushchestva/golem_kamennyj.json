@@ -1,0 +1,5 @@
+{"v": 21, "name": "Каменный голем верхнего кристалла", "budget": 800,
+ "stats": [20, 9, 18, 3, 11, 1], "acV": 7, "main": 0,
+ "weapon": {"armed": true, "n": 2, "s": 8, "range": 5, "att": 2, "reach": 10, "type": 1},
+ "abilities": [{"_kind": "save", "saveStat": 4, "range": 5, "radius": 10, "dmgN": 0, "dmgS": 6, "cond": 7, "condRounds": 2, "recharge": 5, "selective": true}],
+ "passives": {"imm": [8, 9], "immCond": [3, 4, 10, 11], "speed": 30}}

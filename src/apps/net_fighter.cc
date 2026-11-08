@@ -4,6 +4,7 @@
 //   ./net_fighter pinit <файл> [зерно]                           — случайные начальные веса
 //   ./net_fighter psmoke <файл> [боёв]                           — бои сети против бота: решения и отказы исполнителя (должно быть 0)
 //   ./net_fighter check                                          — повтор записанных примитивов бота даёт тот же бой до бита
+//   ./net_fighter pconv <из.bin> <в.bin>                         — сохранить веса старого формата в нынешнем (перенос признаков)
 //   ./net_fighter pbc <боёв> <проходов> <зерно> <веса.bin> [старт] — копирование бота
 //   ./net_fighter ptrain <итераций> <боёв> <зерно> <веса.bin> [старт] — PPO, продолжает с <веса>.state
 //   ./net_fighter peval <веса.bin> <боёв>                        — сеть против бота на отложенных боях
@@ -20,11 +21,17 @@ int main(int argc, char** argv) {
     if (cmd == "pinit") return pt::pinitMain(argc, argv);
     if (cmd == "psmoke") return pt::psmokeMain(argc, argv);
     if (cmd == "check") return pt::checkMain();
+    if (cmd == "pconv") {
+        pn::PNet n;
+        if (argc < 4 || !pn::loadP(argv[2], n, true) || !pn::saveP(argv[3], n)) return 1;
+        std::printf("веса записаны в нынешнем формате: %s\n", argv[3]);
+        return 0;
+    }
     if (cmd == "pbc") return pt::bcMain(argc, argv);
     if (cmd == "ptrain") return pt::trainMain(argc, argv);
     if (cmd == "peval") return pt::evalMain(argc, argv);
     if (cmd == "preplay") return pt::replayMain(argc, argv);
     if (cmd == "pfair") return pt::fairMain(argc, argv);
-    std::fprintf(stderr, "использование: net_fighter pinit|psmoke|check|pbc|ptrain|peval|preplay|pfair (см. шапку файла)\n");
+    std::fprintf(stderr, "использование: net_fighter pinit|psmoke|check|pconv|pbc|ptrain|peval|preplay|pfair (см. шапку файла)\n");
     return 1;
 }

@@ -73,8 +73,8 @@ def lang(p):
     for k, names in OVR.get(a, {}).items():
         if n and (" " + n + " ") in (" " + names + " "): return k
     return DEF.get(a)
-if __name__ == "__main__":
-    fig, ax = plt.subplots(figsize=(22, 15)); ax.set_facecolor("#cfe3f0")
+def draw(ax):
+    ax.set_facecolor("#cfe3f0")
     for f in json.load(open(G + "/ne_50m_land.geojson"))["features"]:
         for r in rings(f["geometry"]):
             if visible(r): ax.add_patch(Polygon(r, fc="#e6e1d6", ec="none", zorder=1))
@@ -97,6 +97,8 @@ if __name__ == "__main__":
       for x, y in POS.get(k, [(sx / w, sy / w)]):
         ax.text(x, y, L[k][0], fontsize=8.5, ha="center", va="center", zorder=6,
                 bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=.6))
+if __name__ == "__main__":
+    fig, ax = plt.subplots(figsize=(22, 15)); draw(ax)
     fams = {}
     for k, (name, fam, col) in L.items(): fams.setdefault(fam, []).append(col)
     for fam, cols in fams.items(): ax.plot([], [], "s", ms=12, mfc=cols[0], mec="#333", label=fam)

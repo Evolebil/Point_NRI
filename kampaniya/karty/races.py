@@ -1,58 +1,128 @@
-"""Карта рас (решение владельца 4 ноября 2026). Запуск: python3 races.py выход.png"""
+"""Карта рас (третья редакция, 9 ноября 2026): цивилизованные расы живут вместе в обжитых землях,
+у каждой ещё есть своя родина; дикие расы — в глуши, орки — на пустошах старых битв.
+Основа: описания рас D&D 5e (PHB / Basic Rules — дварфы, эльфы, полурослики, люди; MM, Volo's Guide — орки,
+гоблиноиды, гноллы, кобольды, ящеролюды, кентавры, великаны, голиафы, фирболги; MM — драконы по цвету и возрасту).
+Запуск: python3 races.py выход.png"""
 import json, os, sys, matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon
+from matplotlib.patches import Polygon, Ellipse
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from realms import realm
-from states import rings, visible, frame, X0, X1, Y0, Y1, G
-RACE = {  # раса: (подпись, цвет)
- "dwarf": ("Дварфы", "#7a5a3a"), "giant": ("Великаны", "#8e6fb0"), "dragon": ("Драконы", "#c0392b"),
- "elf": ("Высшие эльфы\nи их подвиды\n(правят\nполуэльфы)", "#2e9e6b"), "human": ("Люди", "#e8c98a"),
- "beast": ("Животноподобные расы", "#d08a3a"), "orc": ("Кентавры и орки", "#5d7a2a"), "none": ("Не задано", "#d9d9d9")}
-MOUNTAIN = {  # горы перекрывают страну: (страна, провинции)
- "dragon": {"CHE": None, "AUT": "Tirol Vorarlberg Salzburg Kärnten", "ITA": "Aoste Bozen Trento Sondrio Belluno Verbano-Cusio-Ossola Bergamo Brescia Udine Cuneo Turin Biella",
-            "FRA": "Savoie Haute-Savoie Hautes-Alpes Alpes-de-Haute-Provence Alpes-Maritimes Isère", "SVN": None},
- "giant": {"ROU": "Maramures Suceava Neamt Harghita Covasna Brasov Prahova Buzau Vrancea Arges Vâlcea Sibiu Hunedoara Gorj Caras-Severin Alba Bistrita-Nasaud Bacau Dâmbovita Mures",
-           "SVK": "Žilinský Prešov Banskobystrický Košický", "UKR": "Transcarpathia Ivano-Frankivs'k Chernivtsi L'viv", "POL": "Subcarpathian Lesser Poland"}}
-def race(p):
-    a, n = p["adm0_a3"], p["name"] or ""
-    for r, m in MOUNTAIN.items():
-        if a in m and (m[a] is None or (" " + n + " ") in (" " + m[a] + " ")): return r
-    if a in ("NOR", "SWE"): return "dwarf"
-    if a == "GBR" and (p["region"] or "") != "Northern Ireland": return "elf"
-    if a in ("ITA", "SMR", "VAT", "FRA", "MCO", "RUS", "UKR", "BLR"): return "human"
-    if a in ("EGY", "LBY", "TUN", "DZA", "MAR"): return "beast"
-    if realm(p) == "GER": return "orc"
-    return "human"  # остальные земли — люди (решение владельца 4 ноября 2026)
-if __name__ == "__main__":
-    fig, ax = plt.subplots(figsize=(22, 15)); ax.set_facecolor("#cfe3f0")
+import states
+from states import rings, frame, G
+CIVIL = "#efe3c6"
+RACE = {  # код: (подпись, цвет, среда / образ жизни)
+ # родины цивилизованных рас (они же живут и в людских землях)
+ "dwarf": ("Королевства дварфов", "#7a5a3a", "горы и холмы: рудники, кланы"),
+ "elf": ("Леса эльфов", "#1f8f5f", "древние леса"), "gnome": ("Холмы гномов", "#c9a227", "лесистые холмы"),
+ "halfling": ("Хутора полуросликов", "#d9b36c", "пашни и пастбища"),
+ # дикие расы
+ "orc": ("Орочьи пустоши", "#4f6b1f", "пустоши после великих битв: набеги на соседей"),
+ "goblin": ("Гоблиноиды", "#6b8e23", "леса, пещеры, руины рядом с людьми"),
+ "hobgoblin": ("Легионы хобгоблинов", "#8b4513", "горы: военные лагеря, служат наёмниками"),
+ "gnoll": ("Гноллы", "#a0522d", "пустыни и сухие степи"), "lizard": ("Ящеролюды и булливаги", "#2e8b8b", "болота"),
+ "centaur": ("Кентавры", "#b8862b", "открытые равнины и степи"), "goliath": ("Голиафы", "#5d6d7e", "высокогорья"),
+ "fey": ("Фейские леса: фирболги, сатиры, феи", "#7dcea0", "глухие леса у Плана Фей"),
+ "beast": ("Леонины и табакси", "#d0782a", "горы и степи Магриба"),
+ "frost": ("Ледяные великаны", "#6fa8dc", "арктика"), "stone": ("Каменные великаны", "#8e6fb0", "высокие горы"),
+ "hill": ("Холмовые великаны", "#a68fc4", "холмы"), "fire": ("Огненные великаны", "#e06c2b", "вулканы"),
+ "cloud": ("Облачные великаны", "#b4a7d6", "высочайшие пики"), "kobold": ("Кобольды при драконах", "#c0392b", "горы вокруг логов"),
+}
+E = lambda x, y, w, h, lab="": (x, y, w, h, lab)
+ZONES = {  # код -> (районы Natural Earth по NAME, эллипсы)
+ "dwarf": (["Hardanger-vidda", "Harz", "Erzgebirge", "Sudetes Mts."], [E(8.4, 61.6, 2.2, 1.0, "Ётунхейм"), E(13.5, 63.0, 2.5, 1.2)]),
+ "elf": (["Grampian Mts.", "Cambrian Mts."], [E(-1.1, 53.2, .7, .5, "Шервуд"), E(-1.6, 50.87, .6, .35, "Нью-Форест"),
+          E(-2.55, 51.8, .45, .35, "лес Дин"), E(-3.1, 54.45, .8, .5, "Озёрный край"), E(-2.2, 48.0, .9, .5, "Броселианд")]),
+ "gnome": (["Vosges", "Jura"], []),
+ "halfling": ([], [E(-0.6, 49.0, 1.6, .6, "Нормандия"), E(3.6, 50.9, 1.5, .5, "Фландрия"), E(5.5, 52.3, 1.4, .6, "Голландия")]),
+ "orc": ([], [E(-3.6, 39.1, 3.0, 1.4, "Ла-Манча: Аларкос (1195)"), E(35.45, 32.8, 1.0, .7, "Галилея: Хаттин (1187)"),
+          E(42.4, 39.1, 3.0, 1.3, "Армянское нагорье: Манцикерт (1071)"), E(24.5, 41.4, 3.2, 1.0, "Фракия и Македония: война Византии и Империи (1204–1207)"),
+          E(21.0, 54.3, 2.6, .9, "Пруссия: войны с язычниками")]),
+ "goblin": (["Massif Central", "Ardennes", "Böhmerwald"], [E(4.0, 47.15, 1.0, .8, "Морван"), E(8.2, 48.3, 1.0, 1.3, "Шварцвальд"), E(9.4, 50.0, .8, .5, "Шпессарт")]),
+ "hobgoblin": (["Dinaric Alps"], []),
+ "gnoll": (["SYRIAN DESERT", "Negev Desert", "Libyan Plateau"], []),
+ "lizard": ([], [E(27.0, 52.0, 5.0, 1.4, "Полесье"), E(0.1, 52.6, .9, .5, "Фены"), E(3.6, 43.3, 1.4, .45, "лагуны Нарбонны и Камарги"),
+          E(12.2, 45.0, .8, .5, "дельта По"), E(29.3, 45.1, 1.2, .5, "дельта Дуная"), E(-1.0, 44.2, 1.0, .9, "Ланды"), E(1.8, 47.5, 1.1, .5, "Солонь")]),
+ "centaur": (["Alföld"], [E(10.0, 53.1, 2.0, .9, "Люнебургская пустошь"), E(37.0, 47.0, 8.0, 2.4, "Причерноморская степь (вместе с половцами)")]),
+ "goliath": (["PYRENEES"], []),
+ "fey": ([], [E(24.0, 53.5, 3.0, 1.6, "Беловежская и литовские пущи")]),
+ "beast": (["ATLAS MOUNTAINS", "HAUT ATLAS", "Moyen Atlas", "Anti Atlas", "ATLAS SAHARIEN", "Atlas Tellien"], []),
+ "frost": ([], [E(16.5, 67.5, 6, 2.6, "Кьёлен за полярным кругом")]),
+ "stone": (["CARPATHIAN MOUNTAINS", "Transylvanian Alps", "Tatra Mts."], []),
+ "hill": (["Balkan Mts."], []), "fire": ([], [E(15.0, 37.75, .9, .7, "Этна")]), "cloud": (["CAUCASUS MTS."], []),
+ "kobold": (["ALPS"], []),
+}
+# логова драконов: (цвет, возраст, место, долгота, широта). Возраст по MM: вирмлинг — до 5 лет, молодой — 6–100, взрослый — 101–800, древний — 801+.
+DRAGONS = [
+ ("красный", "древний", "Альпы, Монте-Роза", 7.87, 45.94), ("красный", "взрослый", "Этна", 14.99, 37.75), ("красный", "молодой", "Пиренеи, Ането", 0.66, 42.63),
+ ("красный", "молодой", "Татры", 20.0, 49.2), ("красный", "вирмлинг", "Альпы, Ортлер", 10.54, 46.51), ("красный", "вирмлинг", "Альпы, Гран-Парадизо", 7.27, 45.52),
+ ("серебряный", "взрослый", "Юнгфрау", 7.96, 46.54), ("серебряный", "молодой", "Монблан", 6.86, 45.83), ("серебряный", "вирмлинг", "Гросглокнер", 12.69, 47.07),
+ ("золотой", "взрослый", "Женевское озеро", 6.55, 46.45), ("золотой", "молодой", "Боденское озеро", 9.4, 47.6),
+ ("белый", "древний", "Лапландия", 20.0, 68.0), ("белый", "взрослый", "Нордланд", 15.0, 66.5), ("белый", "молодой", "Финнмарк", 25.0, 69.5),
+ ("зелёный", "взрослый", "Арденны", 5.6, 50.1), ("зелёный", "взрослый", "Шварцвальд", 8.1, 48.0), ("зелёный", "молодой", "Богемский лес", 13.5, 48.9),
+ ("зелёный", "молодой", "Беловежская пуща", 23.9, 52.7), ("зелёный", "вирмлинг", "Морван", 4.05, 47.2),
+ ("чёрный", "взрослый", "Полесье", 28.0, 51.8), ("чёрный", "молодой", "дельта Дуная", 29.4, 45.15), ("чёрный", "вирмлинг", "лагуны Нарбонны", 3.1, 43.1),
+ ("синий", "древний", "Сахара", 4.0, 29.0), ("синий", "взрослый", "Большой Восточный Эрг", 8.0, 31.0), ("синий", "молодой", "Ливийская пустыня", 24.0, 29.0),
+ ("латунный", "взрослый", "Сирийская пустыня", 39.5, 33.0), ("латунный", "молодой", "Негев", 34.8, 30.5), ("латунный", "вирмлинг", "Синай", 33.8, 29.5),
+ ("бронзовый", "взрослый", "Бретань", -4.6, 48.4), ("бронзовый", "молодой", "Корнуолл", -5.6, 50.1), ("бронзовый", "молодой", "Ютландия", 8.2, 56.6),
+ ("бронзовый", "вирмлинг", "Далмация", 16.4, 43.5),
+ ("медный", "взрослый", "холмы Тосканы", 11.0, 43.2), ("медный", "молодой", "Каппадокия", 34.8, 38.6), ("медный", "вирмлинг", "холмы Шампани", 4.0, 48.9),
+]
+DCOL = {"красный": "#c0392b", "серебряный": "#c0c0c0", "белый": "#ffffff", "зелёный": "#27ae60", "чёрный": "#111111",
+        "синий": "#2e86c1", "латунный": "#d4ac0d", "бронзовый": "#a0522d", "медный": "#b87333", "золотой": "#f1c40f"}
+AGE = {"вирмлинг": 9, "молодой": 13, "взрослый": 18, "древний": 25}
+SEA = [(-9.5, 46.0, "тритоны и мерфолки"), (18.0, 35.0, "тритоны и мерфолки"), (4.0, 57.5, "тритоны"), (20.0, 58.5, "мерфолки")]
+LAB = {"dwarf": [(11.3, 60.4), (14.6, 51.7)], "elf": [(-4.5, 57.6), (-7.4, 52.6)], "gnome": [(5.0, 48.3)], "halfling": [(0.6, 50.4)],
+       "orc": [(-3.6, 40.3), (42.4, 40.4), (24.5, 42.5)], "goblin": [(3.0, 45.3), (10.9, 48.9)], "hobgoblin": [(17.5, 44.6)],
+       "gnoll": [(38.5, 31.5), (24.0, 30.6)], "lizard": [(27.0, 50.9), (8.6, 42.2)], "centaur": [(19.7, 46.5), (37.0, 48.6), (12.2, 53.7)],
+       "goliath": [(-1.2, 42.9)], "fey": [(24.0, 54.6)], "beast": [(-5.5, 31.6)], "frost": [(18.5, 66.0)], "stone": [(24.7, 46.9)],
+       "hill": [(25.0, 43.7)], "fire": [(16.2, 37.0)], "cloud": [(43.5, 43.8)], "kobold": [(13.2, 47.9)]}
+def draw(ax, dragon_labels=True):
+    ax.set_facecolor("#cfe3f0")
+    vis = states.visible
     for f in json.load(open(G + "/ne_50m_land.geojson"))["features"]:
         for r in rings(f["geometry"]):
-            if visible(r): ax.add_patch(Polygon(r, fc=RACE["none"][1], ec="none", zorder=1))
-    cent = {}
-    for f in json.load(open(G + "/ne_10m_admin_1.geojson"))["features"]:
-        p = f["properties"]
-        if realm(p) is None: continue
-        k = race(p); col = RACE[k][1]
-        for r in rings(f["geometry"]):
-            if visible(r): ax.add_patch(Polygon(r, fc=col, ec=col, lw=.4, zorder=2, hatch="//" if k == "none" else None))
-        if X0 < p["longitude"] < X1 and Y0 < p["latitude"] < Y1 and k != "none":
-            w = p["area_sqkm"] or 1; c = cent.setdefault(k, [0, 0, 0]); c[0] += p["longitude"] * w; c[1] += p["latitude"] * w; c[2] += w
+            if vis(r): ax.add_patch(Polygon(r, fc=CIVIL, ec="none", zorder=1))
+    phys = {f["properties"]["NAME"]: f for f in json.load(open(G + "/ne_10m_geography_regions_polys.geojson"))["features"]}
+    for r in rings(phys["SAHARA"]["geometry"]):
+        if vis(r): ax.add_patch(Polygon(r, fc=RACE["gnoll"][1], ec="none", alpha=.25, zorder=2))
+    for k, (mts, ells) in ZONES.items():
+        col = RACE[k][1]
+        for name in mts:
+            for r in rings(phys[name]["geometry"]):
+                if not vis(r): continue
+                ax.add_patch(Polygon(r, fc="none", ec=col, lw=12, alpha=.22, zorder=3, joinstyle="round"))
+                ax.add_patch(Polygon(r, fc=col, ec=col, lw=1, alpha=.8, zorder=4))
+        for x, y, w, h, lab in ells:
+            ax.add_patch(Ellipse((x, y), w * 1.7, h * 1.7, fc=col, ec="none", alpha=.22, zorder=3))
+            ax.add_patch(Ellipse((x, y), w, h, fc=col, ec="#222", lw=.6, alpha=.85, zorder=4))
+            if lab: ax.text(x, y - h / 2 - .1, lab, fontsize=6.3, ha="center", va="top", zorder=9,
+                            bbox=dict(boxstyle="round,pad=0.1", fc="white", ec="none", alpha=.6))
     for fn in ("ne_50m_lakes", "ne_50m_land"):
         for f in json.load(open(G + f"/{fn}.geojson"))["features"]:
             for r in rings(f["geometry"]):
-                if visible(r): ax.add_patch(Polygon(r, fc="#cfe3f0" if fn.endswith("lakes") else "none", ec="#5a6a79", lw=.6, zorder=3))
-    POS = {"human": [(2.5, 46.8), (12.5, 42.6), (36.0, 54.0), (-4.0, 40.0), (33.0, 39.0), (20.0, 44.5), (40.0, 33.0)], "beast": [(3.0, 31.0), (29.5, 30.2)], "elf": [(-1.4, 52.9)], "dragon": [(10.0, 46.6)]}
-    for k, (sx, sy, w) in cent.items():
-        for x, y in POS.get(k, [(sx / w, sy / w)]):
-            ax.text(x, y, RACE[k][0], fontsize=11, ha="center", va="center", fontweight="bold", zorder=6,
-                    bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=.7))
-    for k, (lab, col) in RACE.items():
-        ax.plot([], [], "s", ms=12, mfc=col, mec="#333", label=lab.replace("\n", " "))
-    ax.legend(loc="upper left", bbox_to_anchor=(1.005, 1), fontsize=10, framealpha=.92, title="Раса большинства")
+                if vis(r): ax.add_patch(Polygon(r, fc="#cfe3f0" if fn.endswith("lakes") else "none", ec="#5a6a79", lw=.6, zorder=5))
+    for col, age, place, x, y in DRAGONS:
+        ax.plot(x, y, "*", ms=AGE[age], mfc=DCOL[col], mec="#222", mew=1.1, zorder=11)
+        if dragon_labels:
+            ax.text(x + .25, y + .12, f"{col} {age}", fontsize=6.8, zorder=11, fontweight="bold",
+                    bbox=dict(boxstyle="round,pad=0.08", fc="white", ec="none", alpha=.7))
+    for x, y, t in SEA: ax.text(x, y, t, fontsize=9, color="#1a4f8b", style="italic", ha="center", zorder=6)
+    for k, pts in LAB.items():
+        for x, y in pts:
+            ax.text(x, y, RACE[k][0], fontsize=9, ha="center", va="center", fontweight="bold", zorder=10, color="#111",
+                    bbox=dict(boxstyle="round,pad=0.18", fc="white", ec=RACE[k][1], lw=1.5, alpha=.85))
+    for x, y in [(2.4, 47.0), (12.6, 42.3), (34.0, 55.0), (-6.0, 41.5), (31.0, 39.3), (19.5, 51.0), (15.5, 57.0), (9.5, 51.8), (0.3, 52.0), (-7.8, 53.0)]:
+        ax.text(x, y, "обжитые земли", fontsize=8.5, ha="center", va="center", color="#6b5a2a", style="italic", zorder=8)
+if __name__ == "__main__":
+    states.Y1 = 71
+    fig, ax = plt.subplots(figsize=(22, 17)); draw(ax)
+    ax.add_patch(Polygon([[0, 0]], fc=CIVIL, ec="#999", label="Обжитые земли: люди; рядом с ними — эльфы, дварфы, полурослики, гномы, полуэльфы, полуорки, тифлинги"))
+    for k, (lab, col, env) in RACE.items(): ax.plot([], [], "s", ms=12, mfc=col, mec="#333", label=f"{lab} — {env}")
+    for age, ms in AGE.items(): ax.plot([], [], "*", ms=ms, mfc="#999", mec="#222", label=f"дракон: {age}")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.005, 1), fontsize=9, framealpha=.92, title="Расы (D&D 5e)")
     frame(ax, "Расы — мир кампании «Аномалии планов»",
-          "Решение владельца, 4 ноября 2026. Показана раса большинства; остальные малочисленные расы живут по всем землям равномерно.\n"
-          "Голиафы — выходцы из Южной Америки (за краем карты). Во всех остальных землях большинство — люди.")
+          "Цивилизованные расы живут вместе в обжитых землях и имеют свои родины; дикие — в глуши; орки — на пустошах старых битв. 35 логов драконов (цвет — среда по MM).\n"
+          "Леса, болота, пустоши — приблизительные области. Решение ИИ по поручению владельца, 9 ноября 2026.")
     plt.savefig(sys.argv[1], dpi=110, bbox_inches="tight")

@@ -1,0 +1,5 @@
+{"v": 21, "name": "Голем нижнего кристалла", "budget": 800,
+ "stats": [18, 8, 18, 3, 8, 1], "acV": 4, "main": 0,
+ "weapon": {"armed": true, "n": 2, "s": 8, "range": 5, "att": 2, "reach": 5, "type": 1},
+ "abilities": [{"_kind": "save", "saveStat": 0, "range": 5, "radius": 15, "dmgN": 2, "dmgS": 6, "dtype": 4, "pullFt": 15, "cond": 1, "condRounds": 1, "recharge": 5, "selective": true}],
+ "passives": {"imm": [8, 9], "immCond": [3, 4, 10, 11], "speed": 20}}

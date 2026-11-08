@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карта мира 1208</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body, #map { height: 100%; margin: 0; background: #cfe3f0; font-family: system-ui, sans-serif; }
+  .lbl { background: rgba(255,255,255,.75); border: none; box-shadow: none; padding: 0 3px; font-size: 11px; color: #222; }
+  .lbl.big { font-weight: 700; font-size: 13px; }
+  .lbl::before { display: none; }
+  .hide { display: none !important; }
+  .legend { background: rgba(255,255,255,.92); padding: 6px 10px; border-radius: 6px; font-size: 12px; line-height: 1.5; }
+  .legend i { display: inline-block; width: 18px; height: 3px; margin-right: 6px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+const D = /*DATA*/null;
+const map = L.map("map", { zoomSnap: 0.5, minZoom: 3, maxZoom: 10, maxBounds: L.latLngBounds(D.bounds).pad(0.1) });
+map.fitBounds(D.bounds);
+const img = f => L.imageOverlay(f, D.bounds);
+const bases = { "Государства 1208": img("gosudarstva.png"), "Расы": img("rasy.png"), "Людские наречия": img("yazyki.png") };
+bases["Государства 1208"].addTo(map);
+const dorogi = img("dorogi.png").addTo(map);
+const COL = { land: "#8b1a1a", sea: "#1a4f8b", river: "#0f7a6b", act1: "#9b27b0" };
+const routes = L.layerGroup(), act1 = L.layerGroup();
+for (const r of D.routes) {
+  const c = r.g === "act1" ? COL.act1 : COL[r.k];
+  const st = { color: c, weight: r.g === "act1" ? 5 : 3.5, opacity: .9 };
+  if (r.k === "sea") st.dashArray = "8 5";
+  if (r.k === "river") st.dashArray = "3 3";
+  if (!r.e) { st.dashArray = "1 6"; st.weight = 3; }
+  L.polyline(r.l, st).bindTooltip(`<b>${r.r || "путь"}</b><br>${r.a} — ${r.b}: ${r.km} км${r.e ? "" : "<br>(трассы нет, напрямую)"}`, { sticky: true })
+    .addTo(r.g === "act1" ? act1 : routes);
+}
+routes.addTo(map); act1.addTo(map);
+const cities = L.layerGroup().addTo(map), labels = [];
+for (const c of D.cities) {
+  const rad = c.p >= 50000 ? 7 : c.p >= 20000 ? 5.5 : c.p >= 5000 ? 3.5 : 2;
+  const m = L.circleMarker([c.y, c.x], { radius: rad, color: "#fff", weight: 1, fillColor: c.p >= 20000 ? "#b22222" : "#333", fillOpacity: 1 })
+    .bindTooltip(`${c.n}`, { permanent: true, direction: "right", offset: [4, 0], className: "lbl" + (c.p >= 50000 ? " big" : "") })
+    .bindPopup(`<b>${c.n}</b><br>около 1200 года: ~${c.p.toLocaleString("ru")} жителей`);
+  m.addTo(cities); labels.push([m, c.z]);
+}
+const res = L.layerGroup();
+for (const r of D.res) L.circleMarker([r.y, r.x], { radius: 6, color: "#222", weight: 1, fillColor: r.c, fillOpacity: 1 })
+  .bindTooltip(`<b>${r.k}</b>: ${r.n}`).addTo(res);
+// подписи: по порогу приближения, затем убираем наезжающие (крупные города важнее — они раньше в списке)
+function relabel() {
+  const z = map.getZoom(), shown = [], view = map.getContainer().getBoundingClientRect();
+  for (const [m, mz] of labels) {
+    const t = m.getTooltip(), el = t && t.getElement();
+    if (!el) continue;
+    el.classList.remove("hide");
+    if (z < mz) { el.classList.add("hide"); continue; }
+    const r = el.getBoundingClientRect();
+    if (r.right < view.left || r.left > view.right || r.bottom < view.top || r.top > view.bottom) continue;
+    if (shown.some(s => r.left < s.right && r.right > s.left && r.top < s.bottom && r.bottom > s.top)) el.classList.add("hide");
+    else shown.push(r);
+  }
+}
+map.on("zoomend moveend overlayadd", relabel); map.whenReady(relabel); cities.on("add", () => setTimeout(relabel));
+L.control.layers(bases, { "Старые римские дороги и реки": dorogi, "Главные пути": routes, "Акт I: пути к Каркассону": act1,
+  "Города": cities, "Ресурсы": res }, { collapsed: false }).addTo(map);
+const lg = L.control({ position: "bottomleft" });
+lg.onAdd = () => { const d = L.DomUtil.create("div", "legend");
+  d.innerHTML = `<b>Мир кампании «Аномалии планов», 1208</b><br>
+  <i style="background:${COL.land}"></i>сухопутный путь &nbsp;<i style="background:${COL.river}"></i>речной &nbsp;<i style="background:${COL.sea}"></i>морской &nbsp;<i style="background:${COL.act1}"></i>Акт I<br>
+  Приближайте — появятся подписи меньших городов. Наведите на путь — длина в км.<br>
+  <span style="color:#666">Дороги: Itiner-e (CC BY 4.0); города: Buringh (CC0), Чандлер (CC BY 4.0); основа: Natural Earth.</span>`; return d; };
+lg.addTo(map);
+</script>
+</body>
+</html>
