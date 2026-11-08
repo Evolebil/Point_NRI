@@ -681,6 +681,38 @@ static bool loadP(const std::string& fn, PNet& n, bool warn) {
         if (warn) std::fprintf(stderr, "сеть-боец %s: веса PN25 перенесены в PN26 (признаки пакета атомов 1 — с нулевыми весами)\n", fn.c_str());
         return true;
     }
+    // PN26 пакета атомов 1 (до пакетов 2–3, 8 ноября): в блоке PN26 было 4 общих признака, 3 на врага, 4 на способность;
+    // пакеты 2–3 дописали свои в конец каждого блока — старые столбцы встают на свои места, новые с нулевыми весами
+    const int G1 = 4, E1 = 3, A1 = 4, D_IN26A = D_IN25 + G1 + MAXE * E1 + MAXA * A1;
+    if (f && hd[0] == P_MAGIC && hd[1] == D_IN26A && hd[2] == EMB && hd[3] == HID && hd[4] == NFIX) {
+        PNetT<float> old;
+        old.D = hd[1];
+        old.NA = hd[4];
+        old.init(1);
+        if (hd[5] != (int)old.ptr.size()) return false;
+        f.read((char*)old.core.p.data(), old.core.p.size() * sizeof(float));
+        f.read((char*)old.ptr.data(), old.ptr.size() * sizeof(float));
+        if (!f) return false;
+        n = probe;
+        for (auto& v : n.core.p) v = 0;
+        auto col = [&](int i) {   // столбец старого входа -> столбец нового
+            if (i < D_IN25) return i;
+            int j = i - D_IN25;
+            if (j < G1) return OFF_X26 + j;
+            j -= G1;
+            if (j < MAXE * E1) return OFF_X26 + GB6 + (j / E1) * FE6 + j % E1;
+            j -= MAXE * E1;
+            return OFF_X26 + GB6 + MAXE * FE6 + (j / A1) * FA6 + j % A1;
+        };
+        const GruNet<float>& o = old.core;
+        GruNet<float>& c = n.core;
+        for (int r = 0; r < EMB; r++)
+            for (int i = 0; i < old.D; i++) c.p[c.oWe + (size_t)r * D_IN + col(i)] = o.p[o.oWe + (size_t)r * old.D + i];
+        std::copy(o.p.begin() + o.obe, o.p.end(), c.p.begin() + c.obe);
+        n.ptr = old.ptr;
+        if (warn) std::fprintf(stderr, "сеть-боец %s: веса PN26 пакета 1 перенесены в нынешний PN26 (признаки пакетов 2–3 — с нулевыми весами)\n", fn.c_str());
+        return true;
+    }
     if (f && (hd[0] == P_MAGIC22 || hd[0] == P_MAGIC23 || hd[0] == P_MAGIC24) && hd[2] == EMB && hd[3] == HID && hd[1] <= D_IN && hd[4] <= NFIX) {
         // перенос старых весов: PN22 (вход короче — новые признаки состояний в конце, указатель на врага короче) и PN23
         // (меньше слотов способностей: нет Помощи и Подготовки). У новых входов и признаков веса нулевые, у новых слотов —
