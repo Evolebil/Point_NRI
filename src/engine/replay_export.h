@@ -1,6 +1,6 @@
 // ============================================================================
 // Экспорт боя для просмотрщика (viewer_template.html): боссы с разбором цены «по покупкам», карта, кадры боя.
-// Подключается из boss_arena_v20.cc после describeBoss. Данные зашиваются в один HTML-файл, он открывается двойным кликом без сервера.
+// Подключается из движка (calib.h) после describeBoss. Данные зашиваются в один HTML-файл, он открывается двойным кликом без сервера.
 // ============================================================================
 #pragma once
 #include <unistd.h>
@@ -254,19 +254,11 @@ static std::string bossViewJson(const Boss& b, const Coef& C, double budget, con
     return o + "}";
 }
 
-// Шаблон ищется рядом с программой, в текущей папке или по переменной DND_VIEWER
+// Шаблон: DND_VIEWER или web/viewer_template.html (поиск — dndPath)
 static std::string findViewerTemplate() {
     std::vector<std::string> cand;
     if (const char* e = std::getenv("DND_VIEWER")) cand.push_back(e);
-    cand.push_back(dndPath("viewer_template.html"));
-    char exe[1024];
-    const ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
-    if (n > 0) {
-        exe[n] = 0;
-        std::string d = exe;
-        d = d.substr(0, d.find_last_of('/') + 1);
-        cand.push_back(d + "viewer_template.html");
-    }
+    cand.push_back(dndPath("web/viewer_template.html"));
     for (auto& c : cand) {
         std::ifstream f(c, std::ios::binary);
         if (f) {
@@ -283,7 +275,7 @@ static void writeViewerHTML(const std::string& path, const Boss& A, const Boss& 
                             unsigned seed, const std::string& mapJson, const std::vector<std::string>& frames) {
     std::string tpl = findViewerTemplate();
     if (tpl.empty()) {
-        std::printf("Не найден viewer_template.html (положите его рядом с программой или задайте DND_VIEWER)\n");
+        std::printf("Не найден web/viewer_template.html (запускайте из папки проекта, задайте DND_ROOT или DND_VIEWER)\n");
         return;
     }
     std::string d = "const REPLAY = {\"seed\":" + std::to_string(seed) + ",\"budget\":" + std::to_string((long long)budget) + ",\"bosses\":[" +

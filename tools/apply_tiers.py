@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Переносит блок TD[] из tiers_fit.txt (результат ./builder tiers) в движок.
-Использование: python3 apply_tiers.py boss_arena_v20.cc tiers_fit.txt"""
-import re, sys
-if len(sys.argv) < 3: sys.exit(__doc__)
-eng, fit = sys.argv[1:3]
+"""Переносит блок TD[] и множители лестниц из результата ./build/tiers в движок (src/engine/atoms.h).
+Использование: python3 tools/apply_tiers.py results/tiers/tiers_fit.txt [atoms.h=src/engine/atoms.h]"""
+import os, re, sys
+if len(sys.argv) < 2: sys.exit(__doc__)
+fit = sys.argv[1]
+eng = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "engine", "atoms.h")
 s = open(eng, encoding='utf-8').read(); blk = open(fit, encoding='utf-8').read().strip()
 tdblk = blk.split("// SCALE")[0].strip()
 a = s.index("TierDef TD[TR_N] = {"); b = s.index("};", a) + 2

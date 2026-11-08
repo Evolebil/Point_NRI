@@ -1,10 +1,11 @@
 #!/bin/sh
 # Туннель через SSH (localhost.run) с автопереподключением: упал — поднимается снова через 3 с. Ссылка при этом может
-# смениться: новая печатается и пишется в lhr_url.txt. Игроки открывают новую ссылку и входят под тем же именем —
+# смениться: новая печатается и пишется в state/lhr_url.txt. Игроки открывают новую ссылку и входят под тем же именем —
 # персонаж и место в бою возвращаются. Сервер игры поднимается, если не запущен. Остановка: Ctrl+C.
 cd "$(dirname "$(readlink -f "$0")")/.." || exit 1   # корень проекта (скрипт лежит в scripts/)
+make -s build/arena_play || exit 1
 if ! curl -s -o /dev/null http://127.0.0.1:8770/; then
-    setsid nohup python3 play_server.py 8770 > /tmp/dnd_server.log 2>&1 < /dev/null &
+    mkdir -p state; setsid nohup python3 web/play_server.py 8770 > state/play_server.log 2>&1 < /dev/null &
     sleep 1
 fi
 # свой SSH-ключ (зарегистрированный на admin.localhost.run — адрес держится дольше) или без ключа
@@ -15,7 +16,7 @@ while true; do
         -R 80:localhost:8770 "${USER_AT}localhost.run" 2>&1 | while IFS= read -r line; do
         url=$(printf '%s\n' "$line" | grep -o 'https://[a-z0-9.-]*\.lhr\.life' | head -1)
         if [ -n "$url" ]; then
-            echo "$url" > lhr_url.txt
+            echo "$url" > state/lhr_url.txt
             echo "=== $(date +%H:%M:%S) ссылка для игроков: $url"
         fi
     done

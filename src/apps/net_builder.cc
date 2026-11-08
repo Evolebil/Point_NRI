@@ -11,14 +11,12 @@
 // ценность считает сама сеть (A2C с GAE). Две сети A и B растут одновременно (соперник: другая сеть сейчас, зал славы, обычный генератор).
 //
 //   ./net_builder train <итераций> <сборок на сторону> <зерно> <префикс весов> [стартовые A.bin] [стартовые B.bin]
-//   ./net_builder eval  <веса> <сборок>             — против обычного генератора и против линейных Сборщиков (builder_runs/v4_champ_*.txt)
+//   ./net_builder eval  <веса> <сборок>             — против обычного генератора
 //   ./net_builder show  <веса> <сколько>            — описания собранных боссов
 //   ./net_builder replay <A.bin> <B.bin> <бюджет> <зерно> <файл.html> — бой боссов двух сетей-Сборщиков для просмотрщика
-// Сборка: g++ -std=c++17 -O2 -pthread -o net_builder net_builder.cc
+// Сборка: make (программа — build/net_builder)
 // ============================================================================
-#define main boss_main
-#include "boss_arena_v20.cc"
-#undef main
+#include "engine.h"
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -27,7 +25,6 @@
 #include "builder_net.h"
 
 int main(int argc, char** argv) {
-    g_rlTurn = nullptr;
     if (argc > 1 && std::string(argv[1]) == "train") return bld::trainMain(argc, argv);
     if (argc > 1 && std::string(argv[1]) == "eval") return bld::evalMain(argc, argv);
     if (argc > 1 && std::string(argv[1]) == "show") return bld::showMain(argc, argv);

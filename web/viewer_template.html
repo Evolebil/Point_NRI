@@ -496,11 +496,6 @@ function frameLog(i){
     const nc = a.cond.filter(c => !b.cond.includes(c));
     if (nc.length && a.hp > 0) evs.push(`<span class="ev mut">${nameOf(k, f)} теперь: ${nc.map(esc).join(', ')}</span>`);
   }
-  if (fr.net){   // что «задумала» нейросеть-боец в этот ход
-    const ST = ['обычная стойка','держит позицию','сближается вплотную','кайтинг (держит дистанцию)','отступает','отход (действие)','уклонение','сначала лечение и баффы','без самобаффов','снимает концентрацию'], TG = ['цель на усмотрение бота','бьёт босса','бьёт приспешника','бьёт слабейшего'];
-    const me = f[A >= 0 ? A : 0], b = me && me.kind < 2 ? BOSS[me.kind] : null, ab = b && fr.net.pf >= 1 ? b.abil[fr.net.pf - 1] : null;
-    evs.push(`<span class="ev mut">🧠 нейросеть: ${ST[fr.net.st] || '?'}; ${TG[fr.net.tg] || '?'}; приоритет — ${fr.net.pf < 0 ? 'без предпочтений' : (fr.net.pf === 0 ? 'оружие' : '«' + esc(ab ? ab.title : 'способность') + '»')}</span>`);
-  }
   for (const e of fr.ev || []){
     if (e.k === 'chase') evs.push(`<span class="ev chase">🏃 ПОГОНЯ: ${nameOf(e.prey, f)} убегает, ${nameOf(1 - e.prey, f)} преследует (провоцированных атак нет)</span>`);
     else if (e.k === 'chaseEnd') evs.push(`<span class="ev chase">🏁 Погоня окончена: ${e.why === 'caught' ? 'преследователь догнал' : 'беглец развернулся навстречу'}</span>`);

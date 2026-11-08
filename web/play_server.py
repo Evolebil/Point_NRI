@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Сервер игры: страница play.html и движок (./arena_play по JSON-строкам).
+"""Сервер игры: страница play.html и движок (build/arena_play по JSON-строкам).
 
-Запуск:   python3 play_server.py [порт] [--public]   (по умолчанию 8770; --public — слушать все адреса, для туннеля)
-Страница: play_template.html + общий код рисования из viewer_template.html (между метками RENDER_BEGIN/RENDER_END).
+Запуск:   python3 web/play_server.py [порт] [--public]   (по умолчанию 8770; --public — слушать все адреса, для туннеля)
+Страница: web/play.html + web/css/play.css + web/js/*.js; общий код рисования — из web/viewer_template.html.
 API:      POST /api, JSON. У каждого браузера свой id (sid): свой бой (start/step), свои запросы цен.
           Комнаты (v21, бои нескольких команд): room_create, room_join, room_set (персонаж, команда), room_bot (бот в команду),
           room_kick, room_start (хозяин), room_poll (состояние, кадры, мой ход), room_step (ход игрока своего места).
@@ -20,10 +20,11 @@ import time
 from urllib.parse import urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if os.path.basename(HERE) in ("web", "tools", "tests"):   # запуск не через симлинк в корне — корень проекта выше
-    HERE = os.path.dirname(HERE)
-ENGINE = os.path.join(HERE, "arena_play")
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # корень проекта (сервер лежит в web/)
+WEB = os.path.join(HERE, "web")
+STATE = os.path.join(HERE, "state")   # игроки и журналы — не в git
+os.makedirs(STATE, exist_ok=True)
+ENGINE = os.path.join(HERE, "build", "arena_play")
 TURN_TIMEOUT = 150   # сек: игрок комнаты не ходит — ход за него завершается
 ROOM_IDLE = 3 * 3600  # сек: заброшенная комната удаляется
 # предохранители сервера наружу (аудит кода, раздел Д, шаг 4)
@@ -94,7 +95,7 @@ SOLO_LOCK = threading.Lock()
 ROOMS = {}                # код -> Room
 ROOMS_LOCK = threading.Lock()
 # игроки по имени (v21): персонаж (состояние конструктора) и текущая комната — переживают смену адреса туннеля
-PLAYERS_FILE = os.path.join(HERE, "players.json")
+PLAYERS_FILE = os.path.join(STATE, "players.json")
 PLAYERS_LOCK = threading.Lock()
 try:
     with open(PLAYERS_FILE, encoding="utf-8") as _f:
@@ -378,9 +379,9 @@ def sheet_mod():
     import importlib
     mt = os.path.getmtime(os.path.join(HERE, "tools", "sheet.py"))
     if _SHEET["mod"] is None:
-        for d in (HERE, os.path.join(HERE, "tools")):   # sheet.py — в tools/ (и симлинком в корне)
-            if d not in sys.path:
-                sys.path.insert(0, d)
+        d = os.path.join(HERE, "tools")   # sheet.py — в tools/
+        if d not in sys.path:
+            sys.path.insert(0, d)
         import sheet
         _SHEET["mod"] = sheet
     elif mt != _SHEET["mtime"]:
@@ -390,12 +391,15 @@ def sheet_mod():
 
 
 def page():
-    with open(os.path.join(HERE, "play_template.html"), encoding="utf-8") as f:
-        tpl = f.read()
-    with open(os.path.join(HERE, "viewer_template.html"), encoding="utf-8") as f:
-        v = f.read()
+    """Страница одним ответом (через туннель лишние запросы дороги): web/play.html + стили web/css/play.css + скрипты
+    web/js/*.js по порядку имён; в скрипт боя подставляется общий код рисования из web/viewer_template.html."""
+    def rd(*p):
+        with open(os.path.join(WEB, *p), encoding="utf-8") as f:
+            return f.read()
+    v = rd("viewer_template.html")
     a, b = v.index("/*RENDER_BEGIN*/"), v.index("/*RENDER_END*/")
-    return tpl.replace("/*RENDER_JS*/", v[a:b])
+    js = "".join(rd("js", n) for n in sorted(os.listdir(os.path.join(WEB, "js"))) if n.endswith(".js"))
+    return rd("play.html").replace("/*PLAY_CSS*/\n", rd("css", "play.css")).replace("/*PLAY_JS*/\n", js.replace("/*RENDER_JS*/", v[a:b]))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -455,6 +459,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, json.dumps({"type": "error", "err": "ожидается объект JSON с полем cmd"}, ensure_ascii=False))
             return
         sid = str(msg.pop("sid", "") or "anon")[:64]
+        for k in ("opp", "opts"):   # путь к весам Сборщика выбирает сервер, не браузер (иначе движок открыл бы любой файл)
+            if isinstance(msg.get(k), dict):
+                msg[k].pop("builder", None)
         cmd = msg.get("cmd")
         try:
             if cmd and cmd.startswith("room_"):
@@ -498,7 +505,7 @@ if __name__ == "__main__":
     port = int(args[0]) if args else 8770
     host = "0.0.0.0" if "--public" in sys.argv else "127.0.0.1"
     if not os.path.exists(ENGINE):
-        sys.exit("нет %s: соберите g++ -std=c++17 -O2 -pthread -o arena_play arena_play.cc" % ENGINE)
+        sys.exit("нет %s: соберите командой make" % ENGINE)
     srv = ThreadingHTTPServer((host, port), Handler)
     print("Игра: http://127.0.0.1:%d/   (Ctrl+C — выход)" % port)
     try:

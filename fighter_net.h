@@ -1,1 +1,0 @@
-src/ai/fighter_net.h

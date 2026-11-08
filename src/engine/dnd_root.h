@@ -1,5 +1,6 @@
 // Где искать файлы проекта (limity.json, веса сетей, шаблоны): аудит кода, раздел Д, шаг 3.
-// Относительный путь ищется так: DND_ROOT (если задан) → текущая папка → папка программы. Абсолютный путь — как есть.
+// Относительный путь (от корня проекта) ищется так: DND_ROOT (если задан) → текущая папка → папка программы и папка над
+// ней (программы лежат в build/). Абсолютный путь — как есть.
 // Если файла нет нигде, возвращается путь от DND_ROOT или текущей папки — тот, кто открывает, пишет громкую ошибку.
 #pragma once
 #include <cstdio>
@@ -18,8 +19,9 @@ inline std::string dndPath(const std::string& rel) {
     if (n > 0) {
         exe[n] = 0;
         std::string d = exe;
-        d = d.substr(0, d.find_last_of('/') + 1) + rel;
-        if (dndExists(d)) return d;
+        d = d.substr(0, d.find_last_of('/') + 1);
+        if (dndExists(d + rel)) return d + rel;
+        if (dndExists(d + "../" + rel)) return d + "../" + rel;
     }
     return rel;
 }

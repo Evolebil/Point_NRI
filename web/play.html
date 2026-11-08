@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Арена Боссов — игра за персонажа</title>
+<style>
+/*PLAY_CSS*/
+</style>
+</head>
+<body>
+<header>
+  <h1>Арена Боссов · игра за персонажа</h1>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab1" aria-selected="true">1 · Персонаж</button>
+    <button class="tab" role="tab" id="tab2" aria-selected="false">2 · Соперник</button>
+    <button class="tab" role="tab" id="tab3" aria-selected="false">3 · Бой</button>
+    <button class="tab" role="tab" id="tab6" aria-selected="false">Комната</button>
+    <button class="tab" role="tab" id="tab5" aria-selected="false">Карты</button>
+    <button class="tab" role="tab" id="tab4" aria-selected="false">Шпаргалка цен</button>
+  </div>
+</header>
+<main>
+
+<!-- ============ 1. Конструктор ============ -->
+<section class="scene on" id="s1">
+  <div class="build">
+    <div id="form"></div>
+    <div class="side">
+      <div class="card">
+        <h3>Очки персонажа</h3>
+        <div><span class="big tnum" id="spent">0</span> <span class="tnum">из <b id="bud">800</b></span> <span class="lbl" id="leftLbl"></span></div>
+        <div class="meter" id="meter"></div>
+        <div id="verdict"></div>
+        <div class="row">
+          <button class="primary" id="toOpp" disabled>К сопернику →</button>
+          <button id="btnExport">Экспорт</button>
+          <button id="btnImport">Импорт</button>
+          <input type="file" id="fileImport" accept="application/json,.json" style="display:none">
+        </div>
+      </div>
+      <div class="card"><h3>Покупки</h3><div class="items" id="items"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2. Соперник ============ -->
+<section class="scene" id="s2">
+  <div class="opp">
+    <div class="card">
+      <h3>Соперник и арена</h3>
+      <div class="hint">Арена случайная и зависит от зерна: размер от 5×5 до 100×100, ручьи, мосты, возвышенности, стены. Выход за край арены — побег, а побег — поражение.</div>
+      <div class="row"><label>Кто собирает соперника
+        <select id="oppMode"><option value="net">нейросеть-Сборщик</option><option value="generator">случайный генератор</option></select></label></div>
+      <div class="row"><label>Кто им играет
+        <select id="oppBrain"><option value="net">нейросеть-боец (GRU, помнит бой)</option><option value="rules">правило-бот (по ИНТ)</option></select></label></div>
+      <div class="row"><label>Время на ваш ход
+        <select id="turnTime"><option value="0">без ограничения</option><option value="45">45 с</option><option value="30" selected>30 с (реальное время)</option><option value="20">20 с</option><option value="10">10 с (блиц)</option></select></label></div>
+      <div class="row"><label>Сила соперника (очки)
+        <select id="oppMul"><option value="0.5">0.5× вашего бюджета</option><option value="0.75">0.75×</option><option value="1" selected>1× (поровну)</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
+      <div class="row"><label>Зерно (арена и соперник) <input type="number" id="seed" value="1" min="1" step="1" style="width:110px"></label><button id="btnDice" title="Другое зерно">🎲</button></div>
+      <div class="hint">Зерно — номер случайности: одно и то же зерно даёт ту же арену, того же соперника и те же броски при тех же ходах. Поменяйте его, чтобы получить новый бой; скажите другу — и он сыграет тот же.</div>
+      <div class="row"><label>Арена
+        <select id="mapSel"><option value="">участок мира по зерну боя</option><option value="__world">мир на выбор (место — на карте мира)</option></select></label></div>
+      <div id="worldBox" style="display:none">
+        <div class="row"><label>Зерно мира <input type="text" id="wSeed" value="1" style="width:130px"></label><button id="wDice" title="Другой мир">🎲</button>
+          <label>Размер мира <select id="wSize"></select></label></div>
+        <div class="row"><label>Арена, клеток: ширина <input type="number" id="wW" min="2" max="100" value="30"></label><label>высота <input type="number" id="wH" min="2" max="100" value="30"></label></div>
+        <div class="row"><button id="wShow">🗺 Показать мир</button><span class="small" id="wPick">место: случайное</span></div>
+      </div>
+      <div class="row"><label>Сторона
+        <select id="side"><option value="-1">случайно</option><option value="0">A (синий)</option><option value="1">B (красный)</option></select></label></div>
+      <div class="row"><button class="primary" id="btnFight">⚔ В бой!</button></div>
+      <div id="oppErr"></div>
+    </div>
+    <div class="card" id="oppCard"><h3>Соперник</h3><div class="hint">Загрузка…</div></div>
+  </div>
+  <div class="card" id="worldCard" style="display:none"><h3>Мир</h3><div class="hint">Щёлкните место боя: рамка — арена. Цвет — биом, светлее — выше; # и + — поселения, ~ — вода, V — ущелья.</div>
+    <canvas id="wCv" style="max-width:100%;cursor:crosshair;border-radius:8px"></canvas><div class="legend2" id="wLegend"></div></div>
+</section>
+
+<!-- ============ 5. Карты ============ -->
+<section class="scene" id="s6">
+  <div class="card" style="max-width:820px;margin:0 auto">
+    <h3>Бой нескольких команд</h3>
+    <div class="hint">Один создаёт комнату и передаёт код, остальные входят по коду. Каждый берёт своего персонажа (вкладка «Персонаж») и выбирает команду; хозяин может добавить ботов и начинает бой. Команд сколько угодно. Побеждает последняя команда, в которой кто-то жив; если бой дошёл до предела раундов — по очкам (доля хитов команды + 1 за каждого убитого врага).</div>
+    <div class="row" id="rmJoin"><label>Ваше имя <input type="text" id="rmName" style="width:150px"></label>
+      <button class="primary" id="rmCreate">Создать комнату</button>
+      <label>Код <input type="text" id="rmCode" style="width:90px;text-transform:uppercase" maxlength="5"></label><button id="rmEnter">Войти</button></div>
+    <div class="hint">Код комнаты — пять знаков (латинские буквы и цифры), которые появятся после «Создать комнату». Передайте их друзьям любым способом; входить нужно по той же ссылке на игру. Комната без действий удаляется через 3 часа; вылетели — войдите снова под тем же именем, место сохранится.</div>
+    <div id="rmBox"></div>
+  </div>
+</section>
+<section class="scene" id="s5">
+  <div class="mapbox">
+    <div class="card" style="min-width:300px;max-width:360px">
+      <h3>Моя карта</h3>
+      <div class="hint">Рисуйте арену: левая кнопка мыши — нарисовать, правая — стереть выбранный слой. Все свободные клетки должны быть связаны (пройти от любой до любой пешком; ущелье пересекается только мостом).</div>
+      <div class="row"><label>Название <input type="text" id="meName" value="Моя арена" style="width:170px"></label></div>
+      <div class="row"><label>Ширина <input type="number" id="meW" min="5" max="200" value="20"></label><label>Высота <input type="number" id="meH" min="5" max="200" value="14"></label><button id="meResize">Применить размер</button></div>
+      <div class="row"><label>Тема <select id="meTheme"><option value="0">дикая местность</option><option value="1">город</option></select></label></div>
+      <div class="sec-h">Кисть</div>
+      <div class="chips" id="meTools"></div>
+      <div class="row"><label>Размер кисти <select id="meBrush"><option>1</option><option>2</option><option>3</option><option>5</option></select></label>
+        <label title="Для высоты земли и настила: уровень по 10 фт">Уровень <select id="meLevel"><option value="0">0 (0 фт)</option><option value="1" selected>1 (10 фт)</option><option value="2">2 (20 фт)</option><option value="3">3 (30 фт)</option><option value="4">4 (40 фт)</option><option value="5">5 (50 фт)</option><option value="6">6 (60 фт)</option><option value="7">7 (70 фт)</option><option value="8">8 (80 фт)</option><option value="9">9 (90 фт)</option></select></label></div>
+      <div class="hint">Высота: соседние клетки с перепадом в 1 уровень — подъём, больше — обрыв (пройти только по лестнице или летуну под открытым небом). Настил — второй ярус над землёй (мост, балкон); без лестницы или подъёма к нему — потолок.</div>
+      <div class="row"><button id="meRandom">🎲 Случайная заготовка</button><button id="meClear">Очистить</button><button id="meBorder">Рамка из стен</button></div>
+      <div class="row"><button id="meCheck">Проверить</button><button class="primary" id="meSave">Сохранить</button></div>
+      <div id="meMsg"></div>
+      <div class="sec-h">Сохранённые карты</div>
+      <div id="meList"></div>
+      <div class="row"><button id="meExport">Экспорт</button><button id="meImport">Импорт</button><input type="file" id="meFile" accept="application/json,.json" style="display:none"></div>
+    </div>
+    <div class="card" style="flex:1;min-width:300px;overflow:auto"><div class="hint" id="meStart">С чего начать: «🎲 Случайная заготовка» или «Рамка из стен», затем выберите кисть слева и рисуйте по полю. «Проверить» покажет недоступные клетки; сохранённая карта появится в списке «Арена» на вкладке «2 · Соперник».</div><canvas id="meCv" style="touch-action:none;border-radius:8px"></canvas><div class="legend2" id="meLegend"></div></div>
+  </div>
+</section>
+
+<!-- ============ 4. Шпаргалка ============ -->
+<section class="scene" id="s4"><div class="card" id="sheet" style="max-width:980px"><div class="hint">Загрузка…</div></div></section>
+
+<!-- ============ 3. Бой ============ -->
+<section class="scene" id="s3">
+  <div class="fight">
+    <div class="stagebox">
+      <div class="stage" id="stage">
+        <canvas id="cv"></canvas>
+        <div class="banner" id="banner"></div>
+        <div class="toast" id="toast"></div>
+        <div class="result" id="result"><div class="box"></div></div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button id="camBtn">🎥 Камера</button><button id="fullBtn" title="Поле во весь экран (Esc — выйти)">⛶ Во весь экран</button><label class="small" title="Затемнить клетки, которых ваша сторона не видит"><input type="checkbox" id="fogOn" checked> туман войны</label><span class="small" style="opacity:.75">колесо — масштаб, правая кнопка или Shift + перетаскивание — сдвиг</span><label class="small">Темп боя соперника <select id="tempo"><option value="1" selected>спокойно</option><option value="1.6">быстро</option><option value="2.6">очень быстро</option></select></label></div>
+      <div class="turn" id="turn"><div class="hint">Бой ещё не начат: соберите персонажа (вкладка «1 · Персонаж»), выберите соперника и арену (вкладка «2 · Соперник») и нажмите «⚔ В бой!». Здесь появятся кнопки вашего хода: движение, атака, способности, «конец хода».</div></div>
+      <details class="small" style="margin-top:6px"><summary>Обозначения на карте</summary><div class="legend2"><span style="--c:#2d6fa3">ручей (труднопроходим)</span><span style="--c:#07080c">ущелье</span><span style="--c:#7a5a34">мост</span><span style="--c:#6f9a6f">возвышенность</span><span style="--c:#3b404d">стена (КД 17, 54 хита)</span><span style="--c:#2f6a33">дерево (КД 15, 27 хитов; залезть — +20 фт высоты)</span><span style="--c:#4a4438">обломки</span><span style="--c:#e2572a">опасная зона: лава, кислота, дым, лёд, гроза, туман — урон при входе и в начале хода (спасбросок — половина)</span><span style="--c:#7d7568">укрытие</span><span style="--c:#56401e">грязь</span><span style="--c:#1a1d3a">тьма</span><span style="--c:#f2c14e">край арены: выход = побег = поражение</span></div></details>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+      <div class="card pcard" id="cardMe"></div>
+      <div class="card pcard" id="cardEnemy"></div>
+      <div class="card"><h3>Журнал боя</h3><div class="small" style="color:var(--muted)">Каждая строка — событие: кто что сделал, броски (к20 + модификатор против КД или СЛ), урон и состояния. Новые события внизу.</div><div class="log" id="log"></div></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+/*PLAY_JS*/
+</script>
+</body>
+</html>

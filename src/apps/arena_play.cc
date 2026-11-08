@@ -5,15 +5,13 @@
 //   {"cmd":"catalog","budget":800}                       -> {"type":"catalog","data":{...}}       перечисления и прайс при бюджете
 //   {"cmd":"price","char":{...}}                         -> {"type":"price","data":{...}}         разбор цены персонажа по покупкам
 //   {"cmd":"preview","budget":800,"seed":7,"opp":{...}}  -> {"type":"preview","boss":{...}}        соперник с разбором цены
-//   {"cmd":"start","char":{...},"seed":7,"opp":{"mode":"generator"|"net","mul":1.0,"builder":"net_runs/builder5_B.bin"},"side":-1}
+//   {"cmd":"start","char":{...},"seed":7,"opp":{"mode":"generator"|"net","mul":1.0},"side":-1}
 //        -> поток: {"type":"turn","init":{...}(только в первом),"frames":[...],"req":{...}} — ждёт команду хода (см. human_turn.h);
 //           в конце {"type":"end","frames":[...],"result":0|1|2,"reason":..,"rounds":..,"me":idx}
 //   {"cmd":"quit"}
-// Сборка: g++ -std=c++17 -O2 -pthread -o arena_play arena_play.cc
+// Сборка: make (программа — build/arena_play)
 // ============================================================================
-#define main boss_main
-#include "boss_arena_v20.cc"
-#undef main
+#include "engine.h"
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -37,7 +35,7 @@ static Boss makeOpponent(const Json& opp, long long budget, unsigned seed, const
     rng.seed(mix(seed, 31));
     if (mode == "net") {
         bld::BNet net;
-        const std::string path = dndPath(opp["builder"].str("net_runs/builder5_B.bin"));
+        const std::string path = dndPath(opp["builder"].str("models/nets/builder5_B.bin"));
         if (bld::loadNet(path, net)) {
             bld::BrainNet b(&net, nullptr);
             g_bb = &b;
@@ -53,7 +51,6 @@ static Boss makeOpponent(const Json& opp, long long budget, unsigned seed, const
 }
 
 int main() {
-    g_rlTurn = nullptr;
     anyFighterNet();   // сеть-боец для соперников с ИНТ >= 12 (если файл весов найден)
     Coef C;
     for (int a = 0; a < AT_N; a++) C[a] = AD[a].init;

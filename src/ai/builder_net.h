@@ -143,25 +143,12 @@ static bool loadNet(const std::string& fn, BNet& n) {
     f.read((char*)n.p.data(), n.p.size() * sizeof(float));
     return (bool)f;
 }
-// линейный Сборщик (builder.cc): файл «бюджет … параметров N» и N чисел
-static bool loadTheta(const std::string& fn, std::vector<float>& th) {
-    std::ifstream f(fn);
-    if (!f) return false;
-    std::string a, c, d;
-    long long B; double wr; size_t n;
-    f >> a >> B >> c >> wr >> d >> n;
-    if (n > (size_t)BP_N) return false;
-    th.assign((size_t)BP_N, 0);   // этап 5: новые решения дописаны в конец — у старых линейных Сборщиков они нулевые
-    for (size_t i = 0; i < n; i++) f >> th[i];
-    return (bool)f;
-}
 
 // --------------------------------------------------------------------------------------------------------------------------------
 // Одна проба: сеть собирает босса (записывая шаги), соперник собирает босса, два боя со сменой сторон
 // --------------------------------------------------------------------------------------------------------------------------------
 struct Opp {
-    const BNet* net = nullptr;                 // соперник — сеть
-    const std::vector<float>* theta = nullptr; // соперник — линейный Сборщик
+    const BNet* net = nullptr;   // соперник — сеть; нет — обычный генератор
 };
 struct Sample {
     std::vector<BStep> steps;
@@ -194,11 +181,8 @@ static void play(const Coef& C, long long B, const BNet* mine, const Opp& opp, u
         g_bb = &bo;
         other = makeBoss(B, C, true, false);
         g_bb = nullptr;
-    } else {
-        g_th = opp.theta ? opp.theta->data() : nullptr;
+    } else
         other = makeBoss(B, C, true, false);
-        g_th = nullptr;
-    }
     out.failures = checkBoss(out.mine, B) + checkBoss(other, B);
     const long long c0 = g_capped;
     const int r1 = fight(out.mine, other), r2 = fight(other, out.mine);
@@ -301,31 +285,26 @@ static void updateLearner(Learner& L, std::vector<Sample>& smp, int it, double& 
     (void)it;
 }
 
-// оценка сети против обычного генератора и против линейных Сборщиков
-struct EvalRes { double vsRandom = 0, vsLinear = 0; double failures = 0, guard = 0; double steps = 0; };
-static EvalRes evalNet(const Coef& C, const BNet& net, int N, uint64_t seed, const std::vector<float> lin[6]) {
+// оценка сети против обычного генератора
+struct EvalRes { double vsRandom = 0; double failures = 0, guard = 0; double steps = 0; };
+static EvalRes evalNet(const Coef& C, const BNet& net, int N, uint64_t seed) {
     EvalRes r;
-    std::vector<Sample> a(N), b(N);
+    std::vector<Sample> a(N);
     Opp rnd;
     parallelFor(N, [&](int i) {
         const uint64_t sd = mix(seed, i);
         const int bi = (int)(mix(sd, 5) % 6);
         play(C, BUDGETS[bi], &net, rnd, sd, false, a[i]);
-        Opp lo; lo.theta = lin[bi].empty() ? nullptr : &lin[bi];
-        play(C, BUDGETS[bi], &net, lo, sd, false, b[i]);
     });
-    for (int i = 0; i < N; i++) { r.vsRandom += a[i].score; r.vsLinear += b[i].score; r.failures += a[i].failures + b[i].failures; r.guard += a[i].guard + b[i].guard; r.steps += a[i].mine.abil.size(); }
-    r.vsRandom /= N; r.vsLinear /= N; r.steps /= N;
+    for (int i = 0; i < N; i++) { r.vsRandom += a[i].score; r.failures += a[i].failures; r.guard += a[i].guard; r.steps += a[i].mine.abil.size(); }
+    r.vsRandom /= N; r.steps /= N;
     return r;
-}
-static void loadLinear(std::vector<float> lin[6]) {
-    for (int i = 0; i < 6; i++) loadTheta("builder_runs/v4_champ_" + std::to_string(BUDGETS[i]) + ".txt", lin[i]);
 }
 
 static int trainMain(int argc, char** argv) {
     const int iters = argc > 2 ? std::atoi(argv[2]) : 100, M = argc > 3 ? std::atoi(argv[3]) : 768;
     const uint64_t seed = argc > 4 ? std::strtoull(argv[4], nullptr, 10) : 1;
-    const std::string prefix = argc > 5 ? argv[5] : "net_runs/builder";
+    const std::string prefix = argc > 5 ? argv[5] : "runs/net/builder";
     Coef C = coefNow();
     Learner L[2];
     for (int s = 0; s < 2; s++) {
@@ -333,8 +312,6 @@ static int trainMain(int argc, char** argv) {
         L[s].adam.init(L[s].net.size());
         if (argc > 6 + s && !loadNet(argv[6 + s], L[s].net)) { std::fprintf(stderr, "не прочитан %s\n", argv[6 + s]); return 1; }
     }
-    std::vector<float> lin[6];
-    loadLinear(lin);
     std::vector<Sample> smp[2] = {std::vector<Sample>(M), std::vector<Sample>(M)};
     std::vector<char> kind[2] = {std::vector<char>(M), std::vector<char>(M)};
     for (int it = 1; it <= iters; it++) {
@@ -375,9 +352,9 @@ static int trainMain(int argc, char** argv) {
         if (it % 50 == 0 || it == iters) {
             saveNet(prefix + "_A.bin", L[0].net);
             saveNet(prefix + "_B.bin", L[1].net);
-            EvalRes a = evalNet(C, L[0].net, 3000, 424200 + it, lin), b = evalNet(C, L[1].net, 3000, 424300 + it, lin);
-            std::printf("  контроль (3000 сборок): A: против случайного %.1f%%, против линейного %.1f%%, способностей %.1f | B: против случайного %.1f%%, против линейного %.1f%% | системных сбоев %.0f\n",
-                        100 * a.vsRandom, 100 * a.vsLinear, a.steps, 100 * b.vsRandom, 100 * b.vsLinear, a.failures + b.failures);
+            EvalRes a = evalNet(C, L[0].net, 3000, 424200 + it), b = evalNet(C, L[1].net, 3000, 424300 + it);
+            std::printf("  контроль (3000 сборок): A: против случайного %.1f%%, способностей %.1f | B: против случайного %.1f%% | системных сбоев %.0f\n",
+                        100 * a.vsRandom, a.steps, 100 * b.vsRandom, a.failures + b.failures);
             std::fflush(stdout);
         }
     }
@@ -391,11 +368,9 @@ static int evalMain(int argc, char** argv) {
     if (argc < 4 || !loadNet(argv[2], net)) return 1;
     const int N = std::atoi(argv[3]);
     Coef C = coefNow();
-    std::vector<float> lin[6];
-    loadLinear(lin);
-    EvalRes r = evalNet(C, net, N, 99, lin);
-    std::printf("сеть-Сборщик, %d сборок: против обычного генератора %.2f%%, против линейных Сборщиков %.2f%% (±%.1f п.п.), способностей на босса %.1f, системных сбоев %.0f, боёв до предохранителя %.0f\n", N,
-                100 * r.vsRandom, 100 * r.vsLinear, 100 * 2 * std::sqrt(0.25 / (2.0 * N)), r.steps, r.failures, r.guard);
+    EvalRes r = evalNet(C, net, N, 99);
+    std::printf("сеть-Сборщик, %d сборок: против обычного генератора %.2f%% (±%.1f п.п.), способностей на босса %.1f, системных сбоев %.0f, боёв до предохранителя %.0f\n", N,
+                100 * r.vsRandom, 100 * 2 * std::sqrt(0.25 / (2.0 * N)), r.steps, r.failures, r.guard);
     return 0;
 }
 
@@ -425,7 +400,7 @@ static int replayMain(int argc, char** argv) {
     const long long budget = std::atoll(argv[4]);
     const unsigned seed = (unsigned)std::strtoul(argv[5], nullptr, 10);
     Coef C = coefNow();
-    anyFighterNet();   // загружает сеть-бойца (новую или старую по DND_NET_LEGACY)
+    anyFighterNet();   // загружает сеть-бойца
     Boss boss[2];
     for (int k = 0; k < 2; k++) {
         rng.seed(mix(seed, 100 + k));

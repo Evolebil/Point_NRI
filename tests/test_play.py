@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Проверка протокола arena_play: цена персонажа и автоигра простой стратегией (идти к врагу и бить)."""
-import json, subprocess, sys
+import json, os, subprocess, sys
 
 CHAR = {"name": "Рыцарь", "budget": 800, "stats": [16, 10, 14, 8, 10, 8], "acV": 8,
         "weapon": {"n": 1, "s": 8, "range": 5, "att": 2, "reach": 5, "type": 11},
@@ -8,7 +8,8 @@ CHAR = {"name": "Рыцарь", "budget": 800, "stats": [16, 10, 14, 8, 10, 8], 
         "passives": {"saveProf": [2]}}
 
 def run(char=CHAR, seed=7, quiet=False):
-    p = subprocess.Popen(["./arena_play"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # корень проекта (тест лежит в tests/)
+    p = subprocess.Popen([os.path.join(root, "build", "arena_play")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1, cwd=root)
     def send(o): p.stdin.write(json.dumps(o, ensure_ascii=False) + "\n"); p.stdin.flush()
     def recv(): return json.loads(p.stdout.readline())
     send({"cmd": "price", "char": char}); pr = recv()["data"]

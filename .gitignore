@@ -1,33 +1,15 @@
+# сборка: make кладёт программы сюда
+/build/
+# работа сервера: игроки, адрес туннеля, журналы
+/state/
+# итоги прогонов (калибровка, лестницы, тесты, профили) и обучение сетей
+/results/
+/runs/
+# локальная языковая модель (5 ГБ) — в git только веса сетей игры
 /models/*
 !/models/nets/
+# выгрузка бестиария и временное
 Sushnost/
 __pycache__/
-perf.data
-perf.data.old
 *.zip
-/builder_runs
-/net_runs
-/runs/
-/results/perf.data*
 *.bak
-/arena
-/arena_play
-/builder
-/net_builder
-/net_fighter
-/net_fighter_live
-/net_fighter_new
-/net_teams
-/tests
-/audit_tests
-# создаётся при работе (аудит кода, раздел Д, шаг 5): игроки, адрес туннеля, журналы, итоги прогонов
-players.json
-players.json.tmp
-lhr_url.txt
-play_server.log
-tests_full.txt
-tests_summary.txt
-calib*.txt
-summary_calib*.txt
-tiers_fit.txt
-tiers_log.txt

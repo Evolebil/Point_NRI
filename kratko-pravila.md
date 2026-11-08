@@ -1,1 +1,0 @@
-docs/kratko-pravila.md

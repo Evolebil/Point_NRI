@@ -1,1 +1,0 @@
-tools/apply_tiers.py

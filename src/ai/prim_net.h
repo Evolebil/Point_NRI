@@ -1,7 +1,5 @@
 // ============================================================================
-// Сеть-боец v21 (ТЗ v21, №4 и №5): ходит примитивами (applyPrim) и видит карту. Подключается в boss_arena_v20.cc после
-// fighter_net.h. Старая сеть со стойками (fighter_net.h) по решению владельца отключена: её веса грузятся только по
-// переменной DND_NET_LEGACY (для сравнения).
+// Сеть-боец v21 (ТЗ v21, №4 и №5): ходит примитивами (applyPrim) и видит карту. Подключается в движке перед fight().
 //
 // Решение — один примитив за шаг, пока сеть не выберет «конец хода». На каждом шаге:
 //   наблюдение = о себе и ходе (бюджет действия, движения, решено за ход) + до MAXE известных врагов + способности (MAXA × FA)
@@ -1209,7 +1207,7 @@ static void netTurnP(World& w, int idx) {
 inline const PNet* primNet() {
     static const PNet* net = []() -> const PNet* {
         const char* e = std::getenv("DND_NETP");
-        const std::string path = e ? std::string(e) : dndPath("net_fighter_p.bin");
+        const std::string path = e ? std::string(e) : dndPath("models/nets/net_fighter_p.bin");
         if (path == "off") return nullptr;
         static PNet n;
         if (!loadP(path, n, true)) {
@@ -1222,49 +1220,41 @@ inline const PNet* primNet() {
 }
 }   // namespace pn
 
-// Подключение к бою: новая сеть (prim_net, веса net_fighter_p.bin) или, если задана DND_NET_LEGACY, старая со стойками.
-// Бойцы с ИНТ >= 12 ходят по сети (12–15: в 25% ходов — обычным ботом, 16+: всегда сеть, жадно); g_forceNetMask — сеть
-// независимо от ИНТ (игра против нейросети). Нет весов — все ходят ботом.
-inline bool anyFighterNet() { return pn::primNet() != nullptr || fighterNet() != nullptr; }
+// Подключение к бою: сеть-боец (веса models/nets/net_fighter_p.bin). Бойцы с ИНТ >= 12 ходят по сети (12–15: в 25%
+// ходов — обычным ботом, 16+: всегда сеть); g_forceNetMask — сеть независимо от ИНТ (игра против нейросети). Нет весов —
+// все ходят ботом.
+inline bool anyFighterNet() { return pn::primNet() != nullptr; }
 struct AutoNet {
-    NetCtx ctx;
     pn::Ctx pctx;
-    bool on = false, prim = false;
+    bool on = false;
     AutoNet(const Boss& A, const Boss& B) {
         const pn::PNet* pnet = pn::primNet();
-        const Net* net = pnet ? nullptr : fighterNet();
-        if ((!pnet && !net) || g_ctx || pn::g_pctx) return;   // нет сети или бой ведёт обучение со своим контекстом
+        if (!pnet || pn::g_pctx) return;   // нет сети или бой ведёт обучение со своим контекстом
         const Boss* bs[2] = {&A, &B};
         for (int i = 0; i < 2; i++) {
             const int in = bs[i]->stats[INT];
             const bool forced = (g_forceNetMask >> i) & 1;
             if (in < 12 && !forced) continue;
-            (pnet ? pctx.side[i].active : ctx.side[i].active) = true;
-            (pnet ? pctx.fallback[i] : ctx.fallback[i]) = (in <= 15 && !forced) ? 0.25 : 0.0;
+            pctx.side[i].active = true;
+            pctx.fallback[i] = (in <= 15 && !forced) ? 0.25 : 0.0;
             on = true;
         }
         if (!on) return;
-        if (pnet) {
+        {
             // в игре и калибровке сеть выбирает по вероятностям с температурой 0.25 (решение 2026-11-01): всегда самый
             // вероятный ход у двух одинаковых сетей давал зеркальное ожидание и затяжные бои (сама с собой 5% до предела
             // раундов против 2%), сила против бота почти та же (57.2% против 58.4%). DND_TEMP=0 — всегда самый вероятный
             const char* te = std::getenv("DND_TEMP");
             const double t = te ? std::atof(te) : 0.25;
-            prim = true;
             pctx.net = pnet;
             pctx.greedy = t <= 0;
             pctx.temp = t > 0 ? t : 1.0;
             pctx.rng.seed(rng.next());   // своё зерно на бой: по зерну боя результат тот же
             pn::g_pctx = &pctx;
-        } else {
-            ctx.net = net;
-            ctx.greedy = true;
-            g_ctx = &ctx;
         }
     }
-    bool controls(int team) const { return on && (prim ? pctx.side[team].active : ctx.side[team].active); }
+    bool controls(int team) const { return on && pctx.side[team].active; }
     ~AutoNet() {
-        if (on && prim) pn::g_pctx = nullptr;
-        if (on && !prim) g_ctx = nullptr;
+        if (on) pn::g_pctx = nullptr;
     }
 };

@@ -22,6 +22,13 @@
 #include <mutex>
 
 namespace pt {
+static const long long BUDGETS[6] = {200, 400, 800, 1600, 3200, 6400};
+// цены атомов сейчас (стартовые из AD[])
+static Coef coefNow() {
+    Coef C;
+    for (int a = 0; a < AT_N; a++) C[a] = AD[a].init;
+    return C;
+}
 using pn::Decision;
 using pn::PNet;
 
@@ -429,7 +436,7 @@ static int bcMain(int argc, char** argv) {
     AdamState aC, aP;
     aC.init(net.core.p.size());
     aP.init(net.ptr.size());
-    Coef C = cmb::coefNow();
+    Coef C = coefNow();
     Hyper hp;
     hp.lr = 1e-3;
     const int chunk = 256;
@@ -483,7 +490,7 @@ static int trainMain(int argc, char** argv) {
     }
     loadCalibBld();   // этап 5б: боссы сетей-Сборщиков в обучении (DND_CALIB_BLD — доля пар)
     if (g_cb.share > 0) std::printf("обучение на смеси: %.0f%% пар с боссами сетей-Сборщиков\n", 100 * g_cb.share);
-    Coef C = cmb::coefNow();
+    Coef C = coefNow();
     Hyper hp;
     if (const char* e = std::getenv("DND_LR")) hp.lr = std::atof(e);
     if (const char* e = std::getenv("DND_ENT")) hp.ent = std::atof(e);
@@ -605,7 +612,7 @@ static int replayMain(int argc, char** argv) {
     if (!pn::loadP(argv[2], net, true)) return 1;
     const long long B = std::atoll(argv[3]);
     const uint64_t seed = std::strtoull(argv[4], nullptr, 10);
-    Coef C = cmb::coefNow();
+    Coef C = coefNow();
     rng.seed(seed);
     Boss A, Bo;
     makePair(B, C, A, Bo);
@@ -640,7 +647,7 @@ static int fairMain(int argc, char** argv) {
     PNet net;
     if (!pn::loadP(argv[2], net, true)) return 1;
     const int N = std::atoi(argv[3]);
-    Coef C = cmb::coefNow();
+    Coef C = coefNow();
     std::vector<std::array<int, 2>> res(N);
     std::vector<long long> bud(N);
     parallelFor(N, [&](int i) {
@@ -688,7 +695,7 @@ static int evalMain(int argc, char** argv) {
     PNet net;
     if (!pn::loadP(argv[2], net, true)) return 1;
     loadCalibBld();   // DND_CALIB_BLD > 0 — часть боссов от сетей-Сборщиков (по умолчанию только генератор)
-    const EvalRes ev = evaluate(cmb::coefNow(), net, std::atoi(argv[3]), HELD_OUT);
+    const EvalRes ev = evaluate(coefNow(), net, std::atoi(argv[3]), HELD_OUT);
     std::printf("сеть (ИНТ 16, жадно) против правила-бота (ИНТ 10), %d отложенных боёв: победы %.1f%% (±%.1f п.п.), раундов %.1f, решений на бой %.1f, отказов %lld, странных побед %zu\n",
                 ev.n, 100 * ev.win, 100 * 2 * std::sqrt(0.25 / ev.n), ev.rounds, ev.steps, ev.illegal, ev.strange.size());
     std::printf("  ход: ходов сети %lld, с перемещением %.1f%%, упёрлись в предел %d решений %lld (%.2f на бой), завершены движком %lld, решений с закрытым «концом хода» (пустой ход) %lld\n",
@@ -696,5 +703,97 @@ static int evalMain(int argc, char** argv) {
     std::printf("  по боссам: %s\n", ev.byBoss.bosses().c_str());
     for (size_t i = 0; i < std::min<size_t>(ev.strange.size(), 10); i++) std::printf("  %s\n", ev.strange[i].c_str());
     return 0;
+}
+
+// Новая сеть (prim_net.h): pinit — сохранить случайные начальные веса; psmoke — бои сети (ИНТ 16) против бота (ИНТ 10): сколько
+// решений, сколько отказов исполнителя (должно быть 0: маски не пускают недопустимое), сколько боёв дошло до конца.
+static int pinitMain(int argc, char** argv) {
+    if (argc < 3) return 1;
+    pn::PNet n;
+    n.init(argc > 3 ? std::strtoull(argv[3], nullptr, 10) : 1);
+    if (!pn::saveP(argv[2], n)) return 1;
+    std::printf("случайные веса новой сети записаны: %s (вход %d, параметров %zu)\n", argv[2], pn::D_IN, n.core.p.size() + n.ptr.size());
+    return 0;
+}
+static int psmokeMain(int argc, char** argv) {
+    if (argc < 3) return 1;
+    pn::PNet net;
+    if (!pn::loadP(argv[2], net, true)) return 1;
+    const int N = argc > 3 ? std::atoi(argv[3]) : 400;
+    Coef C = coefNow();
+    std::vector<long long> steps(N), illegal(N);
+    std::vector<int> res(N), rounds(N);
+    parallelFor(N, [&](int i) {
+        const uint64_t sd = mix(4321, i);
+        rng.seed(sd);
+        Boss A, Bo;
+        makePair(BUDGETS[mix(sd, 5) % 6], C, A, Bo);
+        const int learner = (int)(mix(sd, 6) & 1);
+        (learner ? Bo : A).stats[INT] = 16;
+        (learner ? A : Bo).stats[INT] = 10;
+        pn::Ctx ctx;
+        ctx.net = &net;
+        ctx.greedy = false;
+        ctx.rng.seed(mix(sd, 99));
+        ctx.side[learner].active = true;
+        pn::g_pctx = &ctx;
+        g_rlTeam[learner] = true;
+        const long long r0 = g_rounds;
+        const int r = fight(A, Bo);
+        g_rlTeam[learner] = false;
+        pn::g_pctx = nullptr;
+        res[i] = r == 2 ? 2 : (r == learner ? 1 : 0);
+        rounds[i] = (int)(g_rounds - r0);
+        steps[i] = ctx.steps;
+        illegal[i] = ctx.illegal;
+    });
+    long long st = 0, il = 0, wins = 0, draws = 0, rr = 0;
+    for (int i = 0; i < N; i++) st += steps[i], il += illegal[i], wins += res[i] == 1, draws += res[i] == 2, rr += rounds[i];
+    std::printf("новая сеть (выбор с вероятностями) против бота, %d боёв: побед %.1f%%, ничьих %.1f%%, раундов %.1f, решений на бой %.1f, отказов исполнителя %lld\n", N,
+                100.0 * wins / N, 100.0 * draws / N, (double)rr / N, (double)st / N, il);
+    return il == 0 ? 0 : 2;
+}
+
+// ход из примитивов (v21, №4): бой, где ходы бота записаны примитивами, и тот же бой, где их повторяет исполнитель
+// (applyPrim), совпадают до бита: исход, длина, ХП обоих боссов
+static int checkMain() {
+    Coef C = coefNow();
+    const int N = 4000;
+    // v21, №4: ход из примитивов. Бой, где ходы босса записаны примитивами, и тот же бой, где эти примитивы повторяет
+    // исполнитель (applyPrim), совпадают до бита: исход, длина, ХП обоих боссов
+    std::vector<int> okP(N, 0);
+    std::vector<long long> nPrim(N, 0);
+    parallelFor(N, [&](int i) {
+        const uint64_t sd = mix(77, i);
+        const long long B = BUDGETS[mix(sd, 5) % 6];
+        auto run = [&](PrimLog& L, double* hp, long long& rounds) {
+            rng.seed(sd);
+            Boss A, Bo;
+            makePair(B, C, A, Bo);
+            A.stats[INT] = Bo.stats[INT] = 10;
+            const long long r0 = g_rounds;
+            g_primLog = &L;
+            const int r = fight(A, Bo);
+            g_primLog = nullptr;
+            rounds = g_rounds - r0;
+            hp[0] = g_lastHp[0];
+            hp[1] = g_lastHp[1];
+            return r;
+        };
+        PrimLog rec;
+        rec.who = (int)(mix(sd, 6) & 1);
+        double h1[2], h2[2];
+        long long n1 = 0, n2 = 0;
+        const int r1 = run(rec, h1, n1);
+        for (auto& t : rec.turns) nPrim[i] += (long long)t.size();
+        rec.replay = true;
+        const int r2 = run(rec, h2, n2);
+        okP[i] = r1 == r2 && n1 == n2 && h1[0] == h2[0] && h1[1] == h2[1] && rec.next == rec.turns.size();
+    });
+    int sameP = 0;
+    long long prims = 0;
+    for (int i = 0; i < N; i++) sameP += okP[i], prims += nPrim[i];
+    std::printf("ход из примитивов: бой с повтором записанных примитивов бота совпадает с исходным до бита: %d из %d боёв (примитивов %.1f на бой)\n", sameP, N, (double)prims / N);
+    return sameP == N ? 0 : 2;
 }
 }   // namespace pt

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Короткая сводка двух калибровок (то, что нужно прислать Claude).
-Использование: python3 an.py calibA.txt calibB.txt [слова-фильтры для атомов]
+Использование: python3 tools/an.py results/calib/calibA.txt results/calib/calibB.txt [слова-фильтры для атомов]
 Печатает: длину боя по бюджетам, атомы вне коридора 46–54%, расхождения зёрен, наклон призывателей и выбранные атомы."""
 import re, sys
 def load(f):

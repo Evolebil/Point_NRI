@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
-"""Шпаргалка цен «коротко»: все цены и проценты при заданном бюджете, посчитанные движком (./arena_play catalog).
-Использование:  python3 sheet.py [бюджет=800] > kratko-pravila.md      (play_server.py отдаёт её же на странице игры)"""
+"""Шпаргалка цен «коротко»: все цены и проценты при заданном бюджете, посчитанные движком (build/arena_play catalog).
+Использование:  python3 tools/sheet.py [бюджет=800] > docs/kratko-pravila.md      (web/play_server.py отдаёт её же на странице игры)"""
 import json
 import math
 import os
 import subprocess
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if os.path.basename(HERE) in ("web", "tools", "tests"):   # запуск не через симлинк в корне — корень проекта выше
-    HERE = os.path.dirname(HERE)
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # корень проекта (скрипт лежит в tools/)
 
 
 def catalog(budget):
-    p = subprocess.run([os.path.join(HERE, "arena_play")], input=json.dumps({"cmd": "catalog", "budget": budget}) + "\n" + '{"cmd":"quit"}\n',
+    p = subprocess.run([os.path.join(HERE, "build", "arena_play")], input=json.dumps({"cmd": "catalog", "budget": budget}) + "\n" + '{"cmd":"quit"}\n',
                        capture_output=True, text=True, encoding="utf-8", cwd=HERE, timeout=30)
     return json.loads(p.stdout.splitlines()[0])["data"]
 
