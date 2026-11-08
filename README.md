@@ -2,35 +2,31 @@
 
 Босс собирается на бюджет очков из «атомов» (механик); цены атомов подбирает симуляция так, чтобы владелец атома выигрывал ~50% боёв.
 
-## Файлы
-| Файл | Что это |
+## Папки
+Файлы разложены по папкам (аудит кода, шаг 6, 8 ноября). В корне остались симлинки на всё, чем пользуются команды и
+скрипты, поэтому команды ниже работают из корня как раньше; `g++ -Isrc/engine -Isrc/ai src/apps/arena_play.cc` тоже
+собирается.
+
+| Папка | Что там |
 |---|---|
-| `boss_arena_v20.cc` | движок: правила, генератор боссов, бой, калибровка цен (`./arena`) |
-| `arena_play.cc`, `play_server.py`, `play_template.html`, `human_turn.h`, `char_spec.h`, `mini_json.h` | игра за персонажа: конструктор с живой ценой, выбор соперника, бой по ходам в браузере (`python3 play_server.py`) |
-| `custom_map.h` | карты: запись арены в JSON, пользовательские карты игрока (проверка, применение) |
-| `sheet.py`, `kratko-pravila.md`, `calc.py` | шпаргалка цен «коротко» по движку и консольный калькулятор персонажа |
-| `viewer_template.html`, `replay_export.h` | красивый просмотр: сборка боссов по покупкам и бой на арене с погоней (один HTML-файл, без сервера) |
-| `limity.json` | технические потолки и растяжки (призыв): блокируют вырожденные бои, пороги пишут WARN в журнал |
-| `audit_tests20.cc` | 233 проверки правил и инвариантов (`./run_tests.sh audit_tests20.cc`) |
-| `prim_net.h`, `prim_train.h`, `run_ptrain.sh`, `net_fighter_p.bin` | сеть-боец v21 и её обучение (копирование бота, PPO): ходит примитивами, видит окно карты (туман войны); веса подключаются автоматически (ИНТ ≥12), пока не обучена — все ходят ботом |
-| `net_fighter.cc`, `fighter_net.h`, `fighter_train.h`, `gru.h`, `net_fighter.bin` | старая сеть-боец со стойками (GRU, обучение наградой); в v21 отключена, подключается по `DND_NET_LEGACY=<файл>` |
-| `net_builder.cc`, `builder_net.h` | сеть-Сборщик (GRU поверх решений генератора), обучение наградой; `net_builder train/eval/show/report` |
-| `net_teams.cc` | две команды нейросетей (Сборщик + боец), совместное обучение; `net_teams train/eval` |
-| `builder.cc` | умный Сборщик (обучение наградой) и замер лестниц размерных атомов |
-| `pravila-v21.md` | правила v21 (этапы 0–3 ТЗ `TZ_arena_v21`), формулы цены, таблица цен; что изменилось против v20 — §17 |
-| `pravila-v20.md` | правила v20 (для сравнения) |
-| `builder_runs/v20_snapshot/` | движок и заголовки v20: собрать отдельно (`g++ ... boss_arena_v20.cc` в этой папке) и сравнить с v21 на тех же зёрнах |
-| `istoriya-razrabotki.md` | журнал разработки по этапам: отчёты, таблицы, выводы |
-| `run_calib.sh`, `an.py`, `bake.py` | калибровка двумя зёрнами, сводка, запекание цен в движок |
-| `apply_tiers.py` | перенос результата `builder tiers` (лестницы) в движок |
-| `builder_runs/` | линейные чемпионы Сборщика (`v4_champ_*`) и последние отчёты о дырах |
-| `net_runs/` | веса сетей-Сборщиков и команд, отчёты, логи обучения |
-| `Sushnost/`, `models/` | конвейер выгрузки данных (классы, заклинания, монстры) и локальная модель для него |
-| `.clang-format` | единый стиль (4 пробела, колонка 120) |
+| `src/engine/` | движок: `boss_arena_v20.cc` (правила, генератор, бой, калибровка; `./arena`), карты `world_gen.h` и `custom_map.h`, игрок `char_spec.h` и `human_turn.h`, просмотр `replay_export.h`, `mini_json.h`, `par.h` (потоки), `dnd_root.h` (где искать файлы: `DND_ROOT` → текущая папка → папка программы) |
+| `src/ai/` | сети: боец v21 `prim_net.h` и обучение `prim_train.h`, старый боец `fighter_net.h`/`fighter_train.h`, Сборщик `builder_net.h`, общий `gru.h` |
+| `src/apps/` | программы: `arena_play.cc` (движок игры для сервера), `net_fighter.cc`, `net_builder.cc`, `net_teams.cc`, `builder.cc` |
+| `web/` | игра в браузере: `play_server.py` (`python3 play_server.py`, журнал ошибок — stderr), `play_template.html`, `viewer_template.html` (просмотр боя) |
+| `relay/` | связь через Cloudflare Workers (`relay/host.mjs`; секрет `host_key.txt` — не в git) |
+| `tools/` | `calc.py` (цена персонажа), `sheet.py` (шпаргалка), `bake.py` / `an.py` (калибровка), `apply_tiers.py`, `apply_adv.py` |
+| `scripts/` | `start_*.sh` (запуск игры и туннелей), `run_calib*.sh`, `run_ptrain.sh`, `run_builder.sh`, `live_replay.sh` |
+| `tests/` | `audit_tests20.cc` (233 проверки, `./run_tests.sh audit_tests20.cc`), `test_play.py`; `tests/golden/` — эталон для уборки кода: `make_golden.sh` (снять / `check`, около часа) и `quick_check.sh` (минуты) |
+| `config/` | `limity.json` — технические потолки и растяжки призыва |
+| `models/nets/` | веса сетей в игре: `net_fighter_p.bin` (боец v21), `net_fighter.bin` (старый); остальное в `models/` — локальная языковая модель, не в git |
+| `docs/` | правила (`pravila-v21.md`, `pravila-v20.md`), ТЗ и список работ (`TZ_backlog.md`, `TZ_atomy_posle_testa.md`, …), журнал `istoriya-razrabotki.md`, каталог атомов, памятка игрока, шпаргалка `kratko-pravila.md` |
+| `results/` | итоги прогонов (калибровка, лестницы, тесты) — не в git |
+| `runs/` | `runs/net/` (= `net_runs/`) — веса и журналы обучения сетей; `runs/builder/` (= `builder_runs/`) — Сборщик, резервные копии; не в git |
+| `demo/`, `kampaniya/`, `Sushnost/` | примеры боёв и персонаж; кампания (указатель на Obsidian, карты мира); выгрузка данных бестиария |
 
 ## Команды
 ```
-g++ -std=c++17 -O2 -pthread -o arena_play arena_play.cc && python3 play_server.py   # игра за персонажа: http://127.0.0.1:8770/
+g++ -std=c++17 -O2 -pthread -o arena_play arena_play.cc && python3 play_server.py   # игра за персонажа: http://127.0.0.1:8770/ (журнал ошибок — stderr сервера)
 python3 calc.py demo/rycar.json                    # цена персонажа по файлу
 python3 sheet.py 800 > kratko-pravila.md           # шпаргалка цен
 ./arena replay 1600 42 battle.html                 # просмотр: бюджет, зерно, файл (viewer_template.html лежит рядом)
@@ -58,4 +54,4 @@ cp net_runs/p1.bin.best.bin net_fighter_p.bin     # поставить обуч�
 
 ## Правила разработки
 - Любая смена правил сборки обнуляет обучение Сборщиков и ботов; эталон `T126` (бой побитово как v20) тогда перезаписывается.
-- Перед правкой производительности снимайте эталон: `./arena 0 12000 6 42 | md5sum` не должен меняться.
+- Перед правкой производительности или уборкой снимайте эталон: `./tests/golden/make_golden.sh`, после — `./tests/golden/make_golden.sh check` (всё должно совпасть).
