@@ -35,7 +35,7 @@ static Boss makeOpponent(const Json& opp, long long budget, unsigned seed, const
     rng.seed(mix(seed, 31));
     if (mode == "net") {
         bld::BNet net;
-        const std::string path = dndPath(opp["builder"].str("models/nets/builder5_B.bin"));
+        const std::string path = dndPath(opp["builder"].str("models/nets/builder_B.bin"));
         if (bld::loadNet(path, net)) {
             bld::BrainNet b(&net, nullptr);
             g_bb = &b;

@@ -11,6 +11,7 @@ from states import base, realm_labels, X0, X1, Y0, Y1
 import races, langs, roads as roadsmod
 from cities_data import build
 from resources import SITES, KIND, MITHRIL
+from races import DRAGONS, DCOL
 W = 4800
 def merc(lat): return math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
 def render(draw, path, transparent=False):
@@ -49,7 +50,8 @@ if __name__ == "__main__":
     routes = [dict(r=l["route"], k=l["kind"], g=l["group"], a=l["a"], b=l["b"], km=l["km"], e=l["exact"], l=[[p[1], p[0]] for p in l["line"]]) for l in legs]
     res = [dict(k=k, n=n, x=x, y=y, c=KIND[k][0]) for k, n, x, y in SITES]
     res += [dict(k="Мифрил", n="Мифрил: " + n, x=x, y=y, c="#7fd3e6") for n, x, y, w, h in MITHRIL]
-    data = dict(bounds=[[Y0, X0], [Y1, X1]], cities=cities, routes=routes, res=res)
+    dragons = [dict(col=c, a=a, p=p, x=x, y=y, c=DCOL[c]) for c, a, p, x, y in DRAGONS]
+    data = dict(bounds=[[Y0, X0], [Y1, X1]], cities=cities, routes=routes, res=res, dragons=dragons)
     html = open(HERE + "/interactive_template.html", encoding="utf-8").read().replace("/*DATA*/null", json.dumps(data, ensure_ascii=False))
     open(out + "/index.html", "w", encoding="utf-8").write(html)
     print("готово:", out, len(cities), "городов,", len(routes), "отрезков путей,", len(res), "ресурсов")

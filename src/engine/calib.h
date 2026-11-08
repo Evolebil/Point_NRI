@@ -7,7 +7,7 @@
 #include "builder_net.h"   // этап 5б: калибровка на смеси — часть боссов собирают сети-Сборщики
 
 // Калибровка на смеси (этап 5б, решение владельца): доля пар DND_CALIB_BLD (по умолчанию 0 — только генератор), где
-// боссов собирают сети-Сборщики (веса DND_CALIB_BLDA и DND_CALIB_BLDB, по умолчанию models/nets/builder5_A/B.bin). Из
+// боссов собирают сети-Сборщики (веса DND_CALIB_BLDA и DND_CALIB_BLDB, по умолчанию models/nets/builder_A/B.bin). Из
 // таких пар треть — Сборщик против Сборщика (A против B), две трети — Сборщик (A или B) против генератора
 struct CalibBld {
     bld::BNet net[2];
@@ -20,7 +20,7 @@ void loadCalibBld() {
     if (g_cb.share <= 0) return;
     const char* pa = std::getenv("DND_CALIB_BLDA");
     const char* pb = std::getenv("DND_CALIB_BLDB");
-    const std::string fa = pa ? pa : dndPath("models/nets/builder5_A.bin"), fb = pb ? pb : dndPath("models/nets/builder5_B.bin");
+    const std::string fa = pa ? pa : dndPath("models/nets/builder_A.bin"), fb = pb ? pb : dndPath("models/nets/builder_B.bin");
     g_cb.ok = bld::loadNet(fa, g_cb.net[0]) && bld::loadNet(fb, g_cb.net[1]);
     if (!g_cb.ok) {
         std::fprintf(stderr, "ВНИМАНИЕ: веса Сборщиков %s / %s не загрузились — калибровка только на генераторе\n", fa.c_str(), fb.c_str());

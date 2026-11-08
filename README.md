@@ -16,7 +16,7 @@
 | `scripts/` | `start_*.sh` — запуск игры и туннелей; `run_calib*.sh`, `run_ptrain.sh`, `run_builder.sh`, `live_replay.sh` — прогоны |
 | `tests/` | `audit_tests.cc` + `audit/*.inc` (проверки по диапазонам номеров), `run_tests.sh`, `test_play.py`; `golden/` — эталон для перестроек кода |
 | `config/` | `limity.json` — технические потолки и растяжки призыва |
-| `models/nets/` | веса сетей игры: `net_fighter_p.bin` (боец), `builder5_A/B.bin` (Сборщики); остальное в `models/` — локальная языковая модель, не в git |
+| `models/nets/` | веса сетей игры: `net_fighter_p.bin` (боец), `builder_A/B.bin` (Сборщики; в игре — B); остальное в `models/` — локальная языковая модель, не в git |
 | `docs/` | правила `pravila-v21.md`, ТЗ и список работ (`TZ_backlog.md`, …), журнал `istoriya-razrabotki.md`, каталог атомов, памятка игрока, шпаргалка |
 | `demo/` | примеры боёв и персонаж `rycar.json` |
 | `kampaniya/` | кампания (указатель на Obsidian, карты мира) |

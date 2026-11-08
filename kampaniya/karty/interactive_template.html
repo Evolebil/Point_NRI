@@ -20,24 +20,35 @@
 <div id="map"></div>
 <script>
 const D = /*DATA*/null;
+if (!D) {  // открыли сам шаблон, а не собранную карту
+  document.getElementById("map").innerHTML = "<p style='padding:2em;font-size:18px'>Это шаблон без данных. Готовая карта — " +
+    "<b>Obsidian_Vault/Компейн - Аномалии планов/Мир/География/Карты/Интерактивная карта/index.html</b>.<br>" +
+    "Пересобрать: <code>python3 interactive.py «папка» [--html]</code> в kampaniya/karty.</p>";
+  throw new Error("шаблон без данных");
+}
+if (!window.L) document.getElementById("map").innerHTML = "<p style='padding:2em;font-size:18px'>Не загрузилась библиотека карты Leaflet (unpkg.com): нужен интернет.</p>";
 const map = L.map("map", { zoomSnap: 0.5, minZoom: 3, maxZoom: 10, maxBounds: L.latLngBounds(D.bounds).pad(0.1) });
 map.fitBounds(D.bounds);
 const img = f => L.imageOverlay(f, D.bounds);
 const bases = { "Государства 1208": img("gosudarstva.png"), "Расы": img("rasy.png"), "Людские наречия": img("yazyki.png") };
 bases["Государства 1208"].addTo(map);
 const dorogi = img("dorogi.png").addTo(map);
-const COL = { land: "#8b1a1a", sea: "#1a4f8b", river: "#0f7a6b", act1: "#9b27b0" };
-const routes = L.layerGroup(), act1 = L.layerGroup();
+const COL = { land: "#8b1a1a", sea: "#1a4f8b", river: "#0f7a6b" };
+const routes = L.layerGroup();
 for (const r of D.routes) {
-  const c = r.g === "act1" ? COL.act1 : COL[r.k];
-  const st = { color: c, weight: r.g === "act1" ? 5 : 3.5, opacity: .9 };
+  const c = COL[r.k];
+  const st = { color: c, weight: 3.5, opacity: .9 };
   if (r.k === "sea") st.dashArray = "8 5";
   if (r.k === "river") st.dashArray = "3 3";
   if (!r.e) { st.dashArray = "1 6"; st.weight = 3; }
   L.polyline(r.l, st).bindTooltip(`<b>${r.r || "путь"}</b><br>${r.a} — ${r.b}: ${r.km} км${r.e ? "" : "<br>(трассы нет, напрямую)"}`, { sticky: true })
-    .addTo(r.g === "act1" ? act1 : routes);
+    .addTo(routes);
 }
-routes.addTo(map); act1.addTo(map);
+routes.addTo(map);
+const AGE_R = { "вирмлинг": 5, "молодой": 7, "взрослый": 10, "древний": 14 };
+const dragons = L.layerGroup();
+for (const d of D.dragons) L.circleMarker([d.y, d.x], { radius: AGE_R[d.a], color: "#222", weight: 2, fillColor: d.c, fillOpacity: 1 })
+  .bindTooltip(`<b>Дракон: ${d.col}, ${d.a}</b><br>${d.p}`).addTo(dragons);
 const cities = L.layerGroup().addTo(map), labels = [];
 for (const c of D.cities) {
   const rad = c.p >= 50000 ? 7 : c.p >= 20000 ? 5.5 : c.p >= 5000 ? 3.5 : 2;
@@ -64,12 +75,12 @@ function relabel() {
   }
 }
 map.on("zoomend moveend overlayadd", relabel); map.whenReady(relabel); cities.on("add", () => setTimeout(relabel));
-L.control.layers(bases, { "Старые римские дороги и реки": dorogi, "Главные пути": routes, "Акт I: пути к Каркассону": act1,
+L.control.layers(bases, { "Старые римские дороги и реки": dorogi, "Главные пути": routes, "Логова драконов": dragons,
   "Города": cities, "Ресурсы": res }, { collapsed: false }).addTo(map);
 const lg = L.control({ position: "bottomleft" });
 lg.onAdd = () => { const d = L.DomUtil.create("div", "legend");
   d.innerHTML = `<b>Мир кампании «Аномалии планов», 1208</b><br>
-  <i style="background:${COL.land}"></i>сухопутный путь &nbsp;<i style="background:${COL.river}"></i>речной &nbsp;<i style="background:${COL.sea}"></i>морской &nbsp;<i style="background:${COL.act1}"></i>Акт I<br>
+  <i style="background:${COL.land}"></i>сухопутный путь &nbsp;<i style="background:${COL.river}"></i>речной &nbsp;<i style="background:${COL.sea}"></i>морской<br>
   Приближайте — появятся подписи меньших городов. Наведите на путь — длина в км.<br>
   <span style="color:#666">Дороги: Itiner-e (CC BY 4.0); города: Buringh (CC0), Чандлер (CC BY 4.0); основа: Natural Earth.</span>`; return d; };
 lg.addTo(map);
