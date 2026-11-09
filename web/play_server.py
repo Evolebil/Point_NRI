@@ -5,6 +5,7 @@
 Страница: web/play.html + web/css/play.css + web/js/*.js; общий код рисования — из web/viewer_template.html.
 API:      POST /api, JSON. У каждого браузера свой id (sid): свой бой (start/step), свои запросы цен.
           Комнаты (v21, бои нескольких команд): room_create, room_join, room_set (персонаж, команда), room_bot (бот в команду),
+          room_npc (противник из карточки персонажа — кампания),
           room_kick, room_start (хозяин), room_poll (состояние, кадры, мой ход), room_step (ход игрока своего места).
 """
 import gzip
@@ -156,6 +157,7 @@ class Room:
         self.err = ""
         self.opts = {}
         self.lock = threading.Lock()
+        self.order = []        # имена участников боя по порядку (для итогового состояния)
         self.t = time.time()
         self.seats = {}        # sid -> место (номер человека в составе)
         self.ver = 0           # растёт при любом изменении (долгий опрос ждёт его)
@@ -174,7 +176,7 @@ class Room:
                 if k == self.pending["seat"]:
                     who = next((m["name"] for m in self.members if m["sid"] == s), "")
         return {"type": "room", "code": self.code, "host": self.host == sid, "status": self.status, "err": self.err,
-                "members": [{"name": m["name"], "team": m["team"], "bot": m["bot"], "me": m["sid"] == sid, "ready": bool(m["char"]) or m["bot"] is not None,
+                "members": [{"name": m["name"], "team": m["team"], "bot": m["bot"], "npc": bool(m.get("npc")), "me": m["sid"] == sid, "ready": bool(m["char"]) or m["bot"] is not None,
                              "i": i} for i, m in enumerate(self.members)],
                 "seat": self.seats.get(sid, -1), "init": self.init if self.init and since == 0 else None,
                 "frames": self.frames[since:], "nframes": len(self.frames), "req": mine["req"] if mine else None,
@@ -194,7 +196,8 @@ class Room:
         else:
             self.pending = None
             self.status = "end"
-            self.end = {k: out.get(k) for k in ("result", "reason", "rounds", "scores")}
+            self.end = {k: out.get(k) for k in ("result", "reason", "rounds", "scores", "state")}
+            self.end["who"] = self.order   # чьё состояние: имена участников по порядку (state[i] — у who[i])
             self.eng.kill()
             self.members = [m for m in self.members if not m.get("left")]
 
@@ -303,6 +306,13 @@ def room_cmd1(msg, sid):
                 return {"type": "error", "err": "ботов добавляет хозяин комнаты до боя"}
             r.members.append({"sid": "bot%d" % random.randint(0, 1 << 30), "name": "Бот %d" % (1 + sum(m["bot"] is not None for m in r.members)),
                               "team": max(0, min(63, int(msg.get("team", 1)))), "char": None, "bot": max(20, min(100000, int(msg.get("budget", 500))))})
+        elif cmd == "room_npc":   # противник из карточки (кампания, задача Б-2): персонаж без игрока — им ходит бот или сеть по ИНТ
+            if r.host != sid or r.status != "lobby":
+                return {"type": "error", "err": "противников добавляет хозяин комнаты до боя"}
+            if not isinstance(msg.get("char"), dict):
+                return {"type": "error", "err": "нужна карточка персонажа (char)"}
+            r.members.append({"sid": "npc%d" % random.randint(0, 1 << 30), "name": str(msg.get("name") or msg["char"].get("name") or "Противник")[:40],
+                              "team": max(0, min(63, int(msg.get("team", 1)))), "char": msg["char"], "bot": 0, "npc": True})
         elif cmd == "room_kick":
             if r.host != sid or r.status != "lobby":
                 return {"type": "error", "err": "убирает хозяин до боя"}
@@ -314,18 +324,21 @@ def room_cmd1(msg, sid):
                 return {"type": "error", "err": "начинает хозяин комнаты"}
             if r.status == "fight":
                 return {"type": "error", "err": "бой уже идёт"}
-            humans = [m for m in r.members if m["bot"] is None]
+            humans = [m for m in r.members if m["bot"] is None]   # NPC из карточки — не игроки (bot = 0)
             if any(not m["char"] for m in humans):
                 return {"type": "error", "err": "не все игроки выбрали персонажа: " + ", ".join(m["name"] for m in humans if not m["char"])}
             r.seats = {m["sid"]: k for k, m in enumerate(humans)}
             members = []
             for m in r.members:
                 e = {"team": m["team"], "name": m["name"]}
-                if m["bot"] is not None:
+                if m.get("npc"):
+                    e["char"] = m["char"]   # без места: ходит бот или сеть
+                elif m["bot"] is not None:
                     e["budget"] = m["bot"]
                 else:
                     e["char"], e["seat"] = m["char"], r.seats[m["sid"]]
                 members.append(e)
+            r.order = [m["name"] for m in r.members]
             opts = {k: msg[k] for k in ("seed", "rounds", "map", "world") if k in msg}
             r.opts = {k: v for k, v in opts.items() if k in ("seed", "rounds")}
             r.status, r.err, r.frames, r.init, r.end, r.pending = "fight", "", [], None, None, None

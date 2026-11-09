@@ -7,7 +7,7 @@
 //   {"cmd":"preview","budget":800,"seed":7,"opp":{...}}  -> {"type":"preview","boss":{...}}        соперник с разбором цены
 //   {"cmd":"start","char":{...},"seed":7,"opp":{"mode":"generator"|"net","mul":1.0},"side":-1}
 //        -> поток: {"type":"turn","init":{...}(только в первом),"frames":[...],"req":{...}} — ждёт команду хода (см. human_turn.h);
-//           в конце {"type":"end","frames":[...],"result":0|1|2,"reason":..,"rounds":..,"me":idx}
+//           в конце {"type":"end","frames":[...],"result":0|1|2,"reason":..,"rounds":..,"me":idx,"state":[по бойцам: hp, maxHp, fled, exh, slots, uses]}
 //   {"cmd":"quit"}
 // Сборка: make (программа — build/arena_play)
 // ============================================================================
@@ -48,6 +48,13 @@ static Boss makeOpponent(const Json& opp, long long budget, unsigned seed, const
     }
     label = "Случайный генератор";
     return makeBoss(ob, C, true, false);
+}
+
+// состояние главных бойцов после боя (Б-3) — по порядку участников боя
+static std::string endStatesJson() {
+    std::string s = "[";
+    for (size_t i = 0; i < g_endState.size(); i++) s += (i ? "," : "") + endStateJson(g_endState[i]);
+    return s + "]";
 }
 
 int main() {
@@ -196,7 +203,7 @@ int main() {
             std::string out = "{\"type\":\"end\",";
             if (!sentInit) out += "\"init\":" + initJson() + ",";
             out += "\"frames\":" + flushFrames() + ",\"result\":" + std::to_string(res) + ",\"reason\":" + std::to_string(g_fightInfo.reason) + ",\"rounds\":" + std::to_string(g_fightInfo.rounds) +
-                   ",\"me\":" + std::to_string(side) + "}";
+                   ",\"me\":" + std::to_string(side) + ",\"state\":" + endStatesJson() + "}";
             emitLine(out);
         } else if (c == "teams") {   // бой нескольких команд (v21): состав — люди (свой персонаж, место seat) и боты (сборка генератором)
             const Json& M = cmd["members"];
@@ -303,7 +310,7 @@ int main() {
             std::string out = "{\"type\":\"end\",\"teamsMode\":1,";
             if (!sentInit) out += "\"init\":" + initJson() + ",";
             out += "\"frames\":" + flushFrames() + ",\"result\":" + std::to_string(res) + ",\"reason\":" + std::to_string(g_fightInfo.reason) + ",\"rounds\":" + std::to_string(g_fightInfo.rounds) +
-                   ",\"scores\":" + sc + "]}";
+                   ",\"scores\":" + sc + "],\"state\":" + endStatesJson() + "}";
             emitLine(out);
         } else
             emitLine("{\"type\":\"error\",\"err\":\"неизвестная команда\"}");

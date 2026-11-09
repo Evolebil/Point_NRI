@@ -138,4 +138,35 @@
           fmt("повтор %d; края С %.1f В %.1f Ю %.1f З %.1f (ожидалось %.1f %.1f %.1f %.1f); постройки в середине с поселением %d, без %d; для боя %d %s", same, edgeAvg(0), edgeAvg(1), edgeAvg(2), edgeAvg(3),
               (d.level + d.nb[0]) / 2.0, (d.level + d.nb[1]) / 2.0, (d.level + d.nb[2]) / 2.0, (d.level + d.nb[3]) / 2.0, townA, townE, usable, err.c_str()));
     }
+    // T211: состояние героя (кампания, задача Б-3): "state" на входе — бой начинается с этими ХП, ячейками, применениями и
+    // истощением; на выходе — состояние каждого главного бойца (потрачено от полного запаса); 0 ХП и истощение 6 — не в бой
+    if (TB()) {
+        Coef C2 = CC();
+        const std::string base = R"({"name":"Тест","budget":800,"stats":[14,12,12,10,10,10],"acV":2,"weapon":{"n":1,"s":8,"range":5,"att":1,"type":1},
+            "abilities":[{"_kind":"attack","range":60,"dmgN":2,"dmgS":6,"dtype":3,"uses":3},{"_kind":"attack","range":60,"dmgN":3,"dmgS":8,"dtype":3,"slotLvl":1}],
+            "passives":{"speed":30,"slots":[0,3,0,0,0,0,0,0,0,0]})";
+        Boss fresh, tired;
+        long long bud = 0;
+        std::string err;
+        const bool okF = chr::buildCharacter(parseJson(base + "}"), C2, fresh, bud, err);
+        const bool okT = chr::buildCharacter(parseJson(base + R"(,"state":{"hp":20,"slots":[0,2],"uses":[2,0],"exh":1}})"), C2, tired, bud, err);
+        Boss zero, dead;
+        const bool noZero = !chr::buildCharacter(parseJson(base + R"(,"сост":{"hp":0}})"), C2, zero, bud, err);
+        const bool noDead = !chr::buildCharacter(parseJson(base + R"(,"state":{"exh":6}})"), C2, dead, bud, err);
+        rng.seed(4711);
+        Boss opp = makeBoss(400, C2, true, false);
+        std::vector<std::string> log;
+        rng.seed(99);
+        fight(tired, opp, &log);
+        const bool startHp = !log.empty() && log[0].find("\"hp\":20,") != std::string::npos;
+        const EndState e = g_endState.empty() ? EndState{} : g_endState[0];
+        const bool outOk = g_endState.size() == 2 && e.usesSpent.size() == 2 && e.usesSpent[0] >= 2 && e.slotsUsed[1] >= 2 && e.exh >= 1 && e.hp <= 20;
+        rng.seed(99);
+        fight(fresh, opp);
+        const bool freshOk = g_endState.size() == 2 && g_endState[0].maxHp == fresh.hp;
+        T("T211", "§кампания Б-3: состояние героя — бой начинается с заданными ХП, ячейками, применениями, истощением; после боя отдаётся состояние каждого; 0 ХП и истощение 6 — не в бой",
+          okF && okT && noZero && noDead && startHp && outOk && freshOk,
+          fmt("сборка %d/%d, отказ при 0 ХП %d и истощении 6 %d; начало с 20 ХП %d; итог: ХП %d, применения %d, ячейки 1-го %d, истощение %d", okF, okT, noZero, noDead, startHp, e.hp,
+              e.usesSpent.empty() ? -1 : e.usesSpent[0], e.slotsUsed[1], e.exh));
+    }
 

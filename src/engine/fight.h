@@ -125,6 +125,21 @@ void placeTeams(const World& w, const std::vector<RosterEntry>& R, std::vector<i
     }
 }
 thread_local double g_teamScore[MAXT];   // очки команд последнего многокомандного боя
+// состояние главного бойца после боя (Б-3): ХП, сбежал ли, потрачено ячеек и применений (от полного запаса), истощение
+struct EndState {
+    int hp = 0, maxHp = 0, exh = 0;
+    bool fled = false;
+    int slotsUsed[10] = {};
+    std::vector<int> usesSpent;
+};
+thread_local std::vector<EndState> g_endState;
+inline std::string endStateJson(const EndState& e) {
+    std::string s = "{\"hp\":" + std::to_string(e.hp) + ",\"maxHp\":" + std::to_string(e.maxHp) + ",\"fled\":" + (e.fled ? "true" : "false") + ",\"exh\":" + std::to_string(e.exh) + ",\"slots\":[";
+    for (int L = 0; L < 10; L++) s += (L ? "," : "") + std::to_string(L ? e.slotsUsed[L] : 0);   // номер — уровень ячейки, как в passives.slots
+    s += "],\"uses\":[";
+    for (size_t k = 0; k < e.usesSpent.size(); k++) s += (k ? "," : "") + std::to_string(e.usesSpent[k]);
+    return s + "]}";
+}
 int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log, std::string* mapJsonOut, const Pol* polA, const Pol* polB) {
     const int N = (int)R.size();
     int nT = 0;
@@ -239,6 +254,15 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
         f.ai.seed(rng.next());
         for (int L = 1; L < 10; L++) f.slotLeft[L] = f.b.slots[L];
         for (size_t k = 0; k < f.b.abil.size(); k++) f.uses[k] = f.b.abil[k].recharge && !(f.b.abil[k].rechAfter && f.b.abil[k].uses < UNL) ? 1 : f.b.abil[k].uses;
+        if (f.b.start.on) {   // состояние героя из кампании (Б-3): не свежий — с тем, что осталось после прошлых сцен
+            const auto& s = f.b.start;
+            if (s.hp > 0) f.hp = std::min(f.maxHp, s.hp);
+            for (int L = 1; L < 10; L++) f.slotLeft[L] = std::max(0, f.slotLeft[L] - s.slotsUsed[L]);
+            for (size_t k = 0; k < f.uses.size() && k < s.usesSpent.size(); k++)
+                if (f.b.abil[k].uses < UNL && !f.b.abil[k].recharge) f.uses[k] = std::max(0, f.uses[k] - s.usesSpent[k]);
+            f.exh = s.exh;
+            if (f.exh >= 4) { f.maxHp = std::max(1, f.maxHp / 2); f.hp = std::min(f.hp, f.maxHp); }   // как в погоне: максимум ХП вдвое
+        }
         w.f.push_back(f);
     }
     for (auto& f : w.f) fireTrig(w, f, T_INIT, nullptr);   // «событие → эффект» (v21): в начале боя
@@ -395,6 +419,20 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
     }
     g_human.emit = nullptr;
     g_rounds += rr;
+    g_endState.clear();   // состояние главных бойцов после боя (кампания, задача Б-3)
+    for (int i = 0; i < N; i++) {
+        const Fighter& f = w.f[i];
+        EndState e;
+        e.hp = std::max(0, f.hp);
+        e.maxHp = f.maxHp;
+        e.fled = f.fled;
+        e.exh = f.exh;
+        for (int L = 1; L < 10; L++) e.slotsUsed[L] = std::max(0, f.b.slots[L] - f.slotLeft[L]);
+        e.usesSpent.assign(f.b.abil.size(), 0);
+        for (size_t k = 0; k < f.b.abil.size() && k < f.uses.size(); k++)
+            if (f.b.abil[k].uses < UNL && !f.b.abil[k].recharge) e.usesSpent[k] = std::max(0, f.b.abil[k].uses - f.uses[k]);
+        g_endState.push_back(e);
+    }
     g_lastHp[0] = (double)w.f[0].hp / std::max(1, w.f[0].maxHp);
     g_lastHp[1] = (double)w.f[1].hp / std::max(1, w.f[1].maxHp);
     g_fightInfo.rounds = rr;

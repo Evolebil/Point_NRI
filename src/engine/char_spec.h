@@ -565,6 +565,19 @@ static bool buildCharacter(const Json& j, const Coef& C, Boss& b, long long& bud
         if (b.wN > 0) b.wcost += weaponLongPrice(C, b.wN, b.wS, b.wRange, b.wLong, b.reach, b.wAtt);
         g_B = prevB;
     }
+    // состояние героя (кампания, задача Б-3): "state" (или "сост") — {"hp", "slots":[10 чисел: потрачено ячеек, номер — уровень, как в passives.slots],
+    // "uses":[потрачено применений способности 1, 2, …], "exh"}; на цену не влияет, только на начало боя
+    const Json& st = j.has("state") ? j["state"] : j["сост"];
+    if (st.t == Json::OBJ) {
+        b.start.on = true;
+        b.start.hp = st.has("hp") ? std::max(0, st["hp"].num(-1)) : -1;
+        for (int L = 1; L < 10 && L < (int)st["slots"].size(); L++) b.start.slotsUsed[L] = std::max(0, st["slots"][(size_t)L].num(0));
+        b.start.usesSpent.assign(b.abil.size(), 0);
+        for (size_t k = 0; k < b.abil.size() && k < st["uses"].size(); k++) b.start.usesSpent[k] = std::max(0, st["uses"][k].num(0));
+        b.start.exh = std::clamp(st["exh"].num(0), 0, 6);
+        if (b.start.exh >= 6) { err = "истощение 6: герой мёртв и в бой не идёт"; return false; }
+        if (b.start.hp == 0) { err = "у героя 0 ХП: без сознания, в бой не идёт"; return false; }
+    }
     return true;
 }
 
