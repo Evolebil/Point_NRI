@@ -878,6 +878,7 @@ struct Side {
     bool record = false;                // писать решения (обучение)
     std::vector<Decision> traj;
     double prevPhi = 0;                 // потенциал прошлого решения (доля своих ХП минус доля ХП врага)
+    double prevOwn = 1, prevFoe = 1;    // доли своих и вражьих ХП на прошлом решении (обмен уроном)
     bool hasPrev = false;
 };
 struct Ctx {
@@ -894,10 +895,10 @@ struct Ctx {
     long long atkOpen[2] = {}, atkKinds[2][PR_N] = {};   // решений, когда атака оружием доступна, и что сеть тогда выбрала
     double gamma = 0.99, timePen = 0;   // для потенциальной награды и штрафа за решение
     double roundPen = 0;                // штраф за каждый свой раунд боя (затяжка невыгодна; решение владельца 2026-10-28)
-    // обмен уроном (решение владельца 9 ноября): за отрезок между решениями — trade × (снятая доля ХП врага − потерянная
-    // доля своих), в конце боя НЕ вычитается (в отличие от потенциала Φ): выгодный размен — плюс, невыгодный — минус,
-    // кружение без урона — ноль; риск оправдан, когда урон по врагу больше полученного
-    double trade = 0;
+    // обмен уроном (решения владельца 9 ноября): за отрезок между решениями — tradeD × снятая доля ХП врага − tradeT ×
+    // потерянная доля своих; в конце боя НЕ вычитается (в отличие от потенциала Φ). Урон важнее защиты (tradeD > tradeT):
+    // размен выгоднее увёртки, кружение без урона — ноль
+    double tradeD = 0, tradeT = 0;
     double temp = 1.0;                  // температура выбора, когда greedy = false (1 — как в обучении)
 };
 static thread_local Ctx* g_pctx = nullptr;
@@ -909,6 +910,7 @@ inline double roundPenAt(const Ctx* c, int round) { return c->roundPen * std::ld
 // реплей боя сети: каждый шаг — отдельный кадр с решением сети (что выбрала, с какой уверенностью, как оценивает позицию)
 static thread_local bool g_netVerbose = false;
 // потенциал позиции (для награды): доля своих ХП минус доля ХП главного врага
+inline double hpFrac(const Fighter& f) { return (double)std::max(0, f.hp) / f.maxHp; }
 inline double potential(const World& w, int team) {
     const Fighter& me = w.f[team];
     const Fighter& e = w.f[1 - team];
@@ -1229,8 +1231,11 @@ static void netTurnP(World& w, int idx) {
         if (sd.record) {   // награда прошлого решения: потенциальная разность γΦ(s') − Φ(s) и штраф за время
             const double phi = potential(w, me.team);
             if (sd.hasPrev && !sd.traj.empty())
-                sd.traj.back().reward += (float)(c->gamma * phi - sd.prevPhi + c->trade * (phi - sd.prevPhi) - c->timePen - (stepN == 0 ? roundPenAt(c, g_curRound) : 0.0));
+                sd.traj.back().reward += (float)(c->gamma * phi - sd.prevPhi + c->tradeD * (sd.prevFoe - hpFrac(w.f[1 - me.team])) - c->tradeT * (sd.prevOwn - hpFrac(me)) - c->timePen -
+                                                 (stepN == 0 ? roundPenAt(c, g_curRound) : 0.0));
             sd.prevPhi = phi;
+            sd.prevOwn = hpFrac(me);
+            sd.prevFoe = hpFrac(w.f[1 - me.team]);
             sd.hasPrev = true;
             d.x = o.x;
             d.value = v;
