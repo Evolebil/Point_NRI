@@ -3,6 +3,7 @@
 #include "engine.h"
 #include "char_spec.h"
 #include "kmp_events.h"
+#include <chrono>
 #include <fstream>
 #include <sstream>
 
@@ -367,6 +368,79 @@ int main() {
         for (int k = 0; k < 64 && !road; k++) road = G->at(t.x + std::cos(k * 0.1) * t.r * 1.5, t.y + std::sin(k * 0.1) * t.r * 1.5, 0.6).road;
         T("T239", std::abs(kmp::CELL_KM - 0.3048) < 1e-9 && (256 << G->zMax()) >= G->cellsW() && G->cellsW() > 16000 && onLand && road,
           "масштаб: клетка 1000 фт, мир 5000 км — " + std::to_string(G->cellsW()) + " клеток, zMax " + std::to_string(G->zMax()));
+    }
+
+    // T240–T243 поиск пути (ТЗ v2 §4)
+    {
+        // мир 30 × 10 км: лес везде, дорога петлёй по краю (y < 1: вверх, вдоль, вниз), озеро посередине в x 12–16, y 3–7
+        struct Loop : kmp::World {
+            kmp::WCell at(double x, double y, double) const override {
+                kmp::WCell c;
+                if (x < 0 || y < 0 || x > 30 || y > 10) { c.terr = kmp::TERR_WATER; return c; }
+                if (x > 12 && x < 16 && y > 3 && y < 7) { c.terr = kmp::TERR_WATER; return c; }
+                c.terr = kmp::TERR_FOREST;
+                c.road = y < 1 || ((x < 1.5 || x > 28.5) && y < 6);
+                return c;
+            }
+        };
+        Loop L;
+        L.w = 30, L.h = 10;
+        double mult[kmp::TERR_N];
+        for (int t = 0; t < kmp::TERR_N; t++) mult[t] = std::max(0.01, kmp::terrains()[t].mult);
+        mult[kmp::TERR_TOWN] = 1;
+        kmp::Pts pf, pr, ps;
+        std::string err;
+        const bool ok = kmp::findRoute(L, 1, 5, {{29, 5}}, kmp::PM_FAST, mult, pf, err) && kmp::findRoute(L, 1, 5, {{29, 5}}, kmp::PM_ROADS, mult, pr, err) &&
+                        kmp::findRoute(L, 1, 5, {{29, 5}}, kmp::PM_STRAIGHT, mult, ps, err);
+        auto wet = [&](const kmp::Pts& p) {   // путь пересекает воду?
+            double x = 1, y = 5;
+            for (auto& q : p) {
+                for (int k = 1; k <= 50; k++)
+                    if (L.at(x + (q.first - x) * k / 50, y + (q.second - y) * k / 50, 0).terr == kmp::TERR_WATER) return true;
+                x = q.first, y = q.second;
+            }
+            return false;
+        };
+        const kmp::RouteSum sf = kmp::routeSummary(L, 1, 5, pf, 35, mult), ss = kmp::routeSummary(L, 1, 5, ps, 35, mult);
+        T("T240", ok && !wet(pf) && !wet(pr) && !wet(ps) && pf.back() == std::make_pair(29.0, 5.0), "путь обходит воду во всех режимах" + (ok ? std::string() : ": " + err));
+        T("T241", ok && sf.roadKm > sf.km * 0.6 && ss.roadKm < ss.km * 0.3 && ss.km < sf.km,
+          "быстрее всего — по дороге петлёй (" + std::to_string((int)sf.km) + " км, дорога " + std::to_string((int)(100 * sf.roadKm / std::max(1.0, sf.km))) +
+              "%), напрямик — короче, по лесу (" + std::to_string((int)ss.km) + " км)");
+        std::string e2;
+        kmp::Pts bad;
+        T("T242", !kmp::findRoute(L, 1, 5, {{14, 5}}, kmp::PM_FAST, mult, bad, e2) && e2 == "цель в воде", "цель в воде — понятная ошибка");
+    }
+    {
+        std::ifstream f("web/data/region_act1.json");
+        std::stringstream ss;
+        ss << f.rdbuf();
+        Json d = parseJson(ss.str());
+        auto A = std::make_shared<kmp::ActWorld>();
+        kmp::Region& R = A->R;
+        R.w = d["w"].num(0), R.h = d["h"].num(0), R.lon0 = d["lon0"].dbl(0), R.lat0 = d["lat0"].dbl(0), R.dlon = d["dlon"].dbl(1), R.dlat = d["dlat"].dbl(1);
+        R.terr = d["terrain"].str(), R.road = d["road"].str(), R.river = d["river"].str();
+        A->build({});
+        double px, py, cx, cy;
+        A->toKm(2.35, 48.86, px, py), A->toKm(2.35, 43.21, cx, cy);
+        kmp::Content c2;
+        c2.world = A;
+        kmp::State a = fresh();
+        a.hasPos = true, a.x = px, a.y = py, a.food = a.water = 1000, a.purse = 1000000;
+        const auto t0 = std::chrono::steady_clock::now();
+        Json rf = run(a, c2, "{\"type\":\"route\",\"mode\":\"быстрее всего\",\"way\":[[" + std::to_string(cx) + "," + std::to_string(cy) + "]]}");
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        const std::string fastPath = kmp::jsonOut(rf["res"]["path"]);
+        Json rs = run(a, c2, "{\"type\":\"route\",\"mode\":\"напрямик\",\"way\":[[" + std::to_string(cx) + "," + std::to_string(cy) + "]]}");
+        const int df = rf["res"]["sum"]["days"].num(), ds = rs["res"]["sum"]["days"].num();
+        // день пути — по найденному пути: отряд идёт, пока маршрут не кончится
+        run(a, c2, "{\"type\":\"route\",\"mode\":\"быстрее всего\",\"way\":[[" + std::to_string(cx) + "," + std::to_string(cy) + "]]}");
+        int days = 0;
+        while (!a.route.empty() && days < 60) run(a, c2, "{\"type\":\"day\",\"roles\":{\"Лис\":\"проводник\"}}"), days++;
+        T("T243", fastPath != kmp::jsonOut(rs["res"]["path"]) && df >= 12 && df <= 30 && rf["res"]["sum"]["road"].num() > rs["res"]["sum"]["road"].num() && ms < 3000 &&
+                      std::hypot(a.x - cx, a.y - cy) < 0.5 && days >= df,
+          "Париж — Каркассон: быстрее всего " + std::to_string(rf["res"]["sum"]["km"].num()) + " км, " + std::to_string(df) + " дн., дорога " +
+              std::to_string(rf["res"]["sum"]["road"].num()) + "%; напрямик " + std::to_string(rs["res"]["sum"]["km"].num()) + " км, " + std::to_string(ds) +
+              " дн.; поиск " + std::to_string((int)ms) + " мс; дошли за " + std::to_string(days) + " дн.");
     }
 
     std::printf("\nкампания: %d прошло, %d не прошло\n", g_pass, g_fail);

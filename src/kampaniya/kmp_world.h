@@ -38,6 +38,7 @@ struct World {
     std::vector<Town> towns;
     virtual ~World() {}
     virtual WCell at(double x, double y, double tol) const = 0;   // tol — полклетки обзора: мелкое видно и издали
+    virtual bool snapRoad(double& x, double& y, double maxd) const { (void)x, (void)y, (void)maxd; return false; }   // точку — на ось дороги
     int cellsW() const { return (int)std::ceil(w / CELL_KM); }
     int cellsH() const { return (int)std::ceil(h / CELL_KM); }
     int zMax() const {   // уровень, на котором весь мир помещается в один-два куска
@@ -94,6 +95,23 @@ struct SegIndex {
             for (int y = y0; y <= y1; y++)
                 for (int x = x0; x <= x1; x++) B[(size_t)y * bw + x].push_back((int)i);
         }
+    }
+    bool nearest(double& x, double& y, double maxd) const {   // ближайшая точка отрезков не дальше maxd — вместо (x, y)
+        if (B.empty()) return false;
+        const int r = (int)std::ceil(maxd / bk), cx = (int)(x / bk), cy = (int)(y / bk);
+        double best = maxd * maxd, bx = x, by = y;
+        bool hit = false;
+        for (int yy = std::max(0, cy - r); yy <= std::min(bh - 1, cy + r); yy++)
+            for (int xx = std::max(0, cx - r); xx <= std::min(bw - 1, cx + r); xx++)
+                for (int i : B[(size_t)yy * bw + xx]) {
+                    const Seg& g = segs[i];
+                    const double dx = g.x1 - g.x0, dy = g.y1 - g.y0, L = dx * dx + dy * dy;
+                    const double t = std::clamp(L > 0 ? ((x - g.x0) * dx + (y - g.y0) * dy) / L : 0.0, 0.0, 1.0);
+                    const double qx = g.x0 + t * dx, qy = g.y0 + t * dy, d = (qx - x) * (qx - x) + (qy - y) * (qy - y);
+                    if (d < best) best = d, bx = qx, by = qy, hit = true;
+                }
+        if (hit) x = bx, y = by;
+        return hit;
     }
     bool near(double x, double y, double tol) const {   // точка ближе полуширины (не меньше tol) к какому-нибудь отрезку
         if (B.empty()) return false;
@@ -348,6 +366,7 @@ struct GenWorld : World {
                     if (std::hypot(towns[t].x - x, towns[t].y - y) <= std::max(towns[t].r, tol)) return t;
         return -1;
     }
+    bool snapRoad(double& x, double& y, double maxd) const override { return roads.nearest(x, y, maxd); }
     WCell at(double x, double y, double tol) const override {
         WCell c;
         if (x < 0 || y < 0 || x > w || y > h) { c.terr = TERR_WATER; return c; }
@@ -415,7 +434,7 @@ inline Walk walkDay(const World& W, double x, double y, const std::vector<std::p
         const double tx = route[w.next].first, ty = route[w.next].second, d = std::hypot(tx - w.x, ty - w.y);
         if (d < 1e-6) { w.next++; continue; }
         double mv = std::min(0.5, d);
-        const WCell c = W.at(w.x + (tx - w.x) * mv / d, w.y + (ty - w.y) * mv / d, 0);
+        const WCell c = W.at(w.x + (tx - w.x) * mv / d, w.y + (ty - w.y) * mv / d, CELL_KM);   // дорога — если в пределах клетки
         if (c.terr == TERR_WATER) { w.blocked = true; break; }
         const double m = c.road ? 1.0 : mult[c.terr];
         double cost = mv / m;
@@ -430,10 +449,149 @@ inline Walk walkDay(const World& W, double x, double y, const std::vector<std::p
     for (int t = 0; t < TERR_N; t++)
         if (t != TERR_TOWN && t != TERR_WATER && tt[t] > tt[best]) best = t;
     w.terrain = best;
-    if (W.at(w.x, w.y, 0).terr == TERR_TOWN) w.terrain = TERR_TOWN;
+    if (W.at(w.x, w.y, CELL_KM).terr == TERR_TOWN) w.terrain = TERR_TOWN;
     else if (best == TERR_FIELDS && w.river) w.terrain = TERR_RIVER;
     w.road = total > 0 && roadT * 2 > total;
     return w;
+}
+
+// ---- поиск пути (ТЗ v2 §4) ----
+// Режимы: быстрее всего — минимум времени по множителям местности; по дорогам — вне дороги ×5; напрямик — кратчайший
+// в обход воды, затем выпрямляется. Сетка вокруг отрезка, клетка — чтобы клеток было не больше ~250 тыс.
+enum PathMode { PM_FAST, PM_ROADS, PM_STRAIGHT };
+inline int pathModeOf(const std::string& s) { return s == "дороги" || s == "по дорогам" ? PM_ROADS : s == "напрямик" ? PM_STRAIGHT : PM_FAST; }
+typedef std::vector<std::pair<double, double>> Pts;
+inline bool findPath(const World& W, double ax, double ay, double bx, double by, int mode, const double* mult, Pts& out, std::string& err) {
+    const double d = std::hypot(bx - ax, by - ay), m = std::max(20.0, 0.35 * d);
+    const double x0 = std::max(0.0, std::min(ax, bx) - m), x1 = std::min(W.w, std::max(ax, bx) + m);
+    const double y0 = std::max(0.0, std::min(ay, by) - m), y1 = std::min(W.h, std::max(ay, by) + m);
+    const double cs = std::max(CELL_KM, std::sqrt((x1 - x0) * (y1 - y0) / 250000.0));
+    const int nx = std::max(1, (int)std::ceil((x1 - x0) / cs)), ny = std::max(1, (int)std::ceil((y1 - y0) / cs));
+    std::vector<float> cost((size_t)nx * ny, -2.f);   // −2 — не посчитано, −1 — вода; иначе цена км
+    auto cellCost = [&](int i, int j) -> float {
+        float& c = cost[(size_t)j * nx + i];
+        if (c > -1.5f) return c;
+        const WCell w = W.at(x0 + (i + 0.5) * cs, y0 + (j + 0.5) * cs, cs);
+        if (w.terr == TERR_WATER) return c = -1.f;
+        const double mm = w.road || w.terr == TERR_TOWN ? 1.0 : mult[w.terr];
+        return c = (float)(mode == PM_STRAIGHT ? 1.0 : mode == PM_ROADS ? (w.road || w.terr == TERR_TOWN ? 1.0 : 5.0 / mm) : 1.0 / mm);
+    };
+    auto cellOf = [&](double x, double y, int& i, int& j) { i = std::clamp((int)((x - x0) / cs), 0, nx - 1), j = std::clamp((int)((y - y0) / cs), 0, ny - 1); };
+    int si, sj, gi, gj;
+    cellOf(ax, ay, si, sj), cellOf(bx, by, gi, gj);
+    if (cellCost(gi, gj) < 0) { err = "цель в воде"; return false; }
+    const int N = nx * ny, S = sj * nx + si, G = gj * nx + gi;
+    std::vector<float> dist((size_t)N, 1e30f);
+    std::vector<int> from((size_t)N, -1);
+    std::vector<char> closed((size_t)N, 0);
+    typedef std::pair<double, int> E;
+    std::priority_queue<E, std::vector<E>, std::greater<E>> q;
+    dist[S] = 0, q.push({0, S});
+    const int DX[8] = {1, -1, 0, 0, 1, 1, -1, -1}, DY[8] = {0, 0, 1, -1, 1, -1, 1, -1};
+    bool found = false;
+    while (!q.empty()) {
+        const int c = q.top().second;
+        q.pop();
+        if (closed[c]) continue;
+        closed[c] = 1;
+        if (c == G) { found = true; break; }
+        const int ci = c % nx, cj = c / nx;
+        for (int k = 0; k < 8; k++) {
+            const int ni = ci + DX[k], nj = cj + DY[k];
+            if (ni < 0 || nj < 0 || ni >= nx || nj >= ny) continue;
+            const int n = nj * nx + ni;
+            if (closed[n]) continue;
+            const float cn = cellCost(ni, nj);
+            if (cn < 0) continue;
+            const float cc = c == S ? cn : cost[c];
+            const double nd = dist[c] + (k < 4 ? 1.0 : 1.41421356) * cs * 0.5 * (cc + cn);
+            if (nd < dist[n]) dist[n] = (float)nd, from[n] = c, q.push({nd + std::hypot(gi - ni, gj - nj) * cs, n});   // оценка снизу: цена км ≥ 1
+        }
+    }
+    if (!found) { err = "пути нет: вода кругом"; return false; }
+    Pts p;
+    for (int c = G; c >= 0; c = from[c]) p.push_back({x0 + (c % nx + 0.5) * cs, y0 + (c / nx + 0.5) * cs});
+    std::reverse(p.begin(), p.end());
+    p.front() = {ax, ay}, p.back() = {bx, by};
+    auto dry = [&](const std::pair<double, double>& a, const std::pair<double, double>& b) {   // прямая без воды
+        const double L = std::hypot(b.first - a.first, b.second - a.second);
+        const int n = (int)(L / (cs * 0.5)) + 1;
+        for (int k = 1; k < n; k++)
+            if (W.at(a.first + (b.first - a.first) * k / n, a.second + (b.second - a.second) * k / n, cs).terr == TERR_WATER) return false;
+        return true;
+    };
+    Pts r;
+    if (mode == PM_STRAIGHT) {   // выпрямить: от точки — к самой дальней видимой по суше
+        size_t i = 0;
+        r.push_back(p[0]);
+        while (i + 1 < p.size()) {
+            size_t j = p.size() - 1;
+            while (j > i + 1 && !dry(p[i], p[j])) j = i + 1 + (j - i - 1) / 2;
+            r.push_back(p[j]), i = j;
+        }
+    } else {   // убрать точки на прямых участках; точки дороги — на ось дороги
+        r.push_back(p[0]);
+        for (size_t i = 1; i + 1 < p.size(); i++) {
+            const double dx1 = p[i].first - r.back().first, dy1 = p[i].second - r.back().second, dx2 = p[i + 1].first - p[i].first, dy2 = p[i + 1].second - p[i].second;
+            if (std::abs(dx1 * dy2 - dy1 * dx2) > 1e-9 * cs * cs || cost[(size_t)((int)((p[i].second - y0) / cs)) * nx + (int)((p[i].first - x0) / cs)] == 1.f) {
+                auto q2 = p[i];
+                W.snapRoad(q2.first, q2.second, cs);
+                r.push_back(q2);
+            }
+        }
+        r.push_back(p.back());
+    }
+    out.insert(out.end(), r.begin() + (out.empty() ? 0 : 1), r.end());
+    return true;
+}
+// маршрут через пункты: путь каждого перехода — своим поиском
+inline bool findRoute(const World& W, double ax, double ay, const Pts& way, int mode, const double* mult, Pts& out, std::string& err) {
+    out.clear();
+    double x = ax, y = ay;
+    for (auto& w : way) {
+        Pts leg;
+        if (!findPath(W, x, y, w.first, w.second, mode, mult, leg, err)) return false;
+        out.insert(out.end(), leg.begin() + 1, leg.end());   // начало перехода — там, где отряд уже стоит
+        x = w.first, y = w.second;
+    }
+    return true;
+}
+// сводка: длина, дни (обычный темп, 8 ч), доля дороги, местности по км
+struct RouteSum {
+    double km = 0, roadKm = 0;
+    int days = 0;
+    bool blocked = false;
+    double terrKm[TERR_N] = {0};
+};
+inline RouteSum routeSummary(const World& W, double ax, double ay, const Pts& path, double kmDay, const double* mult) {
+    RouteSum s;
+    double x = ax, y = ay;
+    for (auto& p : path) {
+        const double L = std::hypot(p.first - x, p.second - y);
+        const int n = std::max(1, (int)(L / 0.5));
+        for (int k = 0; k < n; k++) {
+            const WCell c = W.at(x + (p.first - x) * (k + 0.5) / n, y + (p.second - y) * (k + 0.5) / n, CELL_KM);
+            s.terrKm[c.terr] += L / n, s.roadKm += c.road ? L / n : 0;
+        }
+        s.km += L, x = p.first, y = p.second;
+    }
+    Walk w;
+    w.x = ax, w.y = ay;
+    for (s.days = 0; w.next < path.size() && s.days < 2000; s.days++) {
+        Pts rest(path.begin() + w.next, path.end());
+        const Walk n = walkDay(W, w.x, w.y, rest, kmDay, mult);
+        if (n.blocked && n.km < 1e-6) { s.blocked = true; break; }
+        w.x = n.x, w.y = n.y, w.next += n.next;
+    }
+    return s;
+}
+inline std::string routeSumJson(const RouteSum& s) {
+    std::string o = "{\"km\":" + num(std::llround(s.km)) + ",\"days\":" + num(s.days) + ",\"road\":" + num(s.km > 0 ? std::llround(100 * s.roadKm / s.km) : 0) +
+                    ",\"blocked\":" + bl(s.blocked) + ",\"terr\":{";
+    int k = 0;
+    for (int t = 0; t < TERR_N; t++)
+        if (s.terrKm[t] >= 0.5) o += std::string(k++ ? "," : "") + q(terrains()[t].name) + ":" + num(std::llround(s.terrKm[t]));
+    return o + "}}";
 }
 
 // кусок обзора: 256 × 256 клеток уровня z, строки по клеткам: местность, высота, флаги (1 дорога, 2 река)

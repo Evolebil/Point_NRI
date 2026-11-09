@@ -5,7 +5,7 @@
 // черновику: принять, перебросить, править итог, отменить; игрок предлагает.
 // ====================================================================================================================
 // sub — вкладка внутри кампании; draft — маршрут, который прокладывают щелчками; mode — 'route' | 'pos'; speaker — кто говорит
-const KMP = {id: '', v: null, timer: 0, sub: 'map', speaker: '', world: null, worldOf: '', draft: [], mode: '', justCreated: false, gen: null};
+const KMP = {id: '', v: null, timer: 0, sub: 'map', speaker: '', world: null, worldOf: '', draft: [], mode: '', justCreated: false, gen: null, pmode: 'быстрее всего', preview: null};
 const KMP_TERR = ['Пашни и сёла', 'Лес', 'Холмы и плато', 'Горы', 'Болото', 'Река и переправа', 'Город'];
 const KMP_ROLES = ['без занятия', 'проводник', 'дозорный', 'добытчик', 'картограф', 'следопыт', 'помощь'];
 const KMP_TRAV = ['пеший', 'всадник', 'гонец', 'армия', 'обоз'];
@@ -120,7 +120,8 @@ function kmpEvText(e){
     case 'group': return `Групповая проверка: ${r.passed} из ${r.of} — ${r.ok ? 'успех' : 'провал'}`;
     case 'check': return `Проверка: ${r.ok ? 'успех' : 'провал'}`;
     case 'hero': return `Герой: ${esc(e.name || '')}`;
-    case 'route': return `Маршрут: ${(e.path || []).length} точек` + (e.by !== 'мастер' ? ` (предложил ${esc(e.by)})` : '');
+    case 'route': return (r.sum ? `Маршрут ${esc(r.mode)}: ${r.sum.km} км, ≈ ${r.sum.days} дн., по дорогам ${r.sum.road}%` : `Маршрут: ${(e.path || []).length} точек`) +
+      (e.by !== 'мастер' ? ` (предложил ${esc(e.by)})` : '');
     case 'dialog': return (e.npc ? `Разговор с ${esc(e.npc)}` : e.node ? '' : 'Разговор окончен') + (e.said ? ` · ${esc(e.hero || '')}: «${esc(e.said)}»` : '') +
       (e.node ? ` → ${esc(e.node)}` : '') + (e.text ? ` (${esc(e.text)})` : '') + ((e.do || []).length ? ' · ' + e.do.map(d => d.type === 'gm' && d.purse ? kmpMoney(d.purse) : d.fact || d.text || (d.type + (d.delta ? ' ' + d.delta : ''))).map(esc).join(', ') : '');
     default: return esc(e.type) + ' ' + esc(JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !['n','type','by','attempt'].includes(k)))));
@@ -175,9 +176,11 @@ function kmpTabMap(v, s, M, heroes){
   const W = KMP.world;
   h += `<div class="row small"><button id="kmRoute"${KMP.mode === 'route' ? ' class="primary"' : ''}>✏ Прокладывать путь щелчками</button>
       <label>или поселение <input id="kmTown" list="kmTowns" style="width:150px"></label><datalist id="kmTowns">${W.towns.map(t => `<option value="${esc(t[0])}">`).join('')}</datalist>
-      <button id="kmTownAdd">+ в маршрут</button><button id="kmClear"${KMP.draft.length ? '' : ' disabled'}>Очистить</button>
-      <button id="kmSend" class="primary"${KMP.draft.length ? '' : ' disabled'}>${M ? 'Задать маршрут' : 'Предложить маршрут мастеру'} (точек: ${KMP.draft.length})</button>
+      <button id="kmTownAdd">+ в маршрут</button><label>путь <select id="kmMode">${kmpOpt(['быстрее всего', 'по дорогам', 'напрямик'], KMP.pmode)}</select></label>
+      <button id="kmClear"${KMP.draft.length ? '' : ' disabled'}>Очистить</button>
+      <button id="kmSend" class="primary"${KMP.preview && KMP.preview.path ? '' : ' disabled'}>${M ? 'Задать маршрут' : 'Предложить маршрут мастеру'}</button>
       ${M ? `<button id="kmTownPos">Отряд — в поселение</button><button id="kmPos"${KMP.mode === 'pos' ? ' class="primary"' : ''}>📍 Поставить отряд щелчком</button>` : ''}</div>
+    <div class="small" id="kmSum" style="min-height:1.3em">${kmSumText()}</div>
     <div style="position:relative;max-width:1000px">
       <canvas id="kMap" style="width:100%;height:560px;display:block;border-radius:8px;cursor:grab;background:#1b2a3a;touch-action:none"></canvas>
       <div style="position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:4px">
@@ -400,8 +403,10 @@ function kmDraw(){
     pts.forEach((p, i) => { const [x, y] = kmToPx(cv, p[0], p[1]); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); g.setLineDash([]); };
   const from = s.pos ? [s.pos] : [];
   line(from.concat(s.route), '#ffcc00');
-  line((s.route.length ? [s.route[s.route.length - 1]] : from).concat(KMP.draft), '#ffffff', [6, 5]);
-  for (const p of s.route.concat(KMP.draft)){ const [x, y] = kmToPx(cv, p[0], p[1]); g.fillStyle = '#ffcc00'; g.fillRect(x - 3, y - 3, 6, 6); }
+  if (KMP.preview && KMP.preview.path) line(from.concat(KMP.preview.path), '#ffffff', [6, 5]);
+  else line(from.concat(KMP.draft), 'rgba(255,255,255,.6)', [2, 6]);
+  for (const p of KMP.draft){ const [x, y] = kmToPx(cv, p[0], p[1]); g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = 1; g.fillRect(x - 4, y - 4, 8, 8); g.strokeRect(x - 4, y - 4, 8, 8); }
+  if (s.route.length){ const e = s.route[s.route.length - 1], [x, y] = kmToPx(cv, e[0], e[1]); g.fillStyle = '#ffcc00'; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); }
   if (s.pos){ const [x, y] = kmToPx(cv, s.pos[0], s.pos[1]); g.fillStyle = '#e8112d'; g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill(); g.stroke(); }
   // масштаб: линейка и размер клетки уровня
   const km = kmNiceKm(KMV.kpp * 110), px = km / KMV.kpp, ckTxt = ck < 1 ? Math.round(ck * 1000) + ' м' : ck.toFixed(ck < 10 ? 1 : 0) + ' км';
@@ -439,18 +444,40 @@ function kmBind(){
     const [x, y] = kmToKm(cv, ...pxOf(e)); const p = [+x.toFixed(3), +y.toFixed(3)];
     if (KMP.mode === 'pos'){ KMP.mode = ''; kmpDirect({type: 'gm', pos: p, text: 'отряд перенесён'}); return; }
     if (KMP.mode !== 'route') { toast('Чтобы проложить путь, нажмите «✏ Прокладывать путь щелчками»'); return; }
-    KMP.draft.push(p); kmpRender(); };
+    KMP.draft.push(p); kmPreview(); };
   $('kmIn').onclick = () => zoom(0.5); $('kmOut').onclick = () => zoom(2); $('kmHome').onclick = () => { kmFit(); kmDraw(); };
   if ($('kmParty')) $('kmParty').onclick = () => { const s = KMP.v.state; KMV.cx = s.pos[0]; KMV.cy = s.pos[1]; KMV.kpp = Math.min(KMV.kpp, 0.5); kmDraw(); };
   $('kmRoute').onclick = () => { KMP.mode = KMP.mode === 'route' ? '' : 'route'; kmpRender(); };
-  $('kmClear').onclick = () => { KMP.draft = []; kmpRender(); };
-  $('kmSend').onclick = async () => { const path = KMP.v.state.route.concat(KMP.draft); const v = await kmpPropose({type: 'route', path});
-    if (v.type === 'kmp'){ KMP.draft = []; KMP.mode = ''; kmpRender(); } };
+  $('kmClear').onclick = () => { KMP.draft = []; KMP.preview = null; kmpRender(); };
+  $('kmMode').onchange = () => { KMP.pmode = $('kmMode').value; kmPreview(); };
+  $('kmSend').onclick = async () => { const v = await kmpPropose({type: 'route', way: KMP.draft, mode: KMP.pmode});
+    if (v.type === 'kmp'){ KMP.draft = []; KMP.preview = null; KMP.mode = ''; kmpRender(); } };
   const town = () => W.towns.find(t => t[0] === $('kmTown').value.trim());
-  $('kmTownAdd').onclick = () => { const t = town(); if (!t){ toast('нет такого поселения'); return; } KMP.draft.push([t[1], t[2]]); kmpRender(); };
+  $('kmTownAdd').onclick = () => { const t = town(); if (!t){ toast('нет такого поселения'); return; } KMP.draft.push([t[1], t[2]]); kmPreview(); };
   if ($('kmTownPos')) $('kmTownPos').onclick = () => { const t = town(); if (!t){ toast('нет такого поселения'); return; } kmpDirect({type: 'gm', pos: [t[1], t[2]], place: t[0]}); };
   if ($('kmPos')) $('kmPos').onclick = () => { KMP.mode = KMP.mode === 'pos' ? '' : 'pos'; kmpRender(); };
   kmBindWorld();
+}
+
+// ---- путь (ТЗ v2 §4): движок ищет путь через пункты по режиму; до утверждения — предпросмотр со сводкой ----
+function kmSumText(){
+  const P = KMP.preview;
+  if (!KMP.draft.length) return KMP.v && KMP.v.state.route.length ? 'Новый маршрут заменит текущий. Пункты — щелчками или «+ в маршрут».' : 'Пункты маршрута — щелчками («✏ Прокладывать путь») или «+ в маршрут»; путь движок найдёт сам.';
+  if (!P) return 'ищу путь…';
+  if (P.err) return '⚠ ' + P.err;
+  const S = P.sum, terr = Object.entries(S.terr).sort((a, b) => b[1] - a[1]).map(([t, k]) => `${t} ${k} км`).join(', ');
+  return `<b>${P.mode}: ${S.km} км, ≈ ${S.days} дн.</b> (${esc(KMP.v.state.traveler)}, обычный темп) · по дорогам ${S.road}% · ${esc(terr)}${S.blocked ? ' · ⚠ путь упирается в воду' : ''}`;
+}
+async function kmPreview(){
+  KMP.preview = null; kmpRender();
+  if (!KMP.draft.length) return;
+  const seq = (KMP.pseq = (KMP.pseq || 0) + 1);
+  const r = await api({cmd: 'kmp_path', id: KMP.id, name: kmpName(), way: KMP.draft, mode: KMP.pmode});
+  if (seq !== KMP.pseq) return;   // пока считали, пункты сменились
+  KMP.preview = r.type === 'kmp_path' ? r.res : {err: r.err || 'путь не найден'};
+  if ($('kmSum')) $('kmSum').innerHTML = kmSumText();
+  if ($('kmSend')) $('kmSend').disabled = !(KMP.preview && KMP.preview.path);
+  kmDraw();
 }
 
 // ---- мир кампании: мастер выбирает — генератор по параметрам (с предпросмотром) или Акт I ----

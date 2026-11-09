@@ -282,6 +282,20 @@ inline std::string propose(const State& s, const Content& ct, const Json& act, c
         const long long total = std::max(0LL, std::llround(unit * qty * (1.0 + (type == "buy" ? -pct : pct) / 100.0)));
         res = "{\"who\":" + q(act["who"].str("отряд")) + ",\"item\":" + q(act["item"].str()) + ",\"qty\":" + num(qty) + ",\"total\":" + num(total) +
               ",\"pct\":" + num(pct) + ",\"npc\":" + q(act["npc"].str()) + ",\"offend\":" + bl(offend) + "}";
+    } else if (type == "route" && act["way"].t == Json::ARR) {   // маршрут через пункты (ТЗ v2 §4): путь ищет движок по режиму, к событию — путь и сводка
+        if (!ct.world) { err = "у кампании нет мира"; return ""; }
+        const Pts way = routeOf(act["way"]);
+        if (way.empty()) { err = "в маршруте нет пунктов"; return ""; }
+        const int mode = pathModeOf(act["mode"].str());
+        double mult[TERR_N];
+        for (int t = 0; t < TERR_N; t++) mult[t] = std::max(0.01, terrains()[t].mult);
+        mult[TERR_TOWN] = 1.0;
+        const double ax = s.hasPos ? s.x : way[0].first, ay = s.hasPos ? s.y : way[0].second;
+        Pts path;
+        if (!findRoute(*ct.world, ax, ay, way, mode, mult, path, err)) return "";
+        const RouteSum sum = routeSummary(*ct.world, ax, ay, path, travelers()[s.traveler].km, mult);
+        res = "{\"mode\":" + q(mode == PM_ROADS ? "по дорогам" : mode == PM_STRAIGHT ? "напрямик" : "быстрее всего") + ",\"path\":" + routeJson(path) +
+              ",\"sum\":" + routeSumJson(sum) + "}";
     } else if (type == "turnin") {   // сдача сведений по каскаду (Е1); party — «мы» или имя соперника
         const std::string qid = act["quest"].str(), f = act["fact"].str();
         auto it = s.quests.find(qid);
@@ -293,7 +307,7 @@ inline std::string propose(const State& s, const Content& ct, const Json& act, c
         res = "{\"quest\":" + q(qid) + ",\"fact\":" + q(f) + ",\"party\":" + q(act["party"].str("мы")) + ",\"confirm\":" + bl(confirm) + ",\"pay\":" + num(pay) +
               ",\"tier\":" + num(next) + "}";
     } else if (type == "setup" || type == "hero" || type == "quest" || type == "learn" || type == "attitude" || type == "rep" || type == "gm" || type == "note" ||
-               type == "dialog" || type == "route") {
+               type == "dialog" || (type == "route" && act["way"].t != Json::ARR)) {
         // без бросков: событие = запрос как есть
         std::string body;
         for (auto& kv : act.o)
@@ -363,8 +377,9 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
         if (ev.has("place")) s.place = ev["place"].str();
         if (ev.has("returnTrip")) s.returnTrip = ev["returnTrip"].flag();
         if (ev["pos"].t == Json::ARR) s.hasPos = true, s.x = ev["pos"][0].dbl(0), s.y = ev["pos"][1].dbl(0), s.route.clear();
-    } else if (type == "route") {   // маршрут отряда: пункты по порядку (прокладывают игроки, утверждает мастер)
-        s.route = routeOf(ev["path"]);
+    } else if (type == "route") {   // маршрут отряда: найденный движком путь (res.path) или, в старых событиях, пункты как есть
+        s.route = routeOf(r["path"].t == Json::ARR ? r["path"] : ev["path"]);
+        if (r["sum"].t == Json::OBJ) say("маршрут " + r["mode"].str() + ": " + num(r["sum"]["km"].num()) + " км, ≈ " + num(r["sum"]["days"].num()) + " дн.");
     } else if (type == "hero") {
         if (!addHero(s, C, ev, err)) return false;
         say("в отряде " + s.heroes.back().name);

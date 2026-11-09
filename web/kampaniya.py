@@ -866,6 +866,10 @@ def kmp_cmd(msg, sid=""):
                     return {"type": "error", "err": "чужой мир"}
                 t = c.tile(wid, int(msg.get("z", 0)), int(msg.get("tx", 0)), int(msg.get("ty", 0)))
                 return {"type": "kmp_tile", "tile": t} if t else {"type": "error", "err": "нет куска"}
+            if cmd == "kmp_path":   # предпросмотр пути (ТЗ v2 §4): тот же расчёт, что у события «маршрут», без записи в журнал
+                r = c.eng.talk({"cmd": "propose", "act": {"type": "route", "way": msg.get("way") or [], "mode": str(msg.get("mode") or "")},
+                                "who": name, "attempt": 0})
+                return {"type": "kmp_path", "res": r["ev"]["res"]} if r.get("type") == "draft" else {"type": "error", "err": r.get("err")}
             if cmd == "kmp_world_preview":   # мастер: мир по параметрам — посмотреть, не меняя мира кампании
                 if not master:
                     return {"type": "error", "err": "мир выбирает мастер"}
