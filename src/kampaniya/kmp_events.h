@@ -20,7 +20,27 @@ struct Content {   // из Obsidian (web/kampaniya.py): таблицы встр�
     std::map<std::string, std::vector<std::string>> table;     // местность → 12 строк к12
     std::map<std::string, std::string> ambush;                 // местность → «где засада — кто»
     int roadThr = 2, returnThr = -4, ambushMax = 3;            // на дороге порог +2, обратный путь −4, засада на 1–3
+    Region region;                                             // карта региона (может не быть: тогда местность дня задаёт мастер)
 };
+inline std::vector<std::pair<double, double>> routeOf(const Json& a) {
+    std::vector<std::pair<double, double>> r;
+    for (auto& p : a.a) r.push_back({p[0].dbl(0), p[1].dbl(0)});
+    return r;
+}
+inline std::string ptJson(double lon, double lat) {
+    char b[48];
+    std::snprintf(b, sizeof b, "[%.5f,%.5f]", lon, lat);
+    return b;
+}
+inline std::string routeJson(const std::vector<std::pair<double, double>>& r, size_t from = 0) {
+    std::string o = "[";
+    char b[64];
+    for (size_t i = from; i < r.size(); i++) {
+        std::snprintf(b, sizeof b, "%s[%.5f,%.5f]", i > from ? "," : "", r[i].first, r[i].second);
+        o += b;
+    }
+    return o + "]";
+}
 
 inline int saveMod(const Hero& h, int st) { return h.b.mod(st) + (((h.b.saveProf >> st) & 1u) ? h.b.prof : 0); }
 // спасбросок героя против СЛ; истощение 3+ — помеха на спасброски
@@ -89,11 +109,11 @@ inline std::string propose(const State& s, const Content& ct, const Json& act, c
         }
         res = "{\"ok\":" + bl(cnt && ok * 2 >= cnt) + ",\"passed\":" + num(ok) + ",\"of\":" + num(cnt) + "}";
     } else if (type == "day") {   // день пути (Б3): путь, навигация, пропитание, встреча, еда и вода, траты на жизнь
-        const std::string tn = act["terrain"].str("Пашни и сёла");
-        const int ti = terrainIdx(tn);
-        if (ti < 0) { err = "неизвестная местность: " + tn; return ""; }
-        const Terrain& T = terrains()[ti];
-        const bool road = act["road"].flag(), hot = act["hot"].flag();
+        // по карте (Б2): есть карта, позиция и маршрут, а мастер не задал местность сам — местность и дорога из пути
+        const bool byMap = ct.region.ok() && s.hasPos && !s.route.empty() && act["terrain"].t != Json::STR;
+        std::string tn = act["terrain"].str("Пашни и сёла");
+        bool road = act["road"].flag();
+        const bool hot = act["hot"].flag();
         const int hours = std::clamp(act["hours"].num(8), 0, 24);
         // роли: {"имя": "проводник", ...}, помощь — {"имя": "помощь:кому"}
         std::vector<int> role(s.heroes.size(), R_NONE), helpTo(s.heroes.size(), -1);
@@ -119,9 +139,21 @@ inline std::string propose(const State& s, const Content& ct, const Json& act, c
         int pace = act["pace"].t == Json::STR ? (act["pace"].str() == "быстрый" ? PACE_FAST : (act["pace"].str() == "медленный" ? PACE_SLOW : PACE_NORMAL)) : s.pace;
         for (auto& h : s.heroes)   // перегруз (Р15) и истощение 5+ — подробности в Б9; пока только истощение
             if (!h.dead && h.exh >= 5) pace = PACE_SLOW;
-        double km = travelers()[s.traveler].km * (road ? 1.0 : T.mult) * paceMult(pace) * hours / 8.0;
+        double budget = travelers()[s.traveler].km * paceMult(pace) * hours / 8.0;   // км «по дороге» на день
         for (auto& h : s.heroes)
-            if (!h.dead && h.exh >= 2) { km *= 0.5; break; }   // истощение 2 — скорость вдвое
+            if (!h.dead && h.exh >= 2) { budget *= 0.5; break; }   // истощение 2 — скорость вдвое
+        double mult[8];
+        for (int t = 0; t < 7; t++) mult[t] = terrains()[t].mult;
+        mult[TERR_TOWN] = 1.0, mult[7] = 1.0;
+        Walk wk;
+        if (byMap) {
+            wk = walkDay(ct.region, s.lon, s.lat, s.route, budget, mult);
+            tn = terrains()[wk.terrain].name, road = wk.road;
+        }
+        const int ti = terrainIdx(tn);
+        if (ti < 0) { err = "неизвестная местность: " + tn; return ""; }
+        const Terrain& T = terrains()[ti];
+        double km = byMap ? wk.km : budget * (road ? 1.0 : T.mult);
         // навигация вне дороги (DMG): проводник, иначе лучший по Выживанию с помехой; быстрый темп −5, картограф +2
         std::string nav = "null";
         bool lost = false;
@@ -141,6 +173,10 @@ inline std::string propose(const State& s, const Content& ct, const Json& act, c
                 lost = !c.ok;
                 nav = "{\"by\":" + q(c.who) + ",\"ok\":" + bl(c.ok) + "}";
             }
+        }
+        if (lost) {   // сбились: день кружили — пройдена половина пути (мастер видит, где отряд на самом деле)
+            if (byMap) wk = walkDay(ct.region, s.lon, s.lat, s.route, budget * 0.5, mult), km = wk.km;
+            else km *= 0.5;
         }
         // пропитание (DMG): только обычный и медленный темп; каждый добытчик — Выживание, успех: 1к6 + МДР фунтов и галлонов
         double gotF = 0, gotW = 0;
@@ -200,7 +236,9 @@ inline std::string propose(const State& s, const Content& ct, const Json& act, c
               ",\"d12\":" + num(e12) + ",\"ambush\":" + bl(amb) + ",\"text\":" + q(text) + "},\"lookout\":" + num(look) +
               ",\"forage\":{\"food\":" + num((long long)gotF) + ",\"water\":" + num((long long)gotW) + "},\"food\":" +
               num(std::llround(std::min(needF, food) - gotF) * -1) + ",\"water\":" + num(std::llround(std::min(needW, water) - gotW) * -1) +
-              ",\"heroes\":" + hs + ",\"pay\":" + num(std::min(pay, s.purse)) + ",\"payShort\":" + bl(pay > s.purse) + "}";
+              ",\"heroes\":" + hs + ",\"pay\":" + num(std::min(pay, s.purse)) + ",\"payShort\":" + bl(pay > s.purse) +
+              (byMap ? ",\"pos\":" + ptJson(wk.lon, wk.lat) + ",\"route\":" + routeJson(s.route, wk.next) +
+                           ",\"blocked\":" + bl(wk.blocked) : std::string()) + "}";
     } else if (type == "rest") {   // отдых (Б4): короткий — кости хитов по выбору, долгий — всё
         const bool lng = act["kind"].str() == "долгий";
         std::string hs = "[";
@@ -255,7 +293,7 @@ inline std::string propose(const State& s, const Content& ct, const Json& act, c
         res = "{\"quest\":" + q(qid) + ",\"fact\":" + q(f) + ",\"party\":" + q(act["party"].str("мы")) + ",\"confirm\":" + bl(confirm) + ",\"pay\":" + num(pay) +
               ",\"tier\":" + num(next) + "}";
     } else if (type == "setup" || type == "hero" || type == "quest" || type == "learn" || type == "attitude" || type == "rep" || type == "gm" || type == "note" ||
-               type == "dialog") {
+               type == "dialog" || type == "route") {
         // без бросков: событие = запрос как есть
         std::string body;
         for (auto& kv : act.o)
@@ -324,6 +362,9 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
         if (ev.has("purse")) s.purse = cpOf(ev["purse"]);
         if (ev.has("place")) s.place = ev["place"].str();
         if (ev.has("returnTrip")) s.returnTrip = ev["returnTrip"].flag();
+        if (ev["pos"].t == Json::ARR) s.hasPos = true, s.lon = ev["pos"][0].dbl(0), s.lat = ev["pos"][1].dbl(0), s.route.clear();
+    } else if (type == "route") {   // маршрут отряда: пункты по порядку (прокладывают игроки, утверждает мастер)
+        s.route = routeOf(ev["path"]);
     } else if (type == "hero") {
         if (!addHero(s, C, ev, err)) return false;
         say("в отряде " + s.heroes.back().name);
@@ -343,6 +384,7 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
         s.food = std::max(0.0, s.food + r["food"].dbl(0)), s.water = std::max(0.0, s.water + r["water"].dbl(0));
         s.purse -= (long long)r["pay"].dbl(0);
         s.pace = r["pace"].num(s.pace);
+        if (r["pos"].t == Json::ARR) s.hasPos = true, s.lon = r["pos"][0].dbl(s.lon), s.lat = r["pos"][1].dbl(s.lat), s.route = routeOf(r["route"]);
         for (auto& x : r["heroes"].a) {
             const int i = heroIdx(s, x["name"].str());
             if (i < 0) continue;
@@ -423,6 +465,7 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
             while (s.hour >= 24) s.hour -= 24, s.day++;
         }
         if (ev.has("place")) s.place = ev["place"].str();
+        if (ev["pos"].t == Json::ARR) s.hasPos = true, s.lon = ev["pos"][0].dbl(0), s.lat = ev["pos"][1].dbl(0);   // телепорт отряда
         if (ev.has("food")) s.food = std::max(0.0, s.food + ev["food"].dbl(0));
         if (ev.has("water")) s.water = std::max(0.0, s.water + ev["water"].dbl(0));
         if (ev.has("fact")) s.facts.insert(ev["fact"].str());
@@ -451,7 +494,8 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
 inline std::string stateJson(const State& s) {
     std::string o = "{\"n\":" + num(s.n) + ",\"day\":" + num(s.day) + ",\"hour\":" + num(s.hour) + ",\"place\":" + q(s.place) + ",\"km\":" + num(std::llround(s.km)) +
                     ",\"pace\":" + q(paceName(s.pace)) + ",\"traveler\":" + q(travelers()[s.traveler].name) + ",\"lifestyle\":" + q(lifestyles()[s.lifestyle].name) +
-                    ",\"returnTrip\":" + bl(s.returnTrip) + ",\"purse\":" + num(s.purse) + ",\"purseText\":" + q(money(s.purse)) +
+                    ",\"returnTrip\":" + bl(s.returnTrip) + ",\"pos\":" + (s.hasPos ? ptJson(s.lon, s.lat) : std::string("null")) +
+                    ",\"route\":" + routeJson(s.route) + ",\"purse\":" + num(s.purse) + ",\"purseText\":" + q(money(s.purse)) +
                     ",\"food\":" + num(std::llround(s.food)) + ",\"water\":" + num(std::llround(s.water)) + ",\"heroes\":[";
     for (size_t i = 0; i < s.heroes.size(); i++) {
         const Hero& h = s.heroes[i];

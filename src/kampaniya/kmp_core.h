@@ -138,6 +138,67 @@ inline int terrainIdx(const std::string& n) {
     return -1;
 }
 
+// ---- карта региона (Б1): сетка местности в долготе/широте (web/data/region_*.json, tools/region_act1.py) ----
+// коды клеток — индексы terrains(), 7 — вода (не пройти); road, river — флаги клеток
+struct Region {
+    int w = 0, h = 0;
+    double lon0 = 0, lat0 = 0, dlon = 1, dlat = 1;   // lat0 — северный край, строка 0 — север
+    std::string terr, road, river;
+    bool ok() const { return w > 0 && h > 0 && (int)terr.size() == w * h; }
+    int cell(double lon, double lat) const {
+        const int i = (int)std::floor((lon - lon0) / dlon), j = (int)std::floor((lat0 - lat) / dlat);
+        return i >= 0 && i < w && j >= 0 && j < h ? j * w + i : -1;
+    }
+    int terrAt(int c) const { return c < 0 ? 7 : terr[c] - '0'; }
+    bool roadAt(int c) const { return c >= 0 && road.size() == terr.size() && road[c] == '1'; }
+    bool riverAt(int c) const { return c >= 0 && river.size() == terr.size() && river[c] == '1'; }
+};
+const int TERR_WATER = 7, TERR_FIELDS = 0, TERR_RIVER = 5, TERR_TOWN = 6;
+inline double kmBetween(double lo1, double la1, double lo2, double la2) {   // равнопромежуточная проекция: на сотнях км хватает
+    const double k = M_PI / 180.0, x = (lo2 - lo1) * std::cos((la1 + la2) * 0.5 * k) * 111.32, y = (la2 - la1) * 110.57;
+    return std::sqrt(x * x + y * y);
+}
+
+// путь за день по маршруту: budget — км «по дороге» (путник × темп × часы/8); шаг 0,5 км стоит шаг / множитель клетки
+// (дорога и город — ×1). Местность дня — где отряд провёл больше всего времени; ночёвка в городе — «Город»; пересёк реку
+// не по дороге среди пашен — «Река и переправа». Вода не пропускает: отряд встаёт у берега.
+struct Walk {
+    double lon = 0, lat = 0, km = 0;
+    size_t next = 0;           // первый ещё не достигнутый пункт маршрута
+    int terrain = TERR_FIELDS;
+    bool road = false, blocked = false, river = false;
+};
+inline Walk walkDay(const Region& R, double lon, double lat, const std::vector<std::pair<double, double>>& route, double budget, const double* mult) {
+    Walk w;
+    w.lon = lon, w.lat = lat;
+    double tt[8] = {0}, roadT = 0, total = 0;
+    while (budget > 1e-9 && w.next < route.size()) {
+        const double tlo = route[w.next].first, tla = route[w.next].second, d = kmBetween(w.lon, w.lat, tlo, tla);
+        if (d < 1e-6) { w.next++; continue; }
+        double mv = std::min(0.5, d);
+        const double f = mv / d, nlo = w.lon + (tlo - w.lon) * f, nla = w.lat + (tla - w.lat) * f;
+        const int c = R.cell(nlo, nla), t = R.terrAt(c);
+        if (t == TERR_WATER) { w.blocked = true; break; }
+        const bool rd = R.roadAt(c);
+        const double m = rd ? 1.0 : mult[t];
+        double cost = mv / m;
+        if (cost > budget) mv = budget * m, cost = budget;
+        const double g = mv / d;
+        w.lon += (tlo - w.lon) * g, w.lat += (tla - w.lat) * g, w.km += mv, budget -= cost;
+        tt[t] += cost, total += cost, roadT += rd ? cost : 0;
+        if (!rd && R.riverAt(c)) w.river = true;
+        if (mv >= d - 1e-9) w.next++;
+    }
+    int best = TERR_FIELDS;
+    for (int t = 0; t < TERR_WATER; t++)
+        if (t != TERR_TOWN && tt[t] > tt[best]) best = t;
+    w.terrain = best;
+    if (R.terrAt(R.cell(w.lon, w.lat)) == TERR_TOWN) w.terrain = TERR_TOWN;
+    else if (best == TERR_FIELDS && w.river) w.terrain = TERR_RIVER;
+    w.road = total > 0 && roadT * 2 > total;
+    return w;
+}
+
 // путник: км в день по дороге (канон); отряд идёт со скоростью самого медленного
 struct Traveler {
     const char* name;

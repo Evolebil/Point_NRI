@@ -557,8 +557,28 @@ class Campaign:
         self.eng.talk({"cmd": "content", "data": data})
         return errors
 
+    def region(self):
+        """Карта региона (web/data/region_*.json из config «регион») или None."""
+        rp = self.vault.cfg.get("регион")
+        if not rp:
+            return None
+        p = rp if os.path.isabs(rp) else os.path.join(ROOT, rp)
+        if getattr(self, "_region_path", None) != p:
+            try:
+                with open(p, encoding="utf-8") as f:
+                    self._region = json.load(f)
+            except (OSError, ValueError):
+                self._region = None
+            self._region_path = p
+        return self._region
+
     def _load(self):
         self._content()
+        reg = self.region()
+        if reg:
+            r = self.eng.talk({"cmd": "region", "data": reg})
+            if r.get("type") != "ok":
+                raise RuntimeError(r.get("err"))
         r = self.eng.talk({"cmd": "load", "seed": self.meta["seed"], "journal": self.journal})
         if r.get("type") != "state":
             raise RuntimeError(f"журнал кампании {self.cid} не сворачивается: {r.get('err')}")
@@ -738,10 +758,13 @@ def kmp_cmd(msg, sid=""):
             if cmd in MASTER_ONLY and not master:
                 return {"type": "error", "err": "это может только мастер"}
             r = {}
+            if cmd == "kmp_region":   # карта для страницы — один раз (сетка ~140 КБ)
+                reg = c.region()
+                return {"type": "kmp_region", "region": reg} if reg else {"type": "error", "err": "карты региона нет"}
             if cmd == "kmp_propose":
                 act = msg.get("act") or {}
-                if not master and act.get("type") not in ("hero", "check", "contest", "buy", "sell", "note"):
-                    return {"type": "error", "err": "игрок может предложить: героя, проверку, сделку, заметку"}
+                if not master and act.get("type") not in ("hero", "check", "contest", "buy", "sell", "note", "route"):
+                    return {"type": "error", "err": "игрок может предложить: героя, проверку, сделку, маршрут, заметку"}
                 r = c.propose(act, "мастер" if master else str(msg.get("name"))[:40])
             elif cmd == "kmp_accept":
                 r = c.accept(int(msg.get("draft", 0)), msg.get("edit") or None)

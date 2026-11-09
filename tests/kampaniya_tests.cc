@@ -3,6 +3,8 @@
 #include "engine.h"
 #include "char_spec.h"
 #include "kmp_events.h"
+#include <fstream>
+#include <sstream>
 
 static int g_pass = 0, g_fail = 0;
 static void T(const char* id, bool ok, const std::string& what) {
@@ -86,8 +88,8 @@ int main() {
         Json r1 = run(a, ct, "{\"type\":\"day\",\"terrain\":\"Лес\",\"road\":true}");
         Json r2 = run(a, ct, "{\"type\":\"day\",\"terrain\":\"Лес\",\"road\":false}");
         Json r3 = run(a, ct, "{\"type\":\"day\",\"terrain\":\"Лес\",\"road\":false,\"pace\":\"быстрый\"}");
-        T("T216", r1["res"]["km"].num() == 35 && r2["res"]["km"].num() == 18 && r3["res"]["km"].num() == 22 && a.day == 4,
-          "км в день: путник × местность × темп");
+        auto want = [](const Json& r, double km) { return r["res"]["km"].num() == std::llround(r["res"]["lost"].flag() ? km / 2 : km); };   // сбились — половина
+        T("T216", r1["res"]["km"].num() == 35 && want(r2, 17.5) && want(r3, 21.875) && a.day == 4, "км в день: путник × местность × темп");
     }
     // T217–T219 встречи: порог местности; на дороге +2; обратный путь −4 и засада на к12 1–3
     {
@@ -287,6 +289,47 @@ int main() {
             if (a.dlgNode != (e["res"]["win"].str() == "Лис" ? "поверил" : "раскусил")) bad++;
         }
         T("T234", !bad, "состязание в разговоре");
+    }
+
+    // T235 путь по карте: полоса клеток по 0,1° долготы на широте 46° (~7,7 км): 2 клетки дороги, 4 пашни, 2 леса, вода
+    {
+        kmp::Content c2;
+        kmp::Region& R = c2.region;
+        R.w = 9, R.h = 1, R.lon0 = 0, R.lat0 = 46.05, R.dlon = 0.1, R.dlat = 0.1;
+        R.terr = "000000117", R.road = "110000000", R.river = "000100000";
+        kmp::State a = fresh();
+        a.food = a.water = 100, a.hasPos = true, a.lon = 0.01, a.lat = 46.0;
+        run(a, c2, "{\"type\":\"route\",\"path\":[[0.85,46.0]]}");
+        Json d1 = run(a, c2, "{\"type\":\"day\"}");
+        // 35 км по дороге: 15,4 км дороги ×1, дальше пашни ×0,75 (19,6 → 14,7 км) → ~30 км; больше времени — на пашнях, реку перешли
+        const double lon1 = a.lon;
+        const bool day1 = std::abs(d1["res"]["km"].num() - 30) <= 1 && d1["res"]["terrain"].str() == "Река и переправа" && !d1["res"]["road"].flag() && lon1 > 0.38 && lon1 < 0.42;
+        Json d2 = run(a, c2, "{\"type\":\"day\"}");
+        Json d3 = run(a, c2, "{\"type\":\"day\"}");
+        T("T235", day1 && d2["res"]["terrain"].str() == "Пашни и сёла" && d3["res"]["blocked"].flag() && a.lon < 0.8 && a.route.size() == 1 &&
+                      d3["res"]["terrain"].str() == "Лес",
+          "путь по карте: местность и дорога дня из пути, вода не пускает");
+        // T236 мастер задал местность сам — карта не используется; без маршрута — тоже
+        Json m = run(a, c2, "{\"type\":\"day\",\"terrain\":\"Горы\"}");
+        T("T236", m["res"]["terrain"].str() == "Горы" && !m["res"].has("pos"), "местность от мастера важнее карты");
+    }
+    // T237 настоящая карта Акта I: Париж → Орлеан (~110 км по прямой, по римской дороге) — 3–4 дня пешком
+    {
+        std::ifstream f("web/data/region_act1.json");
+        std::stringstream ss;
+        ss << f.rdbuf();
+        Json d = parseJson(ss.str());
+        kmp::Content c2;
+        kmp::Region& R = c2.region;
+        R.w = d["w"].num(0), R.h = d["h"].num(0), R.lon0 = d["lon0"].dbl(0), R.lat0 = d["lat0"].dbl(0), R.dlon = d["dlon"].dbl(1), R.dlat = d["dlat"].dbl(1);
+        R.terr = d["terrain"].str(), R.road = d["road"].str(), R.river = d["river"].str();
+        kmp::State a = fresh();
+        a.food = a.water = 100, a.purse = 100000, a.hasPos = true, a.lon = 2.35, a.lat = 48.86;
+        run(a, c2, "{\"type\":\"route\",\"path\":[[1.909,47.902]]}");
+        int days = 0;
+        while (!a.route.empty() && days < 10) run(a, c2, "{\"type\":\"day\"}"), days++;
+        T("T237", R.ok() && R.terrAt(R.cell(2.35, 48.86)) == kmp::TERR_TOWN && days >= 3 && days <= 5 && kmp::kmBetween(a.lon, a.lat, 1.909, 47.902) < 0.1,
+          "карта Акта I: Париж — Орлеан за " + std::to_string(days) + " дня");
     }
 
     std::printf("\nкампания: %d прошло, %d не прошло\n", g_pass, g_fail);

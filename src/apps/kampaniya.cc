@@ -3,6 +3,7 @@
 // стандартного ввода, ответы JSON-строками. Журнал хранит web/kampaniya.py; здесь — свёртка журнала и черновики событий.
 //
 //   {"cmd":"content","data":{"thr":{..},"table":{..},"ambush":{..}}}   -> {"type":"ok"}             таблицы из Obsidian
+//   {"cmd":"region","data":{w,h,lon0,lat0,dlon,dlat,terrain,road,river}} -> {"type":"ok"}             карта региона (web/data)
 //   {"cmd":"load","seed":42,"journal":[событие, …]}                     -> {"type":"state","state":{..}} свёртка с нуля
 //   {"cmd":"propose","act":{..},"who":"мастер","attempt":0}             -> {"type":"draft","ev":{..}} черновик, состояние не меняется
 //   {"cmd":"apply","ev":{..}}                                           -> {"type":"state","state":{..}} принятое событие
@@ -37,7 +38,9 @@ int main() {
         if (c == "quit") break;
         if (c == "content") {
             const Json& d = cmd["data"];
+            const kmp::Region keep = ct.region;
             ct = kmp::Content();
+            ct.region = keep;
             for (auto& kv : d["thr"].o) ct.thr[kv.first] = kv.second.num(20);
             for (auto& kv : d["table"].o)
                 for (auto& x : kv.second.a) ct.table[kv.first].push_back(x.str());
@@ -46,6 +49,14 @@ int main() {
             if (d.has("returnThr")) ct.returnThr = d["returnThr"].num(-4);
             if (d.has("ambushMax")) ct.ambushMax = d["ambushMax"].num(3);
             emitLine("{\"type\":\"ok\"}");
+        } else if (c == "region") {   // карта региона (Б1): один раз, отдельно от таблиц — она большая
+            const Json& d = cmd["data"];
+            kmp::Region& R = ct.region;
+            R = kmp::Region();
+            R.w = d["w"].num(0), R.h = d["h"].num(0), R.lon0 = d["lon0"].dbl(0), R.lat0 = d["lat0"].dbl(0), R.dlon = d["dlon"].dbl(1), R.dlat = d["dlat"].dbl(1);
+            R.terr = d["terrain"].str(), R.road = d["road"].str(), R.river = d["river"].str();
+            if (!R.ok()) { R = kmp::Region(); emitLine("{\"type\":\"error\",\"err\":\"карта региона не разобрана\"}"); }
+            else emitLine("{\"type\":\"ok\"}");
         } else if (c == "load") {
             st = kmp::State();
             st.seed = (uint64_t)cmd["seed"].dbl(1);

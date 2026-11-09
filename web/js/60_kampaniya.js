@@ -3,7 +3,7 @@
 // Вкладку и её раздел создаёт этот файл (play.html не меняется). Правила — build/kampaniya, журнал — web/kampaniya.py.
 // Мастер видит всё и решает по каждому черновику: принять, перебросить, править итог, отменить. Игрок предлагает.
 // ====================================================================================================================
-const KMP = {id: '', v: null, timer: 0, speaker: ''};   // speaker — герой, который говорит в разговоре
+const KMP = {id: '', v: null, timer: 0, speaker: '', region: null, mapBase: null, draft: [], mode: ''};   // draft — маршрут, который прокладывают щелчками; mode — 'route' | 'pos'   // speaker — герой, который говорит в разговоре
 const KMP_TERR = ['Пашни и сёла', 'Лес', 'Холмы и плато', 'Горы', 'Болото', 'Река и переправа', 'Город'];
 const KMP_ROLES = ['без занятия', 'проводник', 'дозорный', 'добытчик', 'картограф', 'следопыт', 'помощь'];
 const KMP_TRAV = ['пеший', 'всадник', 'гонец', 'армия', 'обоз'];
@@ -47,6 +47,7 @@ async function kmpList(){
 async function kmpCall(o){
   const v = await api(Object.assign({id: KMP.id, name: kmpName(), hero: KMP.speaker}, o));
   if (v.type === 'error'){ toast(v.err); return v; }
+  if (v.type === 'kmp' && !KMP.region && !KMP.noRegion){ const r = await api({cmd: 'kmp_region', id: v.id, name: kmpName()}); if (r.type === 'kmp_region') KMP.region = r.region; else KMP.noRegion = true; }
   if (v.type === 'kmp'){ KMP.id = v.id; KMP.v = v; kmpRender(); clearTimeout(KMP.timer); KMP.timer = setTimeout(kmpPoll, 4000); }
   return v;
 }
@@ -72,7 +73,7 @@ function kmpEvText(e){
     case 'day': { const en = r.enc || {};
       return `День: ${r.km} км, ${esc(r.terrain)}${r.road ? ' по дороге' : ''}, темп ${['медленный','обычный','быстрый'][r.pace]}, ${r.hours} ч.
         ${r.lost ? '<b style="color:#ff7b7b">Сбились с пути.</b>' : ''} Встреча: к20 ${en.d20} против ${en.thr} — ${en.hit ? `<b>${en.ambush ? 'ЗАСАДА' : 'да'}</b> (к12 ${en.d12}): ${esc(en.text || '—')}` : 'нет'}.
-        Дозор (пассивная Внимательность): ${r.lookout || '—'}. Добыто: ${r.forage ? r.forage.food : 0} фунтов еды. Еда ${r.food}, вода ${r.water}. Траты на жизнь: ${kmpMoney(r.pay)}${r.payShort ? ' (денег не хватило)' : ''}.
+        ${r.blocked ? '<b>Путь упёрся в воду.</b> ' : ''}${r.route ? `Впереди точек маршрута: ${r.route.length}. ` : ''}Дозор (пассивная Внимательность): ${r.lookout || '—'}. Добыто: ${r.forage ? r.forage.food : 0} фунтов еды. Еда ${r.food}, вода ${r.water}. Траты на жизнь: ${kmpMoney(r.pay)}${r.payShort ? ' (денег не хватило)' : ''}.
         ${(r.heroes || []).filter(h => h.exh).map(h => esc(h.name) + ': истощение +' + h.exh).join('; ')}`; }
     case 'rest': return `${r.kind} отдых: ` + (r.heroes || []).map(h => `${esc(h.name)} ${h.hp} ХП, костей ${h.hd}, истощение ${h.exh}`).join('; ');
     case 'buy': case 'sell': return `${e.type === 'buy' ? 'Покупка' : 'Продажа'}: ${esc(r.item)} ×${r.qty} — ${kmpMoney(r.total)}${r.pct ? ` (торг ${r.pct > 0 ? '+' : ''}${r.pct}%)` : ''}${r.offend ? ', торговец обижен' : ''}`;
@@ -81,6 +82,7 @@ function kmpEvText(e){
     case 'group': return `Групповая проверка: ${r.passed} из ${r.of} — ${r.ok ? 'успех' : 'провал'}`;
     case 'check': return `Проверка: ${r.ok ? 'успех' : 'провал'}`;
     case 'hero': return `Герой: ${esc(e.name || '')}`;
+    case 'route': return `Маршрут: ${(e.path || []).length} точек` + (e.by !== 'мастер' ? ` (предложил ${esc(e.by)})` : '');
     case 'dialog': return (e.npc ? `Разговор с ${esc(e.npc)}` : e.node ? '' : 'Разговор окончен') + (e.said ? ` · ${esc(e.hero || '')}: «${esc(e.said)}»` : '') +
       (e.node ? ` → ${esc(e.node)}` : '') + (e.text ? ` (${esc(e.text)})` : '') + ((e.do || []).length ? ' · ' + e.do.map(d => d.type === 'gm' && d.purse ? kmpMoney(d.purse) : d.fact || d.text || (d.type + (d.delta ? ' ' + d.delta : ''))).map(esc).join(', ') : '');
     default: return esc(e.type) + ' ' + esc(JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !['n','type','by','attempt'].includes(k)))));
@@ -101,6 +103,19 @@ function kmpRender(){
   h += `<div class="small" style="margin:6px 0">Груз отряда: ${Object.entries(s.inv).map(([k, n]) => esc(k) + ' ×' + n).join(', ') || '—'} · Сведения: ${s.facts.map(esc).join('; ') || '—'}
     · NPC: ${Object.entries(s.npcs).map(([k, n]) => esc(k) + ' — ' + n.attitude + (n.shift ? ` (${n.shift > 0 ? '+' : ''}${n.shift})` : '')).join('; ') || '—'}
     · Задания: ${Object.entries(s.quests).map(([k, q]) => esc(k) + ': за новые ' + kmpMoney(q.tier)).join('; ') || '—'}</div>`;
+
+  // карта региона (Б1, Б2): отряд, маршрут, прокладка щелчками
+  if (KMP.region){
+    h += `<div class="sec-h">Карта: ${esc(KMP.region.name)}</div>
+      <div class="row small"><button id="kmRoute"${KMP.mode === 'route' ? ' class="primary"' : ''}>✏ Прокладывать путь</button>
+      <button id="kmClear">Очистить</button><button id="kmSend"${KMP.draft.length ? '' : ' disabled'}>${M ? 'Задать маршрут' : 'Предложить маршрут'} (точек: ${KMP.draft.length})</button>
+      <label>город <input id="kmTown" list="kmTowns" style="width:140px"></label><datalist id="kmTowns">${KMP.region.towns.map(t => `<option value="${esc(t.name)}">`).join('')}</datalist>
+      <button id="kmTownAdd">+ в маршрут</button>${M ? `<button id="kmTownPos">Отряд — в город</button><button id="kmPos"${KMP.mode === 'pos' ? ' class="primary"' : ''}>📍 Поставить отряд щелчком</button>` : ''}
+      <span id="kmHover" class="hint"></span></div>
+      <canvas id="kMap" style="width:100%;max-width:820px;image-rendering:pixelated;cursor:crosshair;border-radius:8px;display:block"></canvas>
+      <div class="small">${KMP.region.terrains.slice(0, 7).map((t, i) => `<span style="display:inline-block;width:10px;height:10px;background:${KM_COL[i]};margin:0 3px 0 8px"></span>${esc(t)}`).join('')}
+      <span style="margin-left:8px">коричневое — римская дорога (×1), синее — река</span></div>`;
+  }
 
   // разговор (Д3): реплики NPC, варианты (недоступные — серым), проверка у варианта, лавка
   if (!KMP.speaker || !heroes.includes(KMP.speaker)) KMP.speaker = heroes[0] || '';
@@ -150,7 +165,7 @@ function kmpRender(){
 
   if (M){
     h += `<div class="sec-h">Путь</div><div class="row">
-      <label>Местность дня <select id="kDayT">${kmpOpt(KMP_TERR)}</select></label><label><input type="checkbox" id="kDayRoad"> по дороге</label>
+      <label>Местность дня <select id="kDayT">${s.pos && s.route.length && KMP.region ? '<option value="">по карте и маршруту</option>' : ''}${kmpOpt(KMP_TERR)}</select></label><label><input type="checkbox" id="kDayRoad"> по дороге</label>
       <label>часов <input id="kDayH" type="number" value="8" min="0" max="24" style="width:55px"></label>
       <label>темп <select id="kDayP">${kmpOpt(['медленный', 'обычный', 'быстрый'], s.pace)}</select></label><label><input type="checkbox" id="kDayHot"> жара</label></div>
       <div class="row">${s.heroes.filter(x => !x.dead).map((x, i) => `<label>${esc(x.name)} <select data-role="${esc(x.name)}">${kmpOpt(KMP_ROLES)}</select>
@@ -187,6 +202,7 @@ function kmpRender(){
 
 function kmpBind(){
   const val = id => $(id) ? $(id).value : '', on = id => $(id) && $(id).checked;
+  if (KMP.region) kmBind();
   $('kmpBox').querySelectorAll('button[data-d]').forEach(b => b.onclick = () => {
     const d = +b.dataset.d, k = b.dataset.k;
     if (k === 'ed'){ const t = $('kmpEd' + d); t.style.display = t.style.display === 'none' ? '' : 'none'; return; }
@@ -214,7 +230,7 @@ function kmpBind(){
   $('kmpDay').onclick = () => { const roles = {};
     $('kmpBox').querySelectorAll('select[data-role]').forEach(sel => { const n = sel.dataset.role, hp = $('kmpBox').querySelector(`select[data-help="${CSS.escape(n)}"]`);
       if (sel.value === 'помощь' && hp && hp.value) roles[n] = 'помощь:' + hp.value; else if (sel.value !== 'без занятия') roles[n] = sel.value; });
-    kmpPropose({type: 'day', terrain: val('kDayT'), road: on('kDayRoad'), hours: +val('kDayH') || 8, pace: val('kDayP'), hot: on('kDayHot'), roles}); };
+    kmpPropose({type: 'day', ...(val('kDayT') ? {terrain: val('kDayT')} : {}), road: on('kDayRoad'), hours: +val('kDayH') || 8, pace: val('kDayP'), hot: on('kDayHot'), roles}); };
   $('kmpShort').onclick = () => { const spend = {}; $('kmpBox').querySelectorAll('input[data-hd]').forEach(i => { if (+i.value) spend[i.dataset.hd] = +i.value; });
     kmpPropose({type: 'rest', kind: 'короткий', spend}); };
   $('kmpLong').onclick = () => kmpPropose({type: 'rest', kind: 'долгий'});
@@ -244,3 +260,72 @@ function kmpBind(){
 }
 // «10 зм 5 см» → медные (для вычитания денег мастером)
 function kmpParse(t){ let tot = 0; t.replace(/(\d+)\s*(зм|см|мм)?/g, (m, n, u) => { tot += +n * (u === 'зм' ? 100 : u === 'см' ? 10 : 1); }); return tot; }
+
+// ---- карта региона ----
+const KM_COL = ['#d8d09e', '#3f8f3f', '#b5a46a', '#8a6a4a', '#2e8b8b', '#4a7fd6', '#b22222', '#9cc0e6'];
+const KM_S = 4;   // пикселей на клетку
+function kmBaseImage(){   // местность, дороги, реки — один раз
+  const R = KMP.region, c = document.createElement('canvas'); c.width = R.w; c.height = R.h;
+  const g = c.getContext('2d'), im = g.createImageData(R.w, R.h);
+  const rgb = KM_COL.map(x => [1, 3, 5].map(i => parseInt(x.substr(i, 2), 16)));
+  for (let q = 0; q < R.w * R.h; q++){
+    let p = rgb[+R.terrain[q]];
+    if (R.road[q] === '1') p = p.map((v, k) => (v + [90, 74, 58][k]) / 2);
+    if (R.river[q] === '1') p = [42, 111, 176];
+    im.data.set([p[0], p[1], p[2], 255], q * 4);
+  }
+  g.putImageData(im, 0, 0);
+  return c;
+}
+const kmXY = (lon, lat) => [(lon - KMP.region.lon0) / KMP.region.dlon * KM_S, (KMP.region.lat0 - lat) / KMP.region.dlat * KM_S];
+function kmLonLat(ev){
+  const cv = $('kMap'), b = cv.getBoundingClientRect(), x = (ev.clientX - b.left) * cv.width / b.width, y = (ev.clientY - b.top) * cv.height / b.height;
+  return [+(KMP.region.lon0 + x / KM_S * KMP.region.dlon).toFixed(4), +(KMP.region.lat0 - y / KM_S * KMP.region.dlat).toFixed(4)];
+}
+function kmCell(lon, lat){ const R = KMP.region, i = Math.floor((lon - R.lon0) / R.dlon), j = Math.floor((R.lat0 - lat) / R.dlat);
+  return i >= 0 && i < R.w && j >= 0 && j < R.h ? j * R.w + i : -1; }
+function kmDraw(){
+  const R = KMP.region, cv = $('kMap'), s = KMP.v.state;
+  if (!cv) return;
+  cv.width = R.w * KM_S; cv.height = R.h * KM_S;
+  const g = cv.getContext('2d');
+  if (!KMP.mapBase) KMP.mapBase = kmBaseImage();
+  g.imageSmoothingEnabled = false; g.drawImage(KMP.mapBase, 0, 0, cv.width, cv.height);
+  g.font = '11px sans-serif'; g.textBaseline = 'middle';
+  for (const l of R.labels){ const [x, y] = kmXY(l.lon, l.lat); g.fillStyle = 'rgba(0,0,0,.55)'; g.fillText(l.text.split(':')[0], x - 30, y); }
+  for (const t of R.towns){
+    const [x, y] = kmXY(t.lon, t.lat), big = t.pop >= 10000;
+    if (t.pop < 3000 && !['Каркассон', 'Нарбонна'].includes(t.name)) { g.fillStyle = '#333'; g.fillRect(x - 1, y - 1, 3, 3); continue; }
+    g.fillStyle = big ? '#b22222' : '#222'; g.beginPath(); g.arc(x, y, big ? 4 : 3, 0, 7); g.fill();
+    g.fillStyle = '#111'; g.font = big ? 'bold 12px sans-serif' : '11px sans-serif'; g.fillText(t.name, x + 5, y - 6);
+  }
+  const line = (pts, col, dash) => { if (pts.length < 2) return; g.strokeStyle = col; g.lineWidth = 3; g.setLineDash(dash || []); g.beginPath();
+    pts.forEach((p, i) => { const [x, y] = kmXY(p[0], p[1]); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); g.setLineDash([]); };
+  const from = s.pos ? [s.pos] : [];
+  line(from.concat(s.route), '#ffcc00');
+  line((s.route.length ? [s.route[s.route.length - 1]] : from).concat(KMP.draft), '#ffffff', [6, 5]);
+  for (const p of s.route.concat(KMP.draft)){ const [x, y] = kmXY(p[0], p[1]); g.fillStyle = '#ffcc00'; g.fillRect(x - 3, y - 3, 6, 6); }
+  if (s.pos){ const [x, y] = kmXY(s.pos[0], s.pos[1]); g.fillStyle = '#e8112d'; g.strokeStyle = '#fff'; g.lineWidth = 2;
+    g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill(); g.stroke(); }
+}
+function kmBind(){
+  kmDraw();
+  const cv = $('kMap'), R = KMP.region;
+  cv.onmousemove = e => { const [lo, la] = kmLonLat(e), q = kmCell(lo, la);
+    $('kmHover').textContent = q < 0 ? '' : `${R.terrains[+R.terrain[q]]}${R.road[q] === '1' ? ', дорога' : ''}${R.river[q] === '1' ? ', река' : ''} · ${lo.toFixed(2)}, ${la.toFixed(2)}`; };
+  cv.onclick = e => {
+    const p = kmLonLat(e);
+    if (KMP.mode === 'pos'){ KMP.mode = ''; kmpDirect({type: 'gm', pos: p, text: 'отряд перенесён'}); return; }
+    if (KMP.mode !== 'route') { toast('Нажмите «Прокладывать путь», затем щёлкайте по карте'); return; }
+    if (R.terrain[kmCell(p[0], p[1])] === '7'){ toast('там вода'); return; }
+    KMP.draft.push(p); kmpRender();
+  };
+  $('kmRoute').onclick = () => { KMP.mode = KMP.mode === 'route' ? '' : 'route'; kmpRender(); };
+  $('kmClear').onclick = () => { KMP.draft = []; kmpRender(); };
+  $('kmSend').onclick = async () => { const path = KMP.v.state.route.concat(KMP.draft); const v = await kmpPropose({type: 'route', path});
+    if (v.type === 'kmp'){ KMP.draft = []; KMP.mode = ''; kmpRender(); } };
+  const town = () => R.towns.find(t => t.name === $('kmTown').value.trim());
+  $('kmTownAdd').onclick = () => { const t = town(); if (!t){ toast('нет такого города'); return; } KMP.draft.push([t.lon, t.lat]); kmpRender(); };
+  if ($('kmTownPos')) $('kmTownPos').onclick = () => { const t = town(); if (!t){ toast('нет такого города'); return; } kmpDirect({type: 'gm', pos: [t.lon, t.lat], place: t.name}); };
+  if ($('kmPos')) $('kmPos').onclick = () => { KMP.mode = KMP.mode === 'pos' ? '' : 'pos'; kmpRender(); };
+}

@@ -43,6 +43,9 @@ struct State {
     bool returnTrip = false;
     double km = 0;                    // пройдено всего
     std::string place;                // где отряд (место региона или описание)
+    bool hasPos = false;              // позиция на карте региона (Б1) и маршрут — пункты, которые ещё впереди (Б2)
+    double lon = 0, lat = 0;
+    std::vector<std::pair<double, double>> route;
     std::set<std::string> facts;      // сведения отряда
     std::map<std::string, Npc> npcs;
     std::map<std::string, int> rep;   // фракция → известность
