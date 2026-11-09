@@ -338,6 +338,8 @@
             A.wAtt = 1;
             A.stats[INT] = 10;   // правило бота (с поставленной сетью ИНТ 12+ ходил бы сетью)
             Boss B = makeBoss(800, C, false);
+            B.stats[INT] = 10;   // и соперник — ботом: проверяется правило бота, а не то, как прячется сеть
+            for (auto& m : B.tmpl) m.stats[INT] = 10;
             std::vector<std::string> log;
             std::string mj;
             fight(A, B, &log, &mj);
