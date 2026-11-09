@@ -20,6 +20,25 @@ struct GruNet {
     std::vector<T> p;                   // все параметры одним вектором
     size_t oWe = 0, obe = 0, oWz = 0, oUz = 0, obz = 0, oWr = 0, oUr = 0, obr = 0, oWn = 0, oUn = 0, obn = 0, oWo = 0, obo = 0, oWv = 0, obv = 0;
 
+    // Первый слой «по столбцам» (вход j → E чисел подряд): на каждый ненулевой вход читается один короткий отрезок,
+    // а не E разбросанных по таблице чисел (таблица 2.5 МБ не помещается в кэш). Порядок сложения для каждого выхода тот
+    // же — результат совпадает до бита. Включается только явно (freezeT) для сети, которую больше не меняют до
+    // следующего freezeT; копия сети копию по столбцам не наследует — без неё forward идёт прежним путём.
+    struct EmbT {
+        std::vector<T> w;
+        bool ok = false;
+        EmbT() = default;
+        EmbT(const EmbT&) {}
+        EmbT& operator=(const EmbT&) { w.clear(); ok = false; return *this; }
+    } embT;
+    void freezeT() {
+        embT.w.resize((size_t)D * E);
+        for (int i = 0; i < E; i++)
+            for (int j = 0; j < D; j++) embT.w[(size_t)j * E + i] = p[oWe + (size_t)i * D + j];
+        embT.ok = true;
+    }
+    void thawT() { embT.ok = false; }   // параметры сейчас поменяют — до следующего freezeT прежний путь
+
     // Активации одного шага (нужны для обратного прохода).
     struct Step {
         std::vector<T> x, e, z, r, n, un, hprev, h;
@@ -84,12 +103,22 @@ struct GruNet {
         nz.clear();
         for (int j = 0; j < D; j++)
             if (x[j] != T(0)) nz.push_back(j);
-        for (int i = 0; i < E; i++) {
-            T a = p[obe + i];
-            const T* w = &p[oWe + (size_t)i * D];
-            for (int j : nz) a += w[j] * x[j];
-            s.e[i] = std::tanh(a);
-        }
+        if (embT.ok) {
+            T* a = s.e.data();
+            for (int i = 0; i < E; i++) a[i] = p[obe + i];
+            for (int j : nz) {
+                const T* w = &embT.w[(size_t)j * E];
+                const T xj = x[j];
+                for (int i = 0; i < E; i++) a[i] += w[i] * xj;
+            }
+            for (int i = 0; i < E; i++) a[i] = std::tanh(a[i]);
+        } else
+            for (int i = 0; i < E; i++) {
+                T a = p[obe + i];
+                const T* w = &p[oWe + (size_t)i * D];
+                for (int j : nz) a += w[j] * x[j];
+                s.e[i] = std::tanh(a);
+            }
         for (int i = 0; i < H; i++) {
             T az = p[obz + i], ar = p[obr + i], an = p[obn + i], au = 0;
             const T *wz = &p[oWz + (size_t)i * E], *wr = &p[oWr + (size_t)i * E], *wn = &p[oWn + (size_t)i * E];

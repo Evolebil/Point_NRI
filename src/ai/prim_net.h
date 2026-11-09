@@ -654,7 +654,14 @@ static bool saveP(const std::string& fn, const PNet& n) {
     f.write((const char*)n.ptr.data(), n.ptr.size() * sizeof(float));
     return (bool)f;
 }
+static bool loadP0(const std::string& fn, PNet& n, bool warn);
+// загрузка весов; загруженная сеть сразу готова к быстрому прямому проходу (первый слой по столбцам)
 static bool loadP(const std::string& fn, PNet& n, bool warn) {
+    if (!loadP0(fn, n, warn)) return false;
+    n.core.freezeT();
+    return true;
+}
+static bool loadP0(const std::string& fn, PNet& n, bool warn) {
     std::ifstream f(fn, std::ios::binary);
     if (!f) return false;
     int hd[6] = {};   // короткий файл — нули, проверка заголовка ниже его отвергнет
@@ -875,6 +882,11 @@ struct Ctx {
     double temp = 1.0;                  // температура выбора, когда greedy = false (1 — как в обучении)
 };
 static thread_local Ctx* g_pctx = nullptr;
+// штраф за раунд (решение владельца 9 ноября): удваивается каждые 10 раундов — короткий кайт почти бесплатен,
+// бесконечный разорителен (база 0.005: раунды 1–10 по 0.005, 11–20 по 0.01, …, с 51-го по 0.16; за 50 раундов — 1.55,
+// больше исхода). Дальше 50-го раунда не растёт: без потолка к пределу в 500 раундов штраф уходил в миллионы и ломал
+// обучение ценности
+inline double roundPenAt(const Ctx* c, int round) { return c->roundPen * std::ldexp(1.0, std::min(5, std::max(0, round - 1) / 10)); }
 // реплей боя сети: каждый шаг — отдельный кадр с решением сети (что выбрала, с какой уверенностью, как оценивает позицию)
 static thread_local bool g_netVerbose = false;
 // потенциал позиции (для награды): доля своих ХП минус доля ХП главного врага
@@ -1183,7 +1195,7 @@ static void netTurnP(World& w, int idx) {
     for (; stepN < TURN_CAP && !over(w) && me.hp > 0; stepN++) {
         buildObs(w, idx, ts, o);
         if (onlyEnd(o)) {   // тратить нечего: ход завершает движок, в обучение шаг не идёт
-            if (sd.record && stepN == 0 && sd.hasPrev && !sd.traj.empty()) sd.traj.back().reward -= (float)c->roundPen;   // раунд всё равно прошёл
+            if (sd.record && stepN == 0 && sd.hasPrev && !sd.traj.empty()) sd.traj.back().reward -= (float)roundPenAt(c, g_curRound);   // раунд всё равно прошёл
             c->forcedEnds++;
             ended = true;
             break;
@@ -1198,7 +1210,7 @@ static void netTurnP(World& w, int idx) {
         if (sd.record) {   // награда прошлого решения: потенциальная разность γΦ(s') − Φ(s) и штраф за время
             const double phi = potential(w, me.team);
             if (sd.hasPrev && !sd.traj.empty())
-                sd.traj.back().reward += (float)(c->gamma * phi - sd.prevPhi - c->timePen - (stepN == 0 ? c->roundPen : 0.0));
+                sd.traj.back().reward += (float)(c->gamma * phi - sd.prevPhi - c->timePen - (stepN == 0 ? roundPenAt(c, g_curRound) : 0.0));
             sd.prevPhi = phi;
             sd.hasPrev = true;
             d.x = o.x;

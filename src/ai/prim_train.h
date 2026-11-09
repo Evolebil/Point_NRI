@@ -339,9 +339,11 @@ static UpdStats update(PNet& net, AdamState& aCore, AdamState& aPtr, std::vector
         const float inv = (float)(1.0 / std::max(1.0, nS));
         for (auto& v : tot.core) v *= inv;
         for (auto& v : tot.ptr) v *= inv;
+        net.core.thawT();   // веса меняются: следующие куски считают прежним путём
         aCore.step(net.core.p, tot.core, hp.lr, 1.0);
         aPtr.step(net.ptr, tot.ptr, hp.lr, 1.0);
     }
+    net.core.freezeT();   // до следующего обновления веса не меняются
     const double div = std::max(1.0, nS * epochs);
     us.loss /= div;
     us.ent /= div;
@@ -509,12 +511,15 @@ static int trainMain(int argc, char** argv) {
     // DND_PATIENCE проверок подряд (по умолчанию 6 = 300 итераций) — обучение заканчивается
     const char* pe = std::getenv("DND_PATIENCE");
     const int patience = pe ? std::max(1, std::atoi(pe)) : 6;
-    std::printf("обучение: энтропия %.3f, скорость %.0e, штраф %.4f за раунд, соперники: сама %.0f%%, пул %.0f%%, бот %.0f%%; до %d итераций, остановка после %d проверок без роста\n",
+    std::printf("обучение: энтропия %.3f, скорость %.0e, штраф %.4f за раунд (удваивается каждые 10 раундов), соперники: сама %.0f%%, пул %.0f%%, бот %.0f%%; до %d итераций, остановка после %d проверок без роста\n",
                 hp.ent, hp.lr, hp.roundPen, 100 * mixSelf, 100 * mixPool, 100 * (1 - mixSelf - mixPool), iters, patience);
     std::vector<PNet> pool;   // прошлые версии сети — соперники
     for (int k = 0; k < 8; k++) {
         PNet p;
-        if (pn::loadP(out + ".pool" + std::to_string(k), p, false)) pool.push_back(p);
+        if (pn::loadP(out + ".pool" + std::to_string(k), p, false)) {
+            pool.push_back(p);
+            pool.back().core.freezeT();   // копия не наследует первый слой по столбцам
+        }
     }
     double best = -1, bestMark = -1;   // bestMark — лучший результат, от которого считается плато (рост ≥ 0.5 п.п.)
     int markIt = it0;
@@ -567,6 +572,7 @@ static int trainMain(int argc, char** argv) {
         if (it % 25 == 0) {
             const int slot = (int)(pool.size() < 8 ? pool.size() : (it / 25) % 8);
             if ((int)pool.size() < 8) pool.push_back(net); else pool[slot] = net;
+            pool[slot].core.freezeT();
             pn::saveP(out + ".pool" + std::to_string(slot), net);
         }
         if (it % 50 == 0 || it == iters) {
