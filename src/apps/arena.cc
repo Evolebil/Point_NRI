@@ -8,6 +8,7 @@
 #include "engine.h"
 
 int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);   // построчно: прогресс калибровки виден в файле сразу
     if (argc > 1 && std::string(argv[1]) == "replay") {
         long long budget = argc > 2 ? std::stoll(argv[2]) : 1600;
         unsigned seed = argc > 3 ? (unsigned)std::stoul(argv[3]) : (unsigned)std::time(nullptr);

@@ -15,20 +15,22 @@ def rings(g):
 def visible(r):
     xs = [p[0] for p in r]; ys = [p[1] for p in r]
     return max(xs) > X0 and min(xs) < X1 and max(ys) > Y0 and min(ys) < Y1
-# провинции, разделённые по широте: (страна, провинция) -> (широта, к югу, к северу)
-SPLIT = {("GRC", "Peloponnisos"): (37.45, "ITA", "BYZ")}  # юг Мореи — Империи
-def clip(r, lat, below):  # отсечение многоугольника полуплоскостью y < lat (или y >= lat)
-    inside = (lambda q: q[1] < lat) if below else (lambda q: q[1] >= lat)
+# разделённые провинции: (страна, провинция) -> (широта, к югу, к северу) или ("lon", долгота, к западу, к востоку)
+SPLIT = {("GRC", "Peloponnisos"): (37.45, "ITA", "BYZ"),        # юг Мореи — Империи
+         ("POL", "Podlachian"): (53.6, "POL", "PRU"),          # север Подляшья — ятвяги (Судовия)
+         ("POL", "Pomeranian"): ("lon", 18.9, "POL", "PRU")}   # к востоку от Вислы — Помезания, земля пруссов
+def clip(r, lat, below, ax=1):  # отсечение многоугольника полуплоскостью: координата ax < lat (или >= lat)
+    inside = (lambda q: q[ax] < lat) if below else (lambda q: q[ax] >= lat)
     out = []
     for i in range(len(r)):
         a, b = r[i - 1], r[i]
         if inside(b):
-            if not inside(a): out.append(cross(a, b, lat))
+            if not inside(a): out.append(cross(a, b, lat, ax))
             out.append(b)
-        elif inside(a): out.append(cross(a, b, lat))
+        elif inside(a): out.append(cross(a, b, lat, ax))
     return out
-def cross(a, b, lat):
-    t = (lat - a[1]) / (b[1] - a[1]); return [a[0] + t * (b[0] - a[0]), lat]
+def cross(a, b, v, ax=1):
+    t = (v - a[ax]) / (b[ax] - a[ax]); p = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]; p[ax] = v; return p
 _PROV = None
 def _provinces():
     global _PROV
@@ -43,8 +45,8 @@ def province_polys():
         for r in rings(f["geometry"]):
             if not visible(r): continue
             if split:
-                lat, south, north = split
-                for part, kk in ((clip(r, lat, True), south), (clip(r, lat, False), north)):
+                ax_, (lat, south, north) = (0, split[1:]) if split[0] == "lon" else (1, split)
+                for part, kk in ((clip(r, lat, True, ax_), south), (clip(r, lat, False, ax_), north)):
                     if len(part) > 2: yield kk, part
             else: yield k, r
 def province_centers():
@@ -92,7 +94,7 @@ def base(ax, alpha=1.0, borders=True):
 CALL = {  # мелкие государства: подпись в стороне со стрелкой (долгота, широта подписи)
  "GAS": (-6.0, 46.6), "FLA": (2.8, 53.2), "TOU": (1.4, 39.2), "NAV": (-8.6, 44.5), "WAL": (-7.2, 50.2), "IRL_E": (-10.6, 51.3),
  "TRI": (29.5, 33.2), "JER": (29.5, 31.8), "ANT": (31.0, 38.3), "ARM": (31.5, 37.2), "CYP": (29.5, 34.5), "BOS": (14.0, 41.6),
- "PRU": (17.0, 57.5), "FRA_V": (-8.0, 48.6), "ARL": (5.6, 38.4)}
+ "PRU": (17.2, 55.9), "FRA_V": (-8.0, 48.6), "ARL": (5.6, 38.4)}
 POS = {"GER": (10.3, 52.4), "BOH": (15.2, 49.3), "LEO": (-6.2, 42.4), "CAS": (-3.3, 40.4), "POR": (-8.2, 38.6), "ARA": (0.4, 41.6)}  # ручные места подписей
 def realm_labels(ax, cent, big=10.5, small=8):
     for k, (sx, sy, w) in cent.items():

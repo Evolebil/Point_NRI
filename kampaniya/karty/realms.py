@@ -9,7 +9,7 @@ R = {  # код: (подпись, цвет)
  "POR": ("Королевство Португалия", "#3aa0a0"), "LEO": ("Королевство Леон", "#5bb6b6"), "CAS": ("Королевство Кастилия", "#2f8a8a"),
  "NAV": ("Королевство Наварра", "#8fd0d0"), "ARA": ("Арагонская корона", "#e0a23a"), "ALM": ("Альмохадский халифат", "#7a9a4a"),
  "DEN": ("Королевство Дания", "#e07a5a"), "NOR": ("Королевство Норвегия", "#c06a8a"), "SWE": ("Королевство Швеция", "#5a7ab0"),
- "POL": ("Польские княжества", "#e0c0c0"), "PRU": ("Пруссы", "#c0b0a0"), "BAL": ("Балтийские и финские племена", "#b0b8a0"),
+ "POL": ("Польские княжества", "#e0c0c0"), "PRU": ("Пруссы и ятвяги (язычники)", "#c0b0a0"), "BAL": ("Балтийские и финские племена", "#b0b8a0"),
  "HUN": ("Королевство Венгрия", "#5aa05a"), "BOS": ("Боснийский банат\n(вассал Венгрии)", "#8ac08a"),
  "SER": ("Великое княжество Сербия", "#c08060"), "BUL": ("Болгарское царство", "#a05a3a"),
  "BYZ": ("Византийская империя", "#d4a017"), "RUM": ("Румский султанат", "#a0a050"), "ARM": ("Киликийская Армения", "#c070c0"),
@@ -40,6 +40,7 @@ OVR = {
  "GBR": {}, "IRL": {"IRL_E": "Dublin Fingal South Dublin Dún Laoghaire–Rathdown Wicklow Wexford Kildare Carlow Kilkenny Meath Louth Waterford South Tipperary North Tipperary Limerick Cork Westmeath Laoighis Offaly"},
  "SWE": {"DEN": "Skåne Blekinge Halland"},
  "POL": {"PRU": "Warmian-Masurian"},
+ "LTU": {"PRU": "Taurages Marijampoles"},  # Скалвия и Судовия
  "ROU": {"HUN": "Alba Arad Bihor Bistrita-Nasaud Brasov Caras-Severin Cluj Covasna Harghita Hunedoara Maramures Mures Salaj Satu Mare Sibiu Timis",
          "BUL": "Constanta Tulcea"},
  "GRC": {"ITA": "Ionioi Nisoi"},
