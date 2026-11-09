@@ -307,7 +307,7 @@ inline std::string propose(const State& s, const Content& ct, const Json& act, c
         res = "{\"quest\":" + q(qid) + ",\"fact\":" + q(f) + ",\"party\":" + q(act["party"].str("мы")) + ",\"confirm\":" + bl(confirm) + ",\"pay\":" + num(pay) +
               ",\"tier\":" + num(next) + "}";
     } else if (type == "setup" || type == "hero" || type == "quest" || type == "learn" || type == "attitude" || type == "rep" || type == "gm" || type == "note" ||
-               type == "dialog" || (type == "route" && act["way"].t != Json::ARR)) {
+               type == "dialog" || type == "fog" || (type == "route" && act["way"].t != Json::ARR)) {
         // без бросков: событие = запрос как есть
         std::string body;
         for (auto& kv : act.o)
@@ -376,7 +376,7 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
         if (ev.has("purse")) s.purse = cpOf(ev["purse"]);
         if (ev.has("place")) s.place = ev["place"].str();
         if (ev.has("returnTrip")) s.returnTrip = ev["returnTrip"].flag();
-        if (ev["pos"].t == Json::ARR) s.hasPos = true, s.x = ev["pos"][0].dbl(0), s.y = ev["pos"][1].dbl(0), s.route.clear();
+        if (ev["pos"].t == Json::ARR) s.hasPos = true, s.x = ev["pos"][0].dbl(0), s.y = ev["pos"][1].dbl(0), s.route.clear(), s.fog.push_back({0, s.x, s.y, 0, 0, FOG_SIGHT});
     } else if (type == "route") {   // маршрут отряда: найденный движком путь (res.path) или, в старых событиях, пункты как есть
         s.route = routeOf(r["path"].t == Json::ARR ? r["path"] : ev["path"]);
         if (r["sum"].t == Json::OBJ) say("маршрут " + r["mode"].str() + ": " + num(r["sum"]["km"].num()) + " км, ≈ " + num(r["sum"]["days"].num()) + " дн.");
@@ -399,7 +399,13 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
         s.food = std::max(0.0, s.food + r["food"].dbl(0)), s.water = std::max(0.0, s.water + r["water"].dbl(0));
         s.purse -= (long long)r["pay"].dbl(0);
         s.pace = r["pace"].num(s.pace);
-        if (r["pos"].t == Json::ARR) s.hasPos = true, s.x = r["pos"][0].dbl(s.x), s.y = r["pos"][1].dbl(s.y), s.route = routeOf(r["route"]);
+        if (r["pos"].t == Json::ARR) {   // путь дня открывает туман полосой вдоль пройденного
+            const double ox = s.x, oy = s.y, had = s.hasPos;
+            s.hasPos = true, s.x = r["pos"][0].dbl(s.x), s.y = r["pos"][1].dbl(s.y), s.route = routeOf(r["route"]);
+            FogOp f;
+            f.kind = had ? 2 : 0, f.x = had ? ox : s.x, f.y = had ? oy : s.y, f.x2 = s.x, f.y2 = s.y, f.r = FOG_SIGHT;
+            s.fog.push_back(f);
+        }
         for (auto& x : r["heroes"].a) {
             const int i = heroIdx(s, x["name"].str());
             if (i < 0) continue;
@@ -480,7 +486,7 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
             while (s.hour >= 24) s.hour -= 24, s.day++;
         }
         if (ev.has("place")) s.place = ev["place"].str();
-        if (ev["pos"].t == Json::ARR) s.hasPos = true, s.x = ev["pos"][0].dbl(0), s.y = ev["pos"][1].dbl(0);   // телепорт отряда
+        if (ev["pos"].t == Json::ARR) s.hasPos = true, s.x = ev["pos"][0].dbl(0), s.y = ev["pos"][1].dbl(0), s.fog.push_back({0, s.x, s.y, 0, 0, FOG_SIGHT});   // телепорт отряда
         if (ev.has("food")) s.food = std::max(0.0, s.food + ev["food"].dbl(0));
         if (ev.has("water")) s.water = std::max(0.0, s.water + ev["water"].dbl(0));
         if (ev.has("fact")) s.facts.insert(ev["fact"].str());
@@ -488,6 +494,15 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
         if (ev.has("text")) say("мастер: " + ev["text"].str());
     } else if (type == "note") {
         say(ev["text"].str());
+    } else if (type == "fog") {   // туман (Р28): мастер открывает или скрывает круг, открывает или скрывает всё
+        const std::string op = ev["op"].str();
+        FogOp f;
+        f.kind = op == "скрыть" ? 1 : op == "всё" ? 3 : op == "ничего" ? 4 : 0;
+        f.x = ev["x"].dbl(0), f.y = ev["y"].dbl(0), f.r = std::max(0.0, ev["r"].dbl(0));
+        if (ev["pts"].t == Json::ARR && f.kind <= 1)   // мазок кисти: круги по точкам
+            for (auto& p : ev["pts"].a) f.x = p[0].dbl(0), f.y = p[1].dbl(0), s.fog.push_back(f);
+        else s.fog.push_back(f);
+        if (f.kind >= 3) say(f.kind == 3 ? "игрокам открыта вся карта" : "карта скрыта от игроков");
     } else if (type == "dialog") {   // разговор: начать, перейти в узел (с его действиями), закончить (узел пустой)
         if (ev["npc"].t == Json::STR && ev["npc"].str() != s.dlgNpc && ev["node"].str().size()) {
             Npc& p = s.npcs[ev["npc"].str()];
@@ -510,7 +525,7 @@ inline std::string stateJson(const State& s) {
     std::string o = "{\"n\":" + num(s.n) + ",\"day\":" + num(s.day) + ",\"hour\":" + num(s.hour) + ",\"place\":" + q(s.place) + ",\"km\":" + num(std::llround(s.km)) +
                     ",\"pace\":" + q(paceName(s.pace)) + ",\"traveler\":" + q(travelers()[s.traveler].name) + ",\"lifestyle\":" + q(lifestyles()[s.lifestyle].name) +
                     ",\"returnTrip\":" + bl(s.returnTrip) + ",\"pos\":" + (s.hasPos ? ptJson(s.x, s.y) : std::string("null")) +
-                    ",\"route\":" + routeJson(s.route) + ",\"purse\":" + num(s.purse) + ",\"purseText\":" + q(money(s.purse)) +
+                    ",\"route\":" + routeJson(s.route) + ",\"fogN\":" + num((long long)s.fog.size()) + ",\"purse\":" + num(s.purse) + ",\"purseText\":" + q(money(s.purse)) +
                     ",\"food\":" + num(std::llround(s.food)) + ",\"water\":" + num(std::llround(s.water)) + ",\"heroes\":[";
     for (size_t i = 0; i < s.heroes.size(); i++) {
         const Hero& h = s.heroes[i];

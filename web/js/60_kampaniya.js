@@ -170,7 +170,7 @@ function kmpTabMap(v, s, M, heroes){
       <div class="row">${s.heroes.filter(x => !x.dead).map(x => `<label>${esc(x.name)} <select data-role="${esc(x.name)}">${kmpOpt(KMP_ROLES)}</select>
         <select data-help="${esc(x.name)}" title="кому помогает">${kmpOpt([''].concat(heroes.filter(n => n !== x.name)))}</select></label>`).join('') || '<span class="hint">героев нет</span>'}</div>
       <div class="row small">Короткий отдых — кости хитов ${kq('кости хитов')}: ${s.heroes.map(x => `<label>${esc(x.name)} <input data-hd="${esc(x.name)}" type="number" min="0" max="${x.hd}" value="0" style="width:45px"></label>`).join('')}</div></details></div>`;
-    h += kmWorldPanel();
+    h += kmWorldPanel() + kmBrushPanel(s);
   }
   if (!KMP.world) return h + `<div class="hint">Мира у кампании нет. ${M ? 'Создайте его: «Мир» → «Новый мир».' : 'Мир выбирает мастер.'}</div>`;
   const W = KMP.world;
@@ -335,15 +335,23 @@ function kmpBind(){
 function kmpParse(t){ let tot = 0; t.replace(/(\d+)\s*(зм|см|мм)?/g, (m, n, u) => { tot += +n * (u === 'зм' ? 100 : u === 'см' ? 10 : 1); }); return tot; }
 
 // ---- карта мира (ТЗ v2 §2, §3): куски 256 × 256 клеток по уровням обзора, координаты — км ----
-const KM_COL = ['#d8d09e', '#3f8f3f', '#b5a46a', '#8a6a4a', '#2e8b8b', '#4a7fd6', '#b22222', '#5f86b5', '#e8d28c', '#eef2f7'];
+const KM_COL = ['#d8d09e', '#3f8f3f', '#b5a46a', '#8a6a4a', '#2e8b8b', '#4a7fd6', '#b22222', '#5f86b5', '#e8d28c', '#eef2f7', '#11161d'];   // 10 — скрыто туманом
 const KM_LEG = [0, 1, 2, 3, 4, 8, 9, 6, 7];
 const KM_RGB = KM_COL.map(x => [1, 3, 5].map(i => parseInt(x.substr(i, 2), 16)));
 const KMV = {cx: 0, cy: 0, kpp: 1, tiles: {}, raw: {}, wait: {}, drag: null};   // центр вида (км), км на пиксель, куски: ключ → картинка и данные
 async function kmLoadWorld(id){
-  const r = await api({cmd: 'kmp_worldinfo', id, name: kmpName()});
-  KMP.worldOf = id; KMV.tiles = {}; KMV.raw = {}; KMV.wait = {};
-  KMP.world = r.type === 'kmp_worldinfo' ? Object.assign(r.info, {wid: r.wid}) : null;
-  if (KMP.world) kmFit();
+  const r = await api({cmd: 'kmp_worldinfo', id, name: kmpName(), asPlayer: KMP.asPlayer});
+  const same = KMP.world && KMP.worldOf === id && KMP.world.wid === r.wid;
+  KMP.worldOf = id; KMV.wait = {};
+  if (!same){ KMV.tiles = {}; KMV.raw = {}; }
+  KMP.world = r.type === 'kmp_worldinfo' ? Object.assign(r.info, {wid: r.wid, fogN: r.fogN}) : null;
+  if (KMP.world && !same) kmFit();
+}
+// ключ куска: мир, уровень, место и туман (у игрока — число операций тумана: после открытия куски перезапрашиваются)
+const kmFogged = () => KMP.v && (!KMP.v.master || KMP.asPlayer);
+const kmKey = (wid, z, tx, ty) => wid + '|' + z + '|' + tx + '|' + ty + '|' + (kmFogged() ? 'f' + KMP.v.state.fogN : 'm');
+async function kmSyncFog(){   // туман сменился — у игрока обновить список поселений
+  if (KMP.world && kmFogged() && KMP.world.fogN !== KMP.v.state.fogN){ await kmLoadWorld(KMP.id); kmDraw(); }
 }
 function kmFit(){ const W = KMP.world; KMV.cx = W.w / 2; KMV.cy = W.h / 2; KMV.kpp = Math.max(W.w, W.h) / 900; }
 const kmLevel = () => Math.max(0, Math.min(KMP.world.zMax, Math.floor(Math.log2(Math.max(1e-9, KMV.kpp / KMP.world.cellKm)))));
@@ -353,7 +361,7 @@ function kmTileCanvas(t){   // кусок → картинка: цвет мес�
   for (let k = 0; k < 65536; k++){
     const ter = t.terr.charCodeAt(k) - 48, lv = t.level.charCodeAt(k) - 48, f = t.flags.charCodeAt(k) - 48;
     let p = KM_RGB[ter];
-    if (ter !== 7) { const sh = 1 - Math.max(0, lv - 2) * 0.045; p = p.map(v => v * sh); }
+    if (ter !== 7 && ter !== 10) { const sh = 1 - Math.max(0, lv - 2) * 0.045; p = p.map(v => v * sh); }
     if (f & 1) p = [110, 84, 60];
     if (f & 2) p = [42, 111, 176];
     im.data[k * 4] = p[0]; im.data[k * 4 + 1] = p[1]; im.data[k * 4 + 2] = p[2]; im.data[k * 4 + 3] = 255;
@@ -362,11 +370,11 @@ function kmTileCanvas(t){   // кусок → картинка: цвет мес�
   return c;
 }
 function kmGetTile(wid, z, tx, ty, redraw){
-  const key = wid + '|' + z + '|' + tx + '|' + ty;
+  const key = kmKey(wid, z, tx, ty);
   if (KMV.tiles[key]) return KMV.tiles[key];
   if (!KMV.wait[key]){
     KMV.wait[key] = 1;
-    api({cmd: 'kmp_tile', id: KMP.id, name: kmpName(), wid, z, tx, ty}).then(r => { if (r.type === 'kmp_tile'){ KMV.tiles[key] = kmTileCanvas(r.tile); KMV.raw[key] = r.tile; redraw(); } });
+    api({cmd: 'kmp_tile', id: KMP.id, name: kmpName(), wid, z, tx, ty, asPlayer: KMP.asPlayer}).then(r => { if (r.type === 'kmp_tile'){ KMV.tiles[key] = kmTileCanvas(r.tile); KMV.raw[key] = r.tile; redraw(); } });
   }
   return null;
 }
@@ -386,7 +394,7 @@ function kmDraw(){
     for (let tx = Math.max(0, Math.floor(x0 / span)); tx <= Math.min(Math.ceil(W.w / span) - 1, Math.floor(x1 / span)); tx++){
       const [px, py] = kmToPx(cv, tx * span, ty * span), sz = span / KMV.kpp;
       let im = kmGetTile(W.wid, z, tx, ty, kmDraw);
-      if (!im && z < W.zMax){ const pz = z + 1, ps = span * 2, ptx = Math.floor(tx / 2), pty = Math.floor(ty / 2), pim = KMV.tiles[W.wid + '|' + pz + '|' + ptx + '|' + pty];   // пока грузится — крупнее
+      if (!im && z < W.zMax){ const pz = z + 1, ps = span * 2, ptx = Math.floor(tx / 2), pty = Math.floor(ty / 2), pim = KMV.tiles[kmKey(W.wid, pz, ptx, pty)];   // пока грузится — крупнее
         if (pim){ g.drawImage(pim, (tx % 2) * 128, (ty % 2) * 128, 128, 128, px, py, sz, sz); continue; } }
       if (im) g.drawImage(im, px, py, sz + 0.5, sz + 0.5);
     }
@@ -399,6 +407,8 @@ function kmDraw(){
     g.fillStyle = big ? '#b22222' : '#222'; g.beginPath(); g.arc(px, py, big ? 4 : 3, 0, 7); g.fill();
     g.font = big ? 'bold 12px sans-serif' : '11px sans-serif'; g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = 3; g.strokeText(t[0], px + 6, py - 7); g.fillStyle = '#111'; g.fillText(t[0], px + 6, py - 7);
   }
+  g.font = 'italic 12px serif'; g.fillStyle = 'rgba(30,20,10,.85)';
+  for (const l of W.labels || []){ const [px, py] = kmToPx(cv, l[1], l[2]); if (px > -200 && py > -20 && px < cv.width + 50 && py < cv.height + 20){ g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = 3; g.strokeText(l[0], px, py); g.fillText(l[0], px, py); } }
   const line = (pts, col, dash) => { if (pts.length < 2) return; g.strokeStyle = col; g.lineWidth = 3; g.setLineDash(dash || []); g.beginPath();
     pts.forEach((p, i) => { const [x, y] = kmToPx(cv, p[0], p[1]); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); g.setLineDash([]); };
   const from = s.pos ? [s.pos] : [];
@@ -407,6 +417,9 @@ function kmDraw(){
   else line(from.concat(KMP.draft), 'rgba(255,255,255,.6)', [2, 6]);
   for (const p of KMP.draft){ const [x, y] = kmToPx(cv, p[0], p[1]); g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = 1; g.fillRect(x - 4, y - 4, 8, 8); g.strokeRect(x - 4, y - 4, 8, 8); }
   if (s.route.length){ const e = s.route[s.route.length - 1], [x, y] = kmToPx(cv, e[0], e[1]); g.fillStyle = '#ffcc00'; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); }
+  if (KMV.stroke){ g.fillStyle = KMP.tool === 'fogHide' ? 'rgba(0,0,0,.45)' : KMP.tool === 'fogOpen' ? 'rgba(255,255,255,.35)' : 'rgba(255,220,0,.35)';
+    for (const p of KMV.stroke){ const [x, y] = kmToPx(cv, p[0], p[1]); g.beginPath(); g.arc(x, y, Math.max(2, KMP.brushR / KMV.kpp), 0, 7); g.fill(); } }
+  if (KMP.line && KMP.line.length) line(KMP.line, KMP.tool === 'river' ? '#2a6fb0' : '#6e543c', [4, 3]);
   if (s.pos){ const [x, y] = kmToPx(cv, s.pos[0], s.pos[1]); g.fillStyle = '#e8112d'; g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill(); g.stroke(); }
   // масштаб: линейка и размер клетки уровня
   const km = kmNiceKm(KMV.kpp * 110), px = km / KMV.kpp, ckTxt = ck < 1 ? Math.round(ck * 1000) + ' м' : ck.toFixed(ck < 10 ? 1 : 0) + ' км';
@@ -416,11 +429,11 @@ function kmHoverInfo(e){
   const cv = $('kMap'), b = cv.getBoundingClientRect(), [x, y] = kmToKm(cv, (e.clientX - b.left) * cv.width / b.width, (e.clientY - b.top) * cv.height / b.height);
   const W = KMP.world, s = KMP.v.state;
   if (x < 0 || y < 0 || x > W.w || y > W.h){ $('kmHover').textContent = 'за краем мира'; return; }
-  const z = kmLevel(), ck = W.cellKm * (1 << z), span = ck * 256, tx = Math.floor(x / span), ty = Math.floor(y / span), im = KMV.tiles[W.wid + '|' + z + '|' + tx + '|' + ty];
+  const z = kmLevel(), ck = W.cellKm * (1 << z), span = ck * 256, tx = Math.floor(x / span), ty = Math.floor(y / span), im = KMV.tiles[kmKey(W.wid, z, tx, ty)];
   let txt = '';
-  const raw = KMV.raw && KMV.raw[W.wid + '|' + z + '|' + tx + '|' + ty];
+  const raw = KMV.raw && KMV.raw[kmKey(W.wid, z, tx, ty)];
   if (raw){ const k = Math.floor((y - ty * span) / ck) * 256 + Math.floor((x - tx * span) / ck), ter = raw.terr.charCodeAt(k) - 48, f = raw.flags.charCodeAt(k) - 48;
-    txt = `${W.terrains[ter]}, высота ${raw.level[k]}${f & 1 ? ', дорога' : ''}${f & 2 ? ', река' : ''}`; }
+    txt = ter === 10 ? 'не разведано' : `${W.terrains[ter]}, высота ${raw.level[k]}${f & 1 ? ', дорога' : ''}${f & 2 ? ', река' : ''}`; }
   else if (im) txt = '…';
   if (s.pos){ const d = Math.hypot(x - s.pos[0], y - s.pos[1]), kmDay = {'пеший': 35, 'всадник': 47, 'гонец': 85, 'армия': 25, 'обоз': 15}[s.traveler] || 35;
     txt += ` · от отряда ${d < 10 ? d.toFixed(1) : Math.round(d)} км по прямой — ${(d / kmDay).toFixed(1)} дн. по дороге, ${(d / (kmDay * 0.5)).toFixed(1)} дн. по лесу`; }
@@ -436,12 +449,22 @@ function kmBind(){
     KMV.cx += x - nx; KMV.cy += y - ny; kmDraw(); };
   const pxOf = e => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left) * cv.width / b.width, (e.clientY - b.top) * cv.height / b.height]; };
   cv.onwheel = e => { e.preventDefault(); const [px, py] = pxOf(e); zoom(e.deltaY > 0 ? 1.25 : 0.8, px, py); };
-  cv.onpointerdown = e => { KMV.drag = {x: e.clientX, y: e.clientY, cx: KMV.cx, cy: KMV.cy, moved: false}; cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing'; };
-  cv.onpointermove = e => { kmHoverInfo(e); const d = KMV.drag; if (!d) return; const b = cv.getBoundingClientRect(), k = cv.width / b.width;
+  cv.onpointerdown = e => { cv.setPointerCapture(e.pointerId);
+    if (KM_PAINT.includes(KMP.tool)){ KMV.stroke = [kmToKm(cv, ...pxOf(e))]; kmDraw(); return; }   // мазок кисти
+    KMV.drag = {x: e.clientX, y: e.clientY, cx: KMV.cx, cy: KMV.cy, moved: false}; cv.style.cursor = 'grabbing'; };
+  cv.onpointermove = e => { kmHoverInfo(e);
+    if (KMV.stroke){ const p = kmToKm(cv, ...pxOf(e)), l = KMV.stroke[KMV.stroke.length - 1];
+      if (Math.hypot(p[0] - l[0], p[1] - l[1]) >= KMP.brushR * 0.5) { KMV.stroke.push(p); kmDraw(); } return; }
+    const d = KMV.drag; if (!d) return; const b = cv.getBoundingClientRect(), k = cv.width / b.width;
     if (Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 4) d.moved = true;
     KMV.cx = d.cx - (e.clientX - d.x) * k * KMV.kpp; KMV.cy = d.cy - (e.clientY - d.y) * k * KMV.kpp; kmDraw(); };
-  cv.onpointerup = e => { const d = KMV.drag; KMV.drag = null; cv.style.cursor = 'grab'; if (!d || d.moved) return;
+  cv.onpointerup = e => { if (KMV.stroke){ const st = KMV.stroke; KMV.stroke = null; kmStrokeDone(st); return; }
+    const d = KMV.drag; KMV.drag = null; cv.style.cursor = 'grab'; if (!d || d.moved) return;
     const [x, y] = kmToKm(cv, ...pxOf(e)); const p = [+x.toFixed(3), +y.toFixed(3)];
+    if (KMP.tool === 'road' || KMP.tool === 'river'){ (KMP.line = KMP.line || []).push(p); kmDraw(); return; }
+    if (KMP.tool === 'town'){ const n = ($('kbName') || {}).value; if (!n){ toast('Впишите имя поселения'); return; }
+      kmEdit([{op: 'town', name: n, kind: $('kbKind').value, x: p[0], y: p[1]}]); return; }
+    if (KMP.tool === 'label'){ const t = ($('kbText') || {}).value; if (!t){ toast('Впишите надпись'); return; } kmEdit([{op: 'label', text: t, x: p[0], y: p[1]}]); return; }
     if (KMP.mode === 'pos'){ KMP.mode = ''; kmpDirect({type: 'gm', pos: p, text: 'отряд перенесён'}); return; }
     if (KMP.mode !== 'route') { toast('Чтобы проложить путь, нажмите «✏ Прокладывать путь щелчками»'); return; }
     KMP.draft.push(p); kmPreview(); };
@@ -457,6 +480,8 @@ function kmBind(){
   if ($('kmTownPos')) $('kmTownPos').onclick = () => { const t = town(); if (!t){ toast('нет такого поселения'); return; } kmpDirect({type: 'gm', pos: [t[1], t[2]], place: t[0]}); };
   if ($('kmPos')) $('kmPos').onclick = () => { KMP.mode = KMP.mode === 'pos' ? '' : 'pos'; kmpRender(); };
   kmBindWorld();
+  kmBindBrush();
+  kmSyncFog();
 }
 
 // ---- путь (ТЗ v2 §4): движок ищет путь через пункты по режиму; до утверждения — предпросмотр со сводкой ----
@@ -478,6 +503,50 @@ async function kmPreview(){
   if ($('kmSum')) $('kmSum').innerHTML = kmSumText();
   if ($('kmSend')) $('kmSend').disabled = !(KMP.preview && KMP.preview.path);
   kmDraw();
+}
+
+// ---- кисть и туман (ТЗ v2 §3.1, §5): правки мира — у мира (видны всем его кампаниям), туман — в журнале кампании ----
+const KM_PAINT = ['terr', 'erase', 'fogOpen', 'fogHide'];
+const KM_TOOLS = [['', '✋ Рука (двигать карту)'], ['terr', '🖌 Местность'], ['road', 'Дорога'], ['river', 'Река'], ['town', 'Поселение'], ['label', 'Надпись'],
+  ['erase', '🧽 Ластик'], ['fogOpen', '☀ Открыть игрокам'], ['fogHide', '🌫 Скрыть от игроков']];
+const KM_TOWN_KINDS = ['хутор', 'село', 'городок', 'город', 'крупный город', 'великий город'];
+KMP.tool = ''; KMP.brushR = 5; KMP.brushT = 1; KMP.asPlayer = false;
+function kmBrushPanel(s){
+  const T = KMP.tool;
+  return `<details class="card" style="margin:6px 0"${T || KMP.asPlayer ? ' open' : ''}><summary><b>Кисть и туман</b> <span class="small">(рисовать на мире: местность, дороги, реки, поселения; что видят игроки)</span></summary>
+    <div class="row">${KM_TOOLS.map(([k, n]) => `<button data-tool="${k}"${T === k ? ' class="primary"' : ''}>${n}</button>`).join('')}</div>
+    <div class="row">${KM_PAINT.includes(T) ? `<label>радиус, км <input id="kbR" type="number" min="0.2" max="200" step="0.5" value="${KMP.brushR}" style="width:70px"></label>` : ''}
+      ${T === 'terr' ? `<label>местность <select id="kbT">${[0, 1, 2, 3, 4, 8, 9, 7].map(i => `<option value="${i}"${+KMP.brushT === i ? ' selected' : ''}>${esc(KMP.world.terrains[i])}</option>`).join('')}</select></label>` : ''}
+      ${T === 'road' || T === 'river' ? `<span class="small">щёлкайте точки линии (${(KMP.line || []).length})</span><button id="kbLineOk" class="primary">Закончить линию</button><button id="kbLineNo">Сбросить</button>` : ''}
+      ${T === 'town' ? `<label>имя <input id="kbName" style="width:140px"></label><label>вид <select id="kbKind">${kmpOpt(KM_TOWN_KINDS, 'село')}</select></label><span class="small">затем щелчок по карте</span>` : ''}
+      ${T === 'label' ? `<label>надпись <input id="kbText" style="width:200px" placeholder="Солонь: булливаги"></label><span class="small">затем щелчок по карте</span>` : ''}
+      ${KM_PAINT.includes(T) ? '<span class="small">ведите по карте с зажатой кнопкой</span>' : ''}</div>
+    <div class="row"><button id="kbUndo">↶ Отменить последнюю правку мира</button><button id="kbFogAll">Открыть игрокам всю карту</button><button id="kbFogNone">Скрыть всё от игроков</button>
+      <label><input type="checkbox" id="kbAsPlayer"${KMP.asPlayer ? ' checked' : ''}> как видят игроки</label></div>
+    <div class="hint">Правки мира видят все кампании на этом мире. Отряд в пути сам открывает полосу ~8 км вокруг пройденного.</div></details>`;
+}
+async function kmEdit(ops){
+  const v = await kmpCall({cmd: 'kmp_edit', ops});
+  if (v.type === 'kmp'){ KMV.tiles = {}; KMV.raw = {}; await kmLoadWorld(KMP.id); kmDraw(); }
+}
+function kmStrokeDone(st){
+  const r = KMP.brushR, pts = st.map(p => [+p[0].toFixed(3), +p[1].toFixed(3)]);
+  if (KMP.tool === 'terr') kmEdit(pts.map(p => ({op: 'terr', t: +KMP.brushT, x: p[0], y: p[1], r})));
+  else if (KMP.tool === 'erase') kmEdit(pts.map(p => ({op: 'erase', x: p[0], y: p[1], r})));
+  else kmpDirect({type: 'fog', op: KMP.tool === 'fogHide' ? 'скрыть' : 'открыть', r, pts});
+}
+function kmBindBrush(){
+  const click = (id, f) => { if ($(id)) $(id).onclick = f; };
+  document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { KMP.tool = b.dataset.tool; KMP.line = []; KMP.mode = ''; kmpRender(); });
+  if ($('kbR')) $('kbR').oninput = () => { KMP.brushR = Math.max(0.2, +$('kbR').value || 5); };
+  if ($('kbT')) $('kbT').onchange = () => { KMP.brushT = +$('kbT').value; };
+  click('kbLineOk', () => { if ((KMP.line || []).length < 2){ toast('Нужно хотя бы две точки'); return; } kmEdit([{op: KMP.tool, pts: KMP.line}]); KMP.line = []; });
+  click('kbLineNo', () => { KMP.line = []; kmDraw(); });
+  click('kbUndo', () => kmpCall({cmd: 'kmp_edit_undo'}).then(async v => { if (v.type === 'kmp'){ KMV.tiles = {}; KMV.raw = {}; await kmLoadWorld(KMP.id); kmDraw(); } }));
+  click('kbFogAll', () => kmpDirect({type: 'fog', op: 'всё'}));
+  click('kbFogNone', () => confirm('Скрыть от игроков всю карту? Откроется снова, где отряд пройдёт.') && kmpDirect({type: 'fog', op: 'ничего'}));
+  if ($('kbAsPlayer')) $('kbAsPlayer').onchange = async () => { KMP.asPlayer = $('kbAsPlayer').checked; await kmLoadWorld(KMP.id); kmDraw(); };
+  if ($('kMap')) $('kMap').style.cursor = KM_PAINT.includes(KMP.tool) ? 'crosshair' : KMP.tool ? 'copy' : 'grab';
 }
 
 // ---- мир кампании: мастер выбирает — генератор по параметрам (с предпросмотром) или Акт I ----

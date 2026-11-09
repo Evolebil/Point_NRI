@@ -464,6 +464,71 @@ int main() {
         T("T245", n > 0 && down * 10 >= n * 9 && townsDry, "карта высот: реки текут вниз (" + std::to_string(down) + " из " + std::to_string(n) + " отрезков), поселения на суше");
     }
 
+    // T246–T247 правки кистью поверх мира
+    {
+        auto G = std::make_shared<kmp::GenWorld>();
+        G->p.sizeKm = 200, G->p.seed = 9, G->p.sea = 0.1;
+        G->build();
+        const kmp::Town t0 = G->towns.at(0);
+        auto ed = [](const std::string& j) { return kmp::editOf(parseJson(j)); };
+        auto E = std::make_shared<kmp::EditedWorld>();
+        E->build(G, {ed("{\"op\":\"terr\",\"t\":7,\"x\":100,\"y\":100,\"r\":10}"), ed("{\"op\":\"terr\",\"t\":-1,\"x\":100,\"y\":100,\"r\":3}"),
+                     ed("{\"op\":\"terr\",\"t\":1,\"x\":40,\"y\":40,\"r\":4}"), ed("{\"op\":\"road\",\"pts\":[[20,150],[60,150]]}"),
+                     ed("{\"op\":\"town\",\"name\":\"Новгородок\",\"kind\":\"город\",\"x\":150,\"y\":30}"),
+                     ed("{\"op\":\"untown\",\"name\":\"" + t0.name + "\"}"), ed("{\"op\":\"label\",\"text\":\"Чёрный лес\",\"x\":40,\"y\":40}")});
+        const bool water = E->at(100, 107, 0).terr == kmp::TERR_WATER, restored = E->at(100, 100.5, 0).terr == G->at(100, 100.5, 0).terr;
+        const bool forest = E->at(41, 41, 0).terr == kmp::TERR_FOREST || E->at(41, 41, 0).terr == kmp::TERR_TOWN, road = E->at(40, 150, kmp::CELL_KM).road;
+        const kmp::WCell nt = E->at(150, 30, 0), old = E->at(t0.x, t0.y, 0);
+        bool listed = false, gone = true;
+        for (auto& t : E->towns) listed |= t.name == "Новгородок", gone &= t.name != t0.name;
+        T("T246", water && restored && forest && road && nt.terr == kmp::TERR_TOWN && E->towns[nt.town].name == "Новгородок" && listed && gone &&
+                      old.terr != kmp::TERR_TOWN && E->labels.size() == G->labels.size() + 1,
+          "правки: озеро кистью, ластик, лес, дорога, своё поселение, убрать поселение, надпись");
+        double mult[kmp::TERR_N];
+        for (int t = 0; t < kmp::TERR_N; t++) mult[t] = std::max(0.01, kmp::terrains()[t].mult);
+        mult[kmp::TERR_TOWN] = 1;
+        kmp::Pts pth;
+        std::string err;
+        double ax = 89, bx = 111;   // суша по обе стороны озера (r 10) на одной прямой
+        while (ax > 60 && E->at(ax, 100, 0).terr == kmp::TERR_WATER) ax -= 1;
+        while (bx < 140 && E->at(bx, 100, 0).terr == kmp::TERR_WATER) bx += 1;
+        const bool around = kmp::findRoute(*E, ax, 100, {{bx, 100}}, kmp::PM_STRAIGHT, mult, pth, err) && pth.size() > 1;
+        bool dry = true;
+        double x = ax, y = 100;
+        for (auto& q : pth) {
+            for (int k = 1; k <= 40; k++) dry &= E->at(x + (q.first - x) * k / 40, y + (q.second - y) * k / 40, 0).terr != kmp::TERR_WATER || std::hypot(x + (q.first - x) * k / 40 - 100, y + (q.second - y) * k / 40 - 100) < 3.1;
+            x = q.first, y = q.second;
+        }
+        T("T247", around && dry, "путь обходит нарисованное озеро");
+    }
+    // T248–T249 туман карты
+    {
+        auto G = std::make_shared<kmp::GenWorld>();
+        G->p.sizeKm = 200, G->p.seed = 9, G->p.sea = 0.1;
+        G->build();
+        kmp::Content c2;
+        c2.world = G;
+        kmp::State a = fresh();
+        a.food = a.water = 100;
+        const bool hid0 = !kmp::fogVisible(a.fog, 50, 50);
+        run(a, c2, "{\"type\":\"gm\",\"pos\":[50,50]}");
+        const bool near = kmp::fogVisible(a.fog, 55, 50), far = !kmp::fogVisible(a.fog, 90, 50);
+        run(a, c2, "{\"type\":\"route\",\"path\":[[120,50]]}");
+        run(a, c2, "{\"type\":\"day\",\"road\":true,\"terrain\":\"Пашни и сёла\"}");   // местность задана — путь по карте не идёт
+        run(a, c2, "{\"type\":\"day\"}");
+        const bool strip = kmp::fogVisible(a.fog, (50 + a.x) / 2, 53) && !kmp::fogVisible(a.fog, (50 + a.x) / 2, 70);
+        run(a, c2, "{\"type\":\"fog\",\"op\":\"скрыть\",\"x\":52,\"y\":50,\"r\":3}");
+        const bool hidden = !kmp::fogVisible(a.fog, 52, 50) && kmp::fogVisible(a.fog, 58, 50);
+        T("T248", hid0 && near && far && strip && hidden, "туман: открывает место отряда и полосу пути, мастер скрывает круг");
+        kmp::Vis vis = [&a](double x, double y) { return kmp::fogVisible(a.fog, x, y); };
+        auto terrOf = [](const std::string& t) { const size_t a = t.find("\"terr\":\"") + 8; return t.substr(a, t.find('"', a) - a); };
+        const std::string tl = terrOf(kmp::tileJson(*G, 0, 0, 0, vis));
+        const std::string info = kmp::worldInfoJson(*G, vis), all = kmp::worldInfoJson(*G);
+        run(a, c2, "{\"type\":\"fog\",\"op\":\"всё\"}");
+        const bool open = kmp::fogVisible(a.fog, 190, 190) && terrOf(kmp::tileJson(*G, 0, 0, 0, vis)).find(':') == std::string::npos;
+        T("T249", tl.find(':') != std::string::npos && info.size() < all.size() && open, "туман: скрытые клетки и поселения игроку не уходят; «открыть всё»");
+    }
+
     std::printf("\nкампания: %d прошло, %d не прошло\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

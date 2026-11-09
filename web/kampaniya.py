@@ -551,6 +551,70 @@ def world_params(raw):
     return out
 
 
+# ---- правки мира кистью: miry/<мир>/edits.jsonl, по одной на строку; перед каждой пачкой — копия для отмены ----
+EDIT_TERR = 10   # коды местности 0…9 (7 — вода), −1 — вернуть исходную
+
+
+def edits_path(wid):
+    return os.path.join(WORLDS, re.sub(r"[^0-9A-Za-zА-Яа-яЁё_-]", "", str(wid)), "edits.jsonl")
+
+
+def load_edits(wid):
+    try:
+        with open(edits_path(wid), encoding="utf-8") as f:
+            return [json.loads(ln) for ln in f if ln.strip()]
+    except (OSError, ValueError):
+        return []
+
+
+def save_edits(wid, eds):
+    p = edits_path(wid)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    if os.path.exists(p):
+        import shutil
+        shutil.copyfile(p, p + ".undo")
+    else:
+        open(p + ".undo", "w").close()
+    with open(p, "w", encoding="utf-8") as f:
+        f.writelines(json.dumps(e, ensure_ascii=False) + "\n" for e in eds)
+
+
+def apply_edit_ops(eds, ops, info):
+    """Пачка правок: проверить и добавить; ластик убирает добавленное в круге и исходные поселения, возвращает местность."""
+    out = list(eds)
+    num_ = lambda v, lo, hi: min(hi, max(lo, float(v)))
+    for o in ops[:2000]:
+        op = str(o.get("op", ""))
+        try:
+            x, y, r = num_(o.get("x", 0), -10, 6000), num_(o.get("y", 0), -10, 6000), num_(o.get("r", 0), 0, 500)
+            if op == "terr":
+                out.append({"op": "terr", "t": int(num_(o.get("t", -1), -1, EDIT_TERR - 1)), "x": x, "y": y, "r": r})
+            elif op in ("road", "river"):
+                pts = [[num_(p[0], -10, 6000), num_(p[1], -10, 6000)] for p in (o.get("pts") or [])[:500]]
+                if len(pts) >= 2:
+                    out.append({"op": op, "pts": pts})
+            elif op == "town":
+                name = str(o.get("name") or "").strip()[:60]
+                if name:
+                    out.append({"op": "town", "name": name, "kind": str(o.get("kind") or "село")[:30], "x": x, "y": y})
+            elif op == "label":
+                text = str(o.get("text") or "").strip()[:80]
+                if text:
+                    out.append({"op": "label", "text": text, "x": x, "y": y})
+            elif op == "erase":
+                inside = lambda px, py: (px - x) ** 2 + (py - y) ** 2 <= r * r
+                out = [e for e in out if not ((e["op"] in ("town", "label") and inside(e["x"], e["y"])) or
+                                             (e["op"] in ("road", "river") and any(inside(p[0], p[1]) for p in e["pts"])))]
+                added = {e["name"] for e in out if e["op"] == "town"}
+                for t in (info or {}).get("towns", []):
+                    if inside(t[1], t[2]) and t[0] not in added:
+                        out.append({"op": "untown", "name": t[0]})
+                out.append({"op": "terr", "t": -1, "x": x, "y": y, "r": r})
+        except (TypeError, ValueError, IndexError):
+            continue
+    return out
+
+
 HMAP_MAX = 1024   # сторона карты высот, пикселей: страница уменьшает картинку до неё (запрос — не больше 2 МБ)
 
 
@@ -661,14 +725,14 @@ class Campaign:
         """Команда движку для мира wid ("акт1" или id мира генератора)."""
         if wid == "акт1":
             reg = self.region()
-            return None if reg is None else {"cmd": "world", "id": "акт1", "kind": "act", "data": reg, "use": use}
+            return None if reg is None else {"cmd": "world", "id": "акт1", "kind": "act", "data": reg, "use": use, "edits": load_edits("акт1")}
         w = load_world(wid)
         if w is None:
             return None
         prm = dict(w["параметры"], name=w["имя"])
         if prm.get("hmap"):
             prm["hmap"] = hmap_path(prm, wid)
-        return {"cmd": "world", "id": wid, "kind": "gen", "params": prm, "use": use}
+        return {"cmd": "world", "id": wid, "kind": "gen", "params": prm, "use": use, "edits": load_edits(wid)}
 
     def set_world(self, wid):
         """Сделать мир миром кампании: сразу в движок и в meta.json (переживает перезапуск)."""
@@ -684,12 +748,12 @@ class Campaign:
         self.tiles, self.info = {}, r["info"]
         return {"info": r["info"]}
 
-    def tile(self, wid, z, tx, ty):
-        """Кусок обзора — из кэша (последние 300) или от движка."""
-        key = (wid, z, tx, ty)
+    def tile(self, wid, z, tx, ty, fog=False):
+        """Кусок обзора — из кэша (последние 300) или от движка; fog — как видят игроки (ключ — число операций тумана)."""
+        key = (wid, z, tx, ty, self.state.get("fogN", 0) if fog else -1)
         t = self.tiles.get(key)
         if t is None:
-            r = self.eng.talk({"cmd": "tile", "id": wid, "z": z, "tx": tx, "ty": ty})
+            r = self.eng.talk({"cmd": "tile", "id": wid, "z": z, "tx": tx, "ty": ty, "fog": fog})
             if r.get("type") != "tile":
                 return None
             t = self.tiles[key] = r["tile"]
@@ -830,7 +894,7 @@ class Campaign:
 # ---------------------------------------------------------------- команды сервера (play_server.py: cmd «kmp_*»)
 
 CAMPS, CAMPS_LOCK, VAULT = {}, threading.Lock(), None
-MASTER_ONLY = {"kmp_hmap", "kmp_world_use", "kmp_world_preview", "kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export", "kmp_talk", "kmp_talk_end"}
+MASTER_ONLY = {"kmp_edit", "kmp_edit_undo", "kmp_hmap", "kmp_world_use", "kmp_world_preview", "kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export", "kmp_talk", "kmp_talk_end"}
 
 
 def _key(name):
@@ -902,14 +966,43 @@ def kmp_cmd(msg, sid=""):
             if cmd in MASTER_ONLY and not master:
                 return {"type": "error", "err": "это может только мастер"}
             r = {}
-            if cmd == "kmp_worldinfo":   # мир кампании: размер, уровни обзора, поселения (один раз на страницу)
-                return {"type": "kmp_worldinfo", "wid": c.meta.get("мир"), "info": c.info} if c.info else {"type": "error", "err": "мира нет"}
+            fog = not master or bool(msg.get("asPlayer"))   # туман (Р28): игрок видит только открытое; мастер — по желанию «как игроки»
+            if cmd == "kmp_worldinfo":   # мир кампании: размер, уровни обзора, поселения, надписи
+                if not c.info:
+                    return {"type": "error", "err": "мира нет"}
+                info = c.info
+                if fog:
+                    r = c.eng.talk({"cmd": "worldinfo", "id": c.meta.get("мир"), "fog": True})
+                    info = r.get("info") or c.info
+                return {"type": "kmp_worldinfo", "wid": c.meta.get("мир"), "info": info, "fogN": c.state.get("fogN", 0) if fog else -1}
             if cmd == "kmp_tile":   # кусок обзора: мир кампании, а мастеру — и мир предпросмотра
                 wid = str(msg.get("wid") or c.meta.get("мир") or "")
                 if wid != c.meta.get("мир") and not (master and wid == "предпросмотр"):
                     return {"type": "error", "err": "чужой мир"}
-                t = c.tile(wid, int(msg.get("z", 0)), int(msg.get("tx", 0)), int(msg.get("ty", 0)))
+                t = c.tile(wid, int(msg.get("z", 0)), int(msg.get("tx", 0)), int(msg.get("ty", 0)), fog and wid != "предпросмотр")
                 return {"type": "kmp_tile", "tile": t} if t else {"type": "error", "err": "нет куска"}
+            if cmd in ("kmp_edit", "kmp_edit_undo"):   # мастер правит мир кистью (ТЗ v2 §3.1) — правки у мира, видны всем его кампаниям
+                if not master:
+                    return {"type": "error", "err": "мир правит мастер"}
+                wid = c.meta.get("мир")
+                if not wid:
+                    return {"type": "error", "err": "мира нет"}
+                eds = load_edits(wid)
+                if cmd == "kmp_edit_undo":
+                    if not os.path.exists(edits_path(wid) + ".undo"):
+                        return {"type": "error", "err": "отменять нечего"}
+                    os.replace(edits_path(wid) + ".undo", edits_path(wid))
+                    eds = load_edits(wid)
+                else:
+                    new = apply_edit_ops(eds, msg.get("ops") or [], c.info)
+                    save_edits(wid, new)
+                    eds = new
+                for oc in list(CAMPS.values()):   # все открытые кампании на этом мире
+                    if oc.meta.get("мир") == wid:
+                        r = oc.eng.talk({"cmd": "edits", "id": wid, "edits": eds})
+                        if r.get("type") == "world":
+                            oc.info, oc.tiles = r["info"], {}
+                cmd = "kmp_open"
             if cmd == "kmp_path":   # предпросмотр пути (ТЗ v2 §4): тот же расчёт, что у события «маршрут», без записи в журнал
                 r = c.eng.talk({"cmd": "propose", "act": {"type": "route", "way": msg.get("way") or [], "mode": str(msg.get("mode") or "")},
                                 "who": name, "attempt": 0})

@@ -46,6 +46,7 @@ struct State {
     bool hasPos = false;              // позиция на карте мира (км от северо-западного угла) и маршрут — пункты, которые ещё впереди
     double x = 0, y = 0;
     std::vector<std::pair<double, double>> route;
+    std::vector<FogOp> fog;           // туман карты (Р28): что открыто игрокам
     std::set<std::string> facts;      // сведения отряда
     std::map<std::string, Npc> npcs;
     std::map<std::string, int> rep;   // фракция → известность

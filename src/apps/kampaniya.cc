@@ -6,7 +6,9 @@
 //   {"cmd":"world","id":"…","kind":"gen","params":{size,seed,sea,mount,rough,climate,humid,towns,rivers,name},"use":true}
 //   {"cmd":"world","id":"act1","kind":"act","data":<web/data/region_act1.json>,"use":true}     -> {"type":"world","info":{…}}
 //   {"cmd":"tile","id":"…","z":3,"tx":0,"ty":0}  -> {"type":"tile","tile":{…}}   кусок 256 × 256 клеток уровня z
-//   {"cmd":"worldinfo","id":"…"}                 -> {"type":"worldinfo","info":{…}}  размер, уровни, поселения
+//   {"cmd":"worldinfo","id":"…"}                 -> {"type":"worldinfo","info":{…}}  размер, уровни, поселения, надписи
+//   у world — необязательно "edits":[правка, …]; {"cmd":"edits","id":"…","edits":[…]} — сменить правки; у tile и worldinfo
+//   "fog":true — только открытое игрокам (скрытые клетки — ':')
 //   {"cmd":"load","seed":42,"journal":[событие, …]}                     -> {"type":"state","state":{..}} свёртка с нуля
 //   {"cmd":"propose","act":{..},"who":"мастер","attempt":0}             -> {"type":"draft","ev":{..}} черновик, состояние не меняется
 //   {"cmd":"apply","ev":{..}}                                           -> {"type":"state","state":{..}} принятое событие
@@ -32,7 +34,8 @@ int main() {
     for (int a = 0; a < AT_N; a++) C[a] = AD[a].init;
     kmp::State st;
     kmp::Content ct;
-    std::map<std::string, std::shared_ptr<kmp::World>> worlds;   // миры по id: мир кампании и предпросмотры генератора
+    std::map<std::string, std::shared_ptr<kmp::World>> worlds;   // миры по id (с правками): мир кампании и предпросмотры генератора
+    std::map<std::string, std::shared_ptr<kmp::World>> bases;    // те же миры без правок — чтобы правки пересобирать без перестройки мира
     std::string line;
     while (std::getline(std::cin, line)) {
         bool ok = true;
@@ -72,6 +75,12 @@ int main() {
                     A->towns.push_back(tw);
                 }
                 A->name = d["name"].str("Акт I");
+                for (auto& l : d["labels"].a) {   // подписи областей Акта I (леса, болота)
+                    kmp::Label lb;
+                    lb.text = l["text"].str();
+                    A->toKm(l["lon"].dbl(0), l["lat"].dbl(0), lb.x, lb.y);
+                    A->labels.push_back(lb);
+                }
                 W = A;
             } else {
                 auto G = std::make_shared<kmp::GenWorld>();
@@ -91,16 +100,38 @@ int main() {
                 G->build();
                 W = G;
             }
+            bases[id] = W;
+            if (cmd["edits"].t == Json::ARR) {   // правки кистью поверх мира
+                std::vector<kmp::Edit> ed;
+                for (auto& e : cmd["edits"].a) ed.push_back(kmp::editOf(e));
+                auto E = std::make_shared<kmp::EditedWorld>();
+                E->build(W, ed);
+                W = E;
+            }
             worlds[id] = W;
             if (cmd["use"].flag()) ct.world = W;
             emitLine("{\"type\":\"world\",\"id\":" + kmp::q(id) + ",\"info\":" + kmp::worldInfoJson(*W) + "}");
+        } else if (c == "edits") {   // правки мира сменились: пересобрать слой правок над тем же миром (мир не перестраивается)
+            const std::string id = cmd["id"].str();
+            auto b = bases.find(id);
+            if (b == bases.end()) { emitLine("{\"type\":\"error\",\"err\":\"мира нет\"}"); continue; }
+            std::vector<kmp::Edit> ed;
+            for (auto& e : cmd["edits"].a) ed.push_back(kmp::editOf(e));
+            auto E = std::make_shared<kmp::EditedWorld>();
+            E->build(b->second, ed);
+            const bool cur = worlds[id] == ct.world;
+            worlds[id] = E;
+            if (cur) ct.world = E;
+            emitLine("{\"type\":\"world\",\"id\":" + kmp::q(id) + ",\"info\":" + kmp::worldInfoJson(*E) + "}");
         } else if (c == "tile" || c == "worldinfo") {   // кусок обзора / сведения о мире (по id; без id — мир кампании)
             auto it = worlds.find(cmd["id"].str());
             std::shared_ptr<kmp::World> W = it != worlds.end() ? it->second : ct.world;
             if (!W) { emitLine("{\"type\":\"error\",\"err\":\"мира нет\"}"); continue; }
-            if (c == "worldinfo") { emitLine("{\"type\":\"worldinfo\",\"info\":" + kmp::worldInfoJson(*W) + "}"); continue; }
+            kmp::Vis vis;   // туман: для игроков — только открытое (кусок и список поселений)
+            if (cmd["fog"].flag()) vis = [&st](double x, double y) { return kmp::fogVisible(st.fog, x, y); };
+            if (c == "worldinfo") { emitLine("{\"type\":\"worldinfo\",\"info\":" + kmp::worldInfoJson(*W, vis) + "}"); continue; }
             const int z = std::clamp(cmd["z"].num(0), 0, 12);
-            emitLine("{\"type\":\"tile\",\"tile\":" + kmp::tileJson(*W, z, cmd["tx"].num(0), cmd["ty"].num(0)) + "}");
+            emitLine("{\"type\":\"tile\",\"tile\":" + kmp::tileJson(*W, z, cmd["tx"].num(0), cmd["ty"].num(0), vis) + "}");
         } else if (c == "load") {
             st = kmp::State();
             st.seed = (uint64_t)cmd["seed"].dbl(1);

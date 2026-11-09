@@ -10,6 +10,7 @@
 // ============================================================================
 #pragma once
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <queue>
 #include "kmp_core.h"
@@ -32,10 +33,15 @@ struct Town {
     int pop = 0;
     double r = 0.3;              // радиус, км
 };
+struct Label {                   // надпись на карте: область, урочище («Солонь: булливаги»)
+    std::string text;
+    double x = 0, y = 0;
+};
 struct World {
     std::string name;
     double w = 0, h = 0;         // км
     std::vector<Town> towns;
+    std::vector<Label> labels;
     virtual ~World() {}
     virtual WCell at(double x, double y, double tol) const = 0;   // tol — полклетки обзора: мелкое видно и издали
     virtual bool snapRoad(double& x, double& y, double maxd) const { (void)x, (void)y, (void)maxd; return false; }   // точку — на ось дороги
@@ -618,15 +624,17 @@ inline std::string routeSumJson(const RouteSum& s) {
 }
 
 // кусок обзора: 256 × 256 клеток уровня z, строки по клеткам: местность, высота, флаги (1 дорога, 2 река)
-inline std::string tileJson(const World& W, int z, int tx, int ty) {
+typedef std::function<bool(double, double)> Vis;   // туман: видно ли место игрокам (пусто — видно всё)
+inline std::string tileJson(const World& W, int z, int tx, int ty, const Vis& vis = nullptr) {
     const double ck = CELL_KM * (1 << z);
     std::string t(TILE * TILE, '7'), l(TILE * TILE, '0'), f(TILE * TILE, '0');
     for (int j = 0; j < TILE; j++)
         for (int i = 0; i < TILE; i++) {
             const double x = ((double)tx * TILE + i + 0.5) * ck, y = ((double)ty * TILE + j + 0.5) * ck;
             if (x > W.w || y > W.h) continue;
-            const WCell c = W.at(x, y, ck);
             const size_t k = (size_t)j * TILE + i;
+            if (vis && !vis(x, y)) { t[k] = ':', l[k] = '0', f[k] = '0'; continue; }   // ':' — скрыто туманом: игроку не уходит ничего
+            const WCell c = W.at(x, y, ck);
             t[k] = (char)('0' + c.terr), l[k] = (char)('0' + c.level), f[k] = (char)('0' + (c.road ? 1 : 0) + (c.river ? 2 : 0));
         }
     char ckb[32];
@@ -634,18 +642,141 @@ inline std::string tileJson(const World& W, int z, int tx, int ty) {
     return "{\"z\":" + num(z) + ",\"tx\":" + num(tx) + ",\"ty\":" + num(ty) + ",\"cellKm\":" + ckb +
            ",\"terr\":\"" + t + "\",\"level\":\"" + l + "\",\"flags\":\"" + f + "\"}";
 }
-inline std::string worldInfoJson(const World& W) {
+inline std::string worldInfoJson(const World& W, const Vis& vis = nullptr) {
     std::string o = "{\"name\":" + q(W.name) + ",\"w\":" + num(std::llround(W.w)) + ",\"h\":" + num(std::llround(W.h)) + ",\"cellKm\":0.3048,\"tile\":256,\"zMax\":" +
                     num(W.zMax()) + ",\"terrains\":[";
     for (size_t i = 0; i < terrains().size(); i++) o += std::string(i ? "," : "") + q(terrains()[i].name);
     o += "],\"towns\":[";
     char b[64];
-    for (size_t i = 0; i < W.towns.size(); i++) {
-        const Town& t = W.towns[i];
+    int k = 0;
+    for (const Town& t : W.towns) {
+        if (vis && !vis(t.x, t.y)) continue;
         std::snprintf(b, sizeof b, "%.2f,%.2f", t.x, t.y);
-        o += std::string(i ? "," : "") + "[" + q(t.name) + "," + b + "," + num(t.pop) + "," + q(t.kind) + "]";
+        o += std::string(k++ ? "," : "") + "[" + q(t.name) + "," + b + "," + num(t.pop) + "," + q(t.kind) + "]";
+    }
+    o += "],\"labels\":[";
+    k = 0;
+    for (const Label& l : W.labels) {
+        if (vis && !vis(l.x, l.y)) continue;
+        std::snprintf(b, sizeof b, "%.2f,%.2f", l.x, l.y);
+        o += std::string(k++ ? "," : "") + "[" + q(l.text) + "," + b + "]";
     }
     return o + "]}";
 }
+
+// ---- правки кистью поверх любого мира (ТЗ v2 §3.1): местность кругом (−1 — вернуть исходную), дороги и реки линиями,
+// поселения, надписи; убрать исходное поселение по имени. Правки применяются по порядку: поздняя важнее ранней. ----
+struct Edit {
+    std::string op;            // terr | road | river | town | label | untown
+    int terr = -1;
+    double x = 0, y = 0, r = 0;
+    Pts pts;
+    std::string text, kind;
+    int pop = 0;
+};
+inline Edit editOf(const Json& j) {
+    Edit e;
+    e.op = j["op"].str(), e.terr = j["t"].num(-1), e.x = j["x"].dbl(0), e.y = j["y"].dbl(0), e.r = std::max(0.0, j["r"].dbl(0));
+    for (auto& p : j["pts"].a) e.pts.push_back({p[0].dbl(0), p[1].dbl(0)});
+    e.text = j["text"].str(j["name"].str()), e.kind = j["kind"].str("село"), e.pop = j["pop"].num(0);
+    return e;
+}
+inline void townSize(Town& t) {   // размер по виду (шкала «Масштабов»), если жителей не задали
+    static const std::vector<std::tuple<const char*, int, double>> K = {{"хутор", 15, 0.2}, {"село", 500, 0.35}, {"городок", 2000, 0.6},
+                                                                      {"город", 8000, 1.0}, {"крупный город", 25000, 1.6}, {"великий город", 60000, 2.5}};
+    for (auto& [n, p, r] : K)
+        if (t.kind == n) { if (!t.pop) t.pop = p; t.r = r; return; }
+    t.kind = "село", t.pop = t.pop ? t.pop : 500, t.r = 0.35;
+}
+struct EditedWorld : World {
+    std::shared_ptr<World> base;
+    std::vector<Edit> circles;        // круги местности по порядку
+    std::vector<std::vector<int>> cb; // корзины кругов (20 км)
+    int cbw = 0;
+    double cbk = 20;
+    SegIndex roads, rivers;
+    std::vector<int> townMap;         // индекс исходного поселения → в этом мире (−1 — убрано)
+    size_t addFrom = 0;               // с этого индекса — добавленные поселения
+    void build(const std::shared_ptr<World>& b, const std::vector<Edit>& edits) {
+        base = b, name = b->name, w = b->w, h = b->h, labels = b->labels;
+        std::set<std::string> gone;
+        for (auto& e : edits)
+            if (e.op == "untown") gone.insert(e.text);
+        townMap.assign(b->towns.size(), -1);
+        towns.clear();
+        for (size_t i = 0; i < b->towns.size(); i++)
+            if (!gone.count(b->towns[i].name)) townMap[i] = (int)towns.size(), towns.push_back(b->towns[i]);
+        addFrom = towns.size();
+        const double S = std::max(w, h);
+        cbw = (int)(S / cbk) + 1;
+        cb.assign((size_t)cbw * cbw, {});
+        for (auto& e : edits) {
+            if (e.op == "terr") {
+                const int i = (int)circles.size();
+                circles.push_back(e);
+                for (int y = std::max(0, (int)((e.y - e.r) / cbk)); y <= std::min(cbw - 1, (int)((e.y + e.r) / cbk)); y++)
+                    for (int x = std::max(0, (int)((e.x - e.r) / cbk)); x <= std::min(cbw - 1, (int)((e.x + e.r) / cbk)); x++) cb[(size_t)y * cbw + x].push_back(i);
+            } else if (e.op == "road" || e.op == "river") {
+                for (size_t k = 1; k < e.pts.size(); k++)
+                    (e.op == "road" ? roads : rivers).segs.push_back({e.pts[k - 1].first, e.pts[k - 1].second, e.pts[k].first, e.pts[k].second, e.op == "road" ? 0.06 : 0.1});
+            } else if (e.op == "town") {
+                Town t;
+                t.name = e.text, t.kind = e.kind, t.pop = e.pop, t.x = e.x, t.y = e.y;
+                townSize(t);
+                towns.push_back(t);
+            } else if (e.op == "label") labels.push_back({e.text, e.x, e.y});
+        }
+        roads.build(S, S, 5), rivers.build(S, S, 5);
+    }
+    WCell at(double x, double y, double tol) const override {
+        WCell c = base->at(x, y, tol);
+        if (c.town >= 0) {   // исходное поселение: переиндексировать или убрать
+            c.town = c.town < (int)townMap.size() ? townMap[c.town] : -1;
+            if (c.town < 0 && c.terr == TERR_TOWN) c.terr = TERR_FIELDS;
+        }
+        if (x >= 0 && y >= 0 && x <= w && y <= h) {
+            const auto& L = cb[(size_t)std::min(cbw - 1, (int)(y / cbk)) * cbw + std::min(cbw - 1, (int)(x / cbk))];
+            for (auto it = L.rbegin(); it != L.rend(); ++it) {   // поздний круг важнее
+                const Edit& e = circles[*it];
+                if (std::hypot(x - e.x, y - e.y) > e.r + tol * 0.5) continue;
+                if (e.terr >= 0) {
+                    c.terr = e.terr;
+                    if (e.terr == TERR_WATER) c.road = c.river = false, c.town = -1, c.level = 0;
+                    if (e.terr == TERR_MOUNT) c.level = std::max(c.level, 6);
+                }
+                break;
+            }
+        }
+        if (c.terr != TERR_WATER) {
+            c.road = c.road || roads.near(x, y, tol * 0.5);
+            c.river = c.river || rivers.near(x, y, tol * 0.5);
+            for (size_t i = addFrom; i < towns.size(); i++)
+                if (std::hypot(towns[i].x - x, towns[i].y - y) <= towns[i].r) { c.terr = TERR_TOWN, c.town = (int)i; break; }
+        }
+        return c;
+    }
+    bool snapRoad(double& x, double& y, double maxd) const override { return roads.nearest(x, y, maxd) || base->snapRoad(x, y, maxd); }
+};
+
+// ---- туман карты (Р28): по порядку — открыть круг, скрыть круг, открыть полосу пути, открыть всё, скрыть всё ----
+struct FogOp {
+    int kind = 0;              // 0 открыть круг, 1 скрыть круг, 2 открыть полосу (x,y)–(x2,y2), 3 открыть всё, 4 скрыть всё
+    double x = 0, y = 0, x2 = 0, y2 = 0, r = 0;
+};
+inline bool fogVisible(const std::vector<FogOp>& F, double x, double y) {
+    for (auto it = F.rbegin(); it != F.rend(); ++it) {   // поздняя операция важнее
+        const FogOp& f = *it;
+        if (f.kind == 3) return true;
+        if (f.kind == 4) return false;
+        double d;
+        if (f.kind == 2) {
+            const double dx = f.x2 - f.x, dy = f.y2 - f.y, L = dx * dx + dy * dy, t = std::clamp(L > 0 ? ((x - f.x) * dx + (y - f.y) * dy) / L : 0.0, 0.0, 1.0);
+            d = std::hypot(f.x + t * dx - x, f.y + t * dy - y);
+        } else d = std::hypot(x - f.x, y - f.y);
+        if (d <= f.r) return f.kind != 1;
+    }
+    return false;
+}
+const double FOG_SIGHT = 8;   // км: сколько видно вокруг отряда в пути (холмы, дымы, дороги на горизонте)
 
 }  // namespace kmp
