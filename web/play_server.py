@@ -466,6 +466,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if cmd and cmd.startswith("room_"):
                 out = room_cmd(msg, sid)
+            elif cmd and cmd.startswith("kmp_"):   # кампания: исследование и социалка (web/kampaniya.py)
+                import kampaniya
+                out = kampaniya.kmp_cmd(msg, sid)
             elif cmd == "player_save":   # персонаж под именем игрока
                 player_set(msg.get("name"), s=msg.get("s"))
                 out = {"type": "ok"}

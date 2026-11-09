@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE = os.path.join(ROOT, "state", "kampaniya")
@@ -401,6 +402,103 @@ class Campaign:
 
     def close(self):
         self.eng.close()
+
+
+# ---------------------------------------------------------------- команды сервера (play_server.py: cmd «kmp_*»)
+
+CAMPS, CAMPS_LOCK, VAULT = {}, threading.Lock(), None
+MASTER_ONLY = {"kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export"}
+
+
+def _key(name):
+    return " ".join(str(name or "").lower().split())[:40]
+
+
+def _camp(cid):
+    global VAULT
+    cid = re.sub(r"[^0-9A-Za-z_-]", "", str(cid or ""))[:32]
+    if not cid or not os.path.exists(os.path.join(STATE, cid, "meta.json")):
+        raise KeyError("нет такой кампании")
+    if VAULT is None:
+        VAULT = Vault()
+    if cid not in CAMPS:
+        CAMPS[cid] = Campaign(cid, VAULT)
+    return CAMPS[cid]
+
+
+def _draft_view(d):
+    return {"id": d[0], "who": d[1]["who"], "ev": d[1]["ev"]}
+
+
+def kmp_cmd(msg, sid=""):
+    """Мастер — тот, кто создал кампанию (по имени, как хозяин комнаты). Игрок только предлагает: его запрос — черновик
+    в очереди мастера (Р1); принимает, перебрасывает, правит и отменяет — мастер."""
+    global VAULT
+    cmd, name = msg.get("cmd"), _key(msg.get("name"))
+    if not name:
+        return {"type": "error", "err": "введите имя"}
+    with CAMPS_LOCK:
+        try:
+            if cmd == "kmp_list":
+                out = []
+                if os.path.isdir(STATE):
+                    for cid in sorted(os.listdir(STATE)):
+                        try:
+                            with open(os.path.join(STATE, cid, "meta.json"), encoding="utf-8") as f:
+                                m = json.load(f)
+                            out.append({"id": cid, "title": m.get("имя", cid), "master": m.get("мастер") == name})
+                        except (OSError, ValueError):
+                            pass
+                return {"type": "kmp_list", "list": out}
+            if cmd == "kmp_create":
+                title = str(msg.get("title") or "Кампания")[:80]
+                cid = re.sub(r"[^0-9A-Za-z]", "", str(msg.get("cid") or ""))[:16] or "k" + str(int(time.time()))
+                os.makedirs(STATE, exist_ok=True)
+                if VAULT is None:
+                    VAULT = Vault()
+                CAMPS[cid] = Campaign.create(cid, title, int(msg.get("seed") or 1), name, vault=VAULT)
+                c, cmd = CAMPS[cid], "kmp_open"
+            else:
+                c = _camp(msg.get("id"))
+            master = c.meta.get("мастер") == name
+            if cmd in MASTER_ONLY and not master:
+                return {"type": "error", "err": "это может только мастер"}
+            r = {}
+            if cmd == "kmp_propose":
+                act = msg.get("act") or {}
+                if not master and act.get("type") not in ("hero", "check", "contest", "buy", "sell", "note"):
+                    return {"type": "error", "err": "игрок может предложить: героя, проверку, сделку, заметку"}
+                r = c.propose(act, "мастер" if master else str(msg.get("name"))[:40])
+            elif cmd == "kmp_accept":
+                r = c.accept(int(msg.get("draft", 0)), msg.get("edit") or None)
+            elif cmd == "kmp_reroll":
+                r = c.reroll(int(msg.get("draft", 0)))
+            elif cmd == "kmp_cancel":
+                r = c.cancel(int(msg.get("draft", 0)))
+            elif cmd == "kmp_direct":
+                r = c.direct(msg.get("act") or {})
+            elif cmd == "kmp_undo":
+                r = c.undo()
+            elif cmd == "kmp_export":
+                return {"type": "kmp_export", "md": c.export_md(), "title": c.meta.get("имя", c.cid)}
+            elif cmd != "kmp_open":
+                return {"type": "error", "err": "неизвестная команда кампании"}
+            if r.get("err"):
+                return {"type": "error", "err": r["err"]}
+            v = c.view(None if master else name)
+            v.update({"type": "kmp", "id": c.cid, "title": c.meta.get("имя", c.cid), "master": master,
+                      "drafts": [_draft_view(d) for d in sorted(c.drafts.items())
+                                 if master or _key(d[1]["who"]) == name]})
+            if master:
+                v["errors"] = c.vault.get()[2]
+                data = c.vault.get()[0]
+                v["terrains"] = TERRAINS
+                v["tables"] = {t: len(data["table"].get(t, [])) for t in TERRAINS}
+            return v
+        except KeyError as e:
+            return {"type": "error", "err": str(e).strip("'")}
+        except (OSError, RuntimeError, ValueError) as e:
+            return {"type": "error", "err": "кампания: " + str(e)}
 
 
 # ---------------------------------------------------------------- проверка
