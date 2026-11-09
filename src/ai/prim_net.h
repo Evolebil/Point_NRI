@@ -894,6 +894,10 @@ struct Ctx {
     long long atkOpen[2] = {}, atkKinds[2][PR_N] = {};   // решений, когда атака оружием доступна, и что сеть тогда выбрала
     double gamma = 0.99, timePen = 0;   // для потенциальной награды и штрафа за решение
     double roundPen = 0;                // штраф за каждый свой раунд боя (затяжка невыгодна; решение владельца 2026-10-28)
+    // обмен уроном (решение владельца 9 ноября): за отрезок между решениями — trade × (снятая доля ХП врага − потерянная
+    // доля своих), в конце боя НЕ вычитается (в отличие от потенциала Φ): выгодный размен — плюс, невыгодный — минус,
+    // кружение без урона — ноль; риск оправдан, когда урон по врагу больше полученного
+    double trade = 0;
     double temp = 1.0;                  // температура выбора, когда greedy = false (1 — как в обучении)
 };
 static thread_local Ctx* g_pctx = nullptr;
@@ -1225,7 +1229,7 @@ static void netTurnP(World& w, int idx) {
         if (sd.record) {   // награда прошлого решения: потенциальная разность γΦ(s') − Φ(s) и штраф за время
             const double phi = potential(w, me.team);
             if (sd.hasPrev && !sd.traj.empty())
-                sd.traj.back().reward += (float)(c->gamma * phi - sd.prevPhi - c->timePen - (stepN == 0 ? roundPenAt(c, g_curRound) : 0.0));
+                sd.traj.back().reward += (float)(c->gamma * phi - sd.prevPhi + c->trade * (phi - sd.prevPhi) - c->timePen - (stepN == 0 ? roundPenAt(c, g_curRound) : 0.0));
             sd.prevPhi = phi;
             sd.hasPrev = true;
             d.x = o.x;

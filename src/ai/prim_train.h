@@ -41,7 +41,7 @@ struct Hyper {
     // по отложенным боям сохраняется отдельно, так что «забыть лучшее» нельзя
     // штраф за время — за раунд боя, а не за решение (решение владельца 2026-10-28: сети против сети тянули бой, а
     // штраф за решение затяжку не наказывал); DND_ROUNDPEN
-    double gamma = 0.99, lambda = 0.95, clip = 0.2, vcoef = 0.5, ent = 0.1, lr = 3e-4, timePen = 0.0, roundPen = 0.005;
+    double gamma = 0.99, lambda = 0.95, clip = 0.2, vcoef = 0.5, ent = 0.1, lr = 3e-4, timePen = 0.0, roundPen = 0.005, trade = 0.5;
     int epochs = 3;
 };
 
@@ -117,6 +117,7 @@ static Episode runEpisode(const Coef& C, const PNet& net, const PNet* opp, uint6
     ctx.gamma = hp.gamma;
     ctx.timePen = hp.timePen;
     ctx.roundPen = hp.roundPen;
+    ctx.trade = hp.trade;
     ctx.side[learner].active = true;
     ctx.side[learner].record = record;
     const bool self = opp == &net;   // сеть против самой себя (текущей версии): учатся обе стороны
@@ -146,12 +147,14 @@ static Episode runEpisode(const Coef& C, const PNet& net, const PNet* opp, uint6
         pn::Side& sd = ctx.side[learner];
         ep.tr.d = std::move(sd.traj);
         ep.tr.outcome = ep.result;
-        if (!ep.tr.d.empty()) ep.tr.d.back().reward += (float)((ep.result ? 1.0 : -1.0) - sd.prevPhi);   // Φ(конец) = 0, исход ±1
+        // доля ХП в конце: своя минус вражья — для последнего отрезка обмена уроном
+        const double phiEnd = std::max(0.0, g_lastHp[learner]) - std::max(0.0, g_lastHp[1 - learner]);   // как в potential: ХП не ниже 0
+        if (!ep.tr.d.empty()) ep.tr.d.back().reward += (float)((ep.result ? 1.0 : -1.0) - sd.prevPhi + hp.trade * (phiEnd - sd.prevPhi));   // Φ(конец) = 0, исход ±1
         if (self) {   // вторая сторона: ничья (в том числе предел раундов) — поражение и для неё
             pn::Side& s2 = ctx.side[1 - learner];
             ep.tr2.d = std::move(s2.traj);
             ep.tr2.outcome = r == 1 - learner ? 1 : 0;
-            if (!ep.tr2.d.empty()) ep.tr2.d.back().reward += (float)((ep.tr2.outcome ? 1.0 : -1.0) - s2.prevPhi);
+            if (!ep.tr2.d.empty()) ep.tr2.d.back().reward += (float)((ep.tr2.outcome ? 1.0 : -1.0) - s2.prevPhi + hp.trade * (-phiEnd - s2.prevPhi));
         }
     }
     return ep;
@@ -497,6 +500,7 @@ static int trainMain(int argc, char** argv) {
     if (const char* e = std::getenv("DND_LR")) hp.lr = std::atof(e);
     if (const char* e = std::getenv("DND_ENT")) hp.ent = std::atof(e);
     if (const char* e = std::getenv("DND_ROUNDPEN")) hp.roundPen = std::atof(e);
+    if (const char* e = std::getenv("DND_TRADE")) hp.trade = std::atof(e);
     // соперники (решение владельца 2026-10-28: сети учатся друг против друга): доли «сама против себя, пул прошлых
     // версий, правило-бот»; DND_MIX="0.4,0.4,0.2". Пул пуст — его доля идёт на бои против себя
     double mixSelf = 0.4, mixPool = 0.4;
@@ -511,8 +515,8 @@ static int trainMain(int argc, char** argv) {
     // DND_PATIENCE проверок подряд (по умолчанию 6 = 300 итераций) — обучение заканчивается
     const char* pe = std::getenv("DND_PATIENCE");
     const int patience = pe ? std::max(1, std::atoi(pe)) : 6;
-    std::printf("обучение: энтропия %.3f, скорость %.0e, штраф %.4f за раунд (удваивается каждые 10 раундов), соперники: сама %.0f%%, пул %.0f%%, бот %.0f%%; до %d итераций, остановка после %d проверок без роста\n",
-                hp.ent, hp.lr, hp.roundPen, 100 * mixSelf, 100 * mixPool, 100 * (1 - mixSelf - mixPool), iters, patience);
+    std::printf("обучение: энтропия %.3f, скорость %.0e, штраф %.4f за раунд (удваивается каждые 10 раундов), обмен уроном %.2f, соперники: сама %.0f%%, пул %.0f%%, бот %.0f%%; до %d итераций, остановка после %d проверок без роста\n",
+                hp.ent, hp.lr, hp.roundPen, hp.trade, 100 * mixSelf, 100 * mixPool, 100 * (1 - mixSelf - mixPool), iters, patience);
     std::vector<PNet> pool;   // прошлые версии сети — соперники
     for (int k = 0; k < 8; k++) {
         PNet p;
