@@ -16,6 +16,7 @@
 // ============================================================================
 #include "engine.h"
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 #include "char_spec.h"
 #include "kmp_events.h"
@@ -78,6 +79,15 @@ int main() {
                 G->p.sizeKm = p["size"].dbl(800), G->p.seed = (uint64_t)p["seed"].dbl(1), G->p.sea = p["sea"].dbl(0.3), G->p.mount = p["mount"].dbl(0.5);
                 G->p.rough = p["rough"].dbl(0.5), G->p.climate = p["climate"].dbl(0), G->p.humid = p["humid"].dbl(0), G->p.towns = p["towns"].dbl(1), G->p.rivers = p["rivers"].dbl(1);
                 G->name = p["name"].str("Мир");
+                if (p["hmap"].t == Json::STR) {   // карта высот: файл серого hw × hh байт (путь даёт web/kampaniya.py)
+                    G->p.hw = p["hw"].num(0), G->p.hh = p["hh"].num(0), G->p.kmpp = p["kmpp"].dbl(1), G->p.hmSea = p["hmSea"].dbl(-1);
+                    std::ifstream f(p["hmap"].str(), std::ios::binary);
+                    G->p.hmap.assign(std::istreambuf_iterator<char>(f), {});
+                    if (G->p.hw < 2 || G->p.hh < 2 || (long long)G->p.hmap.size() != (long long)G->p.hw * G->p.hh) {
+                        emitLine("{\"type\":\"error\",\"err\":\"карта высот не прочитана\"}");
+                        continue;
+                    }
+                }
                 G->build();
                 W = G;
             }

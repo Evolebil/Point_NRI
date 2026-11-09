@@ -443,6 +443,27 @@ int main() {
               " дн.; поиск " + std::to_string((int)ms) + " мс; дошли за " + std::to_string(days) + " дн.");
     }
 
+    // T244–T245 мир по карте высот: остров 64 × 48 пикселей по 10 км, вершина в середине
+    {
+        auto G = std::make_shared<kmp::GenWorld>();
+        G->p.hw = 64, G->p.hh = 48, G->p.kmpp = 10, G->p.hmSea = 0.3, G->p.seed = 4;
+        for (int j = 0; j < 48; j++)
+            for (int i = 0; i < 64; i++) {
+                const double d = std::hypot((i - 32) / 28.0, (j - 24) / 20.0), a = std::atan2(j - 24.0, i - 32.0);
+                G->p.hmap.push_back((uint8_t)std::clamp(255 * (1 - d) * (0.8 + 0.2 * std::cos(a * 5)), 0.0, 255.0));   // конус с пятью долинами
+            }
+        G->build();
+        const kmp::WCell mid = G->at(320, 240, 0), edge = G->at(15, 15, 0), coast = G->at(320 + 280 * 0.65, 240, 0);
+        int down = 0, n = 0;
+        for (auto& sg : G->rivers.segs) n++, down += G->rawH(sg.x0, sg.y0) >= G->rawH(sg.x1, sg.y1) - 0.03;
+        bool townsDry = !G->towns.empty();
+        for (auto& t : G->towns) townsDry &= G->at(t.x, t.y, 0).terr != kmp::TERR_WATER;
+        T("T244", std::abs(G->w - 640) < 1e-9 && std::abs(G->h - 480) < 1e-9 && mid.terr != kmp::TERR_WATER && mid.level >= 6 && edge.terr == kmp::TERR_WATER &&
+                      coast.terr != kmp::TERR_WATER && coast.level < mid.level,
+          "карта высот: 640 × 480 км, вершина в середине (уровень " + std::to_string(mid.level) + "), края — море");
+        T("T245", n > 0 && down * 10 >= n * 9 && townsDry, "карта высот: реки текут вниз (" + std::to_string(down) + " из " + std::to_string(n) + " отрезков), поселения на суше");
+    }
+
     std::printf("\nкампания: %d прошло, %d не прошло\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

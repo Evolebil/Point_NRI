@@ -541,7 +541,42 @@ def world_params(raw):
         except (TypeError, ValueError):
             v = d
         out[k] = int(min(hi, max(lo, v))) if k == "seed" else min(hi, max(lo, v))
+    hm = re.sub(r"[^0-9A-Za-z_-]", "", str((raw or {}).get("hmap") or ""))[:40]
+    if hm:   # карта высот: метка загрузки (или «height.bin» у сохранённого мира), размер в пикселях, км на пиксель, порог моря
+        try:
+            out.update(hmap=hm, hw=int(raw["hw"]), hh=int(raw["hh"]), kmpp=min(5000.0, max(0.05, float(raw.get("kmpp", 1)))),
+                       hmSea=min(1.0, max(0.0, float(raw.get("hmSea", 0.3)))))
+        except (KeyError, TypeError, ValueError):
+            out.pop("hmap", None)
     return out
+
+
+HMAP_MAX = 1024   # сторона карты высот, пикселей: страница уменьшает картинку до неё (запрос — не больше 2 МБ)
+
+
+def hmap_save(token_owner, data_b64, w, h):
+    """Загруженная карта высот (серое w × h байт, base64) — во временный файл; возвращает метку."""
+    import base64
+    w, h = int(w), int(h)
+    if not (2 <= w <= HMAP_MAX and 2 <= h <= HMAP_MAX):
+        raise ValueError(f"карта высот — до {HMAP_MAX} × {HMAP_MAX}")
+    raw = base64.b64decode(data_b64 or "")
+    if len(raw) != w * h:
+        raise ValueError("размер данных не совпадает с картинкой")
+    d = os.path.join(WORLDS, "_upload")
+    os.makedirs(d, exist_ok=True)
+    tok = "u" + re.sub(r"[^0-9A-Za-z]", "", token_owner)[:12] + "".join(random.choice("abcdefghjkmnpqrstuvwxyz23456789") for _ in range(6))
+    with open(os.path.join(d, tok + ".bin"), "wb") as f:
+        f.write(raw)
+    return tok
+
+
+def hmap_path(params, wid=None):
+    """Путь к файлу карты высот для движка: у сохранённого мира — его height.bin, иначе — загрузка по метке."""
+    hm = params.get("hmap")
+    if not hm:
+        return None
+    return os.path.join(WORLDS, wid, "height.bin") if wid and hm == "height.bin" else os.path.join(WORLDS, "_upload", hm + ".bin")
 
 
 def load_world(wid):
@@ -558,6 +593,10 @@ def save_world(name, params, author):
     while not wid or os.path.exists(os.path.join(WORLDS, wid)):
         wid = "w" + "".join(random.choice("abcdefghjkmnpqrstuvwxyz23456789") for _ in range(6))
     os.makedirs(os.path.join(WORLDS, wid))
+    if params.get("hmap"):   # карта высот переезжает к миру
+        import shutil
+        shutil.copyfile(hmap_path(params), os.path.join(WORLDS, wid, "height.bin"))
+        params = dict(params, hmap="height.bin")
     with open(os.path.join(WORLDS, wid, "world.json"), "w", encoding="utf-8") as f:
         json.dump({"имя": name, "тип": "генератор", "параметры": params, "автор": author}, f, ensure_ascii=False)
     return wid
@@ -624,7 +663,12 @@ class Campaign:
             reg = self.region()
             return None if reg is None else {"cmd": "world", "id": "акт1", "kind": "act", "data": reg, "use": use}
         w = load_world(wid)
-        return None if w is None else {"cmd": "world", "id": wid, "kind": "gen", "params": dict(w["параметры"], name=w["имя"]), "use": use}
+        if w is None:
+            return None
+        prm = dict(w["параметры"], name=w["имя"])
+        if prm.get("hmap"):
+            prm["hmap"] = hmap_path(prm, wid)
+        return {"cmd": "world", "id": wid, "kind": "gen", "params": prm, "use": use}
 
     def set_world(self, wid):
         """Сделать мир миром кампании: сразу в движок и в meta.json (переживает перезапуск)."""
@@ -786,7 +830,7 @@ class Campaign:
 # ---------------------------------------------------------------- команды сервера (play_server.py: cmd «kmp_*»)
 
 CAMPS, CAMPS_LOCK, VAULT = {}, threading.Lock(), None
-MASTER_ONLY = {"kmp_world_use", "kmp_world_preview", "kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export", "kmp_talk", "kmp_talk_end"}
+MASTER_ONLY = {"kmp_hmap", "kmp_world_use", "kmp_world_preview", "kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export", "kmp_talk", "kmp_talk_end"}
 
 
 def _key(name):
@@ -870,10 +914,19 @@ def kmp_cmd(msg, sid=""):
                 r = c.eng.talk({"cmd": "propose", "act": {"type": "route", "way": msg.get("way") or [], "mode": str(msg.get("mode") or "")},
                                 "who": name, "attempt": 0})
                 return {"type": "kmp_path", "res": r["ev"]["res"]} if r.get("type") == "draft" else {"type": "error", "err": r.get("err")}
+            if cmd == "kmp_hmap":   # мастер загружает карту высот (страница уже перевела её в серое и уменьшила)
+                if not master:
+                    return {"type": "error", "err": "мир выбирает мастер"}
+                return {"type": "kmp_hmap", "token": hmap_save(c.cid, msg.get("data"), msg.get("w", 0), msg.get("h", 0)), "w": int(msg["w"]), "h": int(msg["h"])}
             if cmd == "kmp_world_preview":   # мастер: мир по параметрам — посмотреть, не меняя мира кампании
                 if not master:
                     return {"type": "error", "err": "мир выбирает мастер"}
-                r = c.eng.talk({"cmd": "world", "id": "предпросмотр", "kind": "gen", "params": world_params(msg.get("params")), "use": False})
+                prm = world_params(msg.get("params"))
+                if prm.get("hmap"):
+                    prm["hmap"] = hmap_path(prm)
+                    if not os.path.exists(prm["hmap"]):
+                        return {"type": "error", "err": "карта высот не найдена — загрузите её снова"}
+                r = c.eng.talk({"cmd": "world", "id": "предпросмотр", "kind": "gen", "params": prm, "use": False})
                 c.tiles = {k: v for k, v in c.tiles.items() if k[0] != "предпросмотр"}
                 return {"type": "kmp_preview", "info": r.get("info")} if r.get("type") == "world" else {"type": "error", "err": r.get("err")}
             if cmd == "kmp_world_use":   # мастер: взять мир (новый по параметрам или «акт1»)

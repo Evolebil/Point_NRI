@@ -150,6 +150,11 @@ struct GenParams {
     double humid = 0;      // −1 сухо … +1 сыро
     double towns = 1;      // поселений на 100 × 100 км
     double rivers = 1;     // густота рек 0…2
+    // карта высот (ТЗ v2 §3.1): серое 0…255, строка за строкой с севера; мир — hw × hh пикселей по kmpp км (до 5000 км
+    // по стороне); hmSea — порог моря 0…1 (меньше нуля — по доле моря sea)
+    std::vector<uint8_t> hmap;
+    int hw = 0, hh = 0;
+    double kmpp = 1, hmSea = -1;
 };
 
 struct GenWorld : World {
@@ -167,6 +172,16 @@ struct GenWorld : World {
     // tol — полклетки обзора: детали мельче её не считаются (иначе обзор рябит), высота подробного вида та же
     double rawH(double x, double y, double tol = 0) const {
         const double S = p.sizeKm;
+        if (!p.hmap.empty()) {   // карта высот: серое между пикселями — плавно, поверх — мелкий рельеф, чтобы вблизи не было ступенек
+            if (x < 0 || y < 0 || x > w || y > h) return -1;
+            const double u = std::clamp(x / p.kmpp - 0.5, 0.0, p.hw - 1.0), v = std::clamp(y / p.kmpp - 0.5, 0.0, p.hh - 1.0);
+            const int i = std::min((int)u, p.hw - 2 < 0 ? 0 : p.hw - 2), j = std::min((int)v, p.hh - 2 < 0 ? 0 : p.hh - 2);
+            const double fu = u - i, fv = v - j;
+            auto g = [&](int a, int b) { return p.hmap[(size_t)std::min(b, p.hh - 1) * p.hw + std::min(a, p.hw - 1)] / 255.0; };
+            const double base = (g(i, j) * (1 - fu) + g(i + 1, j) * fu) * (1 - fv) + (g(i, j + 1) * (1 - fu) + g(i + 1, j + 1) * fu) * fv;
+            const double kh = std::clamp(1.5 - tol / 8.0, 0.0, 1.0), kf = std::clamp(1.5 - tol / 1.0, 0.0, 1.0);
+            return base + (0.01 + 0.025 * p.rough) * fbm2(p.seed ^ 0x4B, x / 25.0, y / 25.0, 4) * kh + 0.005 * fbm2(p.seed ^ 0xF1, x / 3.0, y / 3.0, 3) * kf;
+        }
         double c = fbm2(p.seed ^ 0xC0, x / (S * 0.45) + 13.1, y / (S * 0.45) + 7.7, 4);
         const double ridge = 1 - std::abs(fbm2(p.seed ^ 0x51, x / std::max(60.0, S * 0.12), y / std::max(60.0, S * 0.12), 4));
         const double hill = fbm2(p.seed ^ 0x4B, x / 25.0, y / 25.0, 4), fine = fbm2(p.seed ^ 0xF1, x / 3.0, y / 3.0, 3);
@@ -185,15 +200,23 @@ struct GenWorld : World {
     double moist(double x, double y) const { return 0.5 + 0.22 * p.humid + 0.35 * fbm2(p.seed ^ 0x3D, x / (p.sizeKm * 0.22), y / (p.sizeKm * 0.22), 4); }
 
     void build() {
-        w = h = std::clamp(p.sizeKm, 10.0, 5000.0);
-        P = std::max(32, std::min(512, (int)std::ceil(w / CELL_KM)));
-        pk = w / P;
+        if (!p.hmap.empty()) {   // мир по карте высот: стороны — по картинке, не больше 5000 км
+            p.kmpp = std::clamp(p.kmpp, 0.05, 5000.0 / std::max(p.hw, p.hh));
+            w = p.hw * p.kmpp, h = p.hh * p.kmpp, p.sizeKm = std::max(w, h);
+        } else w = h = p.sizeKm = std::clamp(p.sizeKm, 10.0, 5000.0);
+        const double S = std::max(w, h);   // план — квадрат на большую сторону; что за краем — море
+        P = std::max(32, std::min(512, (int)std::ceil(S / CELL_KM)));
+        pk = S / P;
         ph.assign((size_t)P * P, 0);
+        std::vector<float> srt;
         for (int j = 0; j < P; j++)
-            for (int i = 0; i < P; i++) ph[(size_t)j * P + i] = (float)rawH((i + 0.5) * pk, (j + 0.5) * pk);
-        std::vector<float> srt(ph);
+            for (int i = 0; i < P; i++) {
+                const double x = (i + 0.5) * pk, y = (j + 0.5) * pk;
+                ph[(size_t)j * P + i] = (float)rawH(x, y);
+                if (x <= w && y <= h) srt.push_back(ph[(size_t)j * P + i]);
+            }
         std::sort(srt.begin(), srt.end());
-        seaH = srt[(size_t)(std::clamp(p.sea, 0.0, 0.9) * (srt.size() - 1))];
+        seaH = !p.hmap.empty() && p.hmSea >= 0 ? p.hmSea : srt[(size_t)(std::clamp(p.sea, 0.0, 0.9) * (srt.size() - 1))];
         topH = srt[(size_t)(0.999 * (srt.size() - 1))];
         auto idx = [&](int i, int j) { return (size_t)j * P + i; };
         auto land = [&](int i, int j) { return ph[idx(i, j)] >= seaH; };
@@ -230,14 +253,14 @@ struct GenWorld : World {
             acc[c] += (float)std::clamp(moist((ci + 0.5) * pk, (cj + 0.5) * pk), 0.1, 1.2);
             if (down[c] >= 0) acc[down[c]] += acc[c];
         }
-        const double thr = (double)P * P * 0.0025 / std::max(0.05, p.rivers);   // река — где стекает с 1/400 площади плана (при густоте 1)
+        const double thr = (double)srt.size() * 0.0025 / std::max(0.05, p.rivers);   // река — где стекает с 1/400 площади мира (при густоте 1)
         for (int c = 0; c < P * P; c++) {
             if (acc[c] < thr || down[c] < 0 || !land(c % P, c / P)) continue;
             const int d = down[c];
             const double wkm = std::min(1.2, 0.05 + 0.02 * std::sqrt(acc[c] / thr) * std::sqrt(pk));
             rivers.segs.push_back({(c % P + 0.5) * pk, (c / P + 0.5) * pk, (d % P + 0.5) * pk, (d / P + 0.5) * pk, wkm});
         }
-        rivers.build(w, h, std::max(1.5, pk));
+        rivers.build(S, S, std::max(1.5, pk));
         // поселения: пригодность (ровно, умеренно, у воды), шаг между ними — от плотности
         struct Cand { double sc; int c; };
         std::vector<Cand> cs;
@@ -257,7 +280,7 @@ struct GenWorld : World {
         std::sort(cs.begin(), cs.end(), [](const Cand& a, const Cand& b) { return a.sc > b.sc || (a.sc == b.sc && a.c < b.c); });
         const double spacing = 100.0 / std::sqrt(std::max(0.05, p.towns)) * 0.7;
         const size_t cap = 3000;
-        tbk = std::max(spacing, pk), tbw = (int)(w / tbk) + 1;
+        tbk = std::max(spacing, pk), tbw = (int)(S / tbk) + 1;
         std::vector<std::vector<int>> tb((size_t)tbw * tbw);
         for (const Cand& cd : cs) {
             if (towns.size() >= cap) break;
@@ -350,10 +373,10 @@ struct GenWorld : World {
                 roads.segs.push_back({(c % P + 0.5) * pk, (c / P + 0.5) * pk, (d % P + 0.5) * pk, (d / P + 0.5) * pk, 0.06});
             }
         }
-        roads.build(w, h, std::max(1.5, pk));
+        roads.build(S, S, std::max(1.5, pk));
     }
     void buildTownIndex() {
-        tbw = (int)(w / tbk) + 1;
+        tbw = (int)(std::max(w, h) / tbk) + 1;
         townB.assign((size_t)tbw * tbw, {});
         for (size_t i = 0; i < towns.size(); i++)
             townB[(size_t)std::min(tbw - 1, (int)(towns[i].y / tbk)) * tbw + std::min(tbw - 1, (int)(towns[i].x / tbk))].push_back((int)i);

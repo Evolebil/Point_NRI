@@ -491,7 +491,14 @@ function kmWorldPanel(){
     <span class="hint">Смена мира не двигает отряд: поставьте его заново.</span></div></details>`;
   h += `<div class="hint">Подберите параметры и нажмите «Показать» — мир кампании не изменится, пока вы не нажмёте «Взять этот мир».</div>
     <div class="row"><label>Название <input id="kgName" value="${esc(G.name)}" style="width:180px"></label><label>Зерно ${kq('зерно')} <input id="kgSeed" type="number" value="${G.params.seed}" style="width:110px"></label><button id="kgDice" title="Другое зерно">🎲</button></div>
-    <div class="grid2">${KM_GEN.map(([k, n, lo, hi, st]) => `<label>${n} <input type="range" data-kg="${k}" min="${lo}" max="${hi}" step="${st}" value="${G.params[k]}"> <span class="tnum" data-kgv="${k}">${G.params[k]}</span></label>`).join('')}</div>
+    <div class="card" style="margin:6px 0"><b>Карта высот</b> <span class="small">(необязательно): чёрно-белый PNG, светлее — выше. Страница уменьшит её до ${KM_HMAX} точек по большей стороне.</span>
+      <div class="row"><input type="file" id="kgFile" accept="image/png,image/jpeg,image/webp">${G.hm ? `<button id="kgHmOff">Без карты высот</button>` : ''}</div>
+      ${G.hm ? `<div class="row"><label>км на точку <input id="kgKmpp" type="number" min="0.05" step="0.05" value="${G.hm.kmpp}" style="width:80px"></label>
+        <span class="small" id="kgHmSize">${kmHmSize()}</span>
+        <label>уровень моря <input id="kgSea" type="range" min="0" max="1" step="0.01" value="${G.hm.sea}"> <span class="tnum" id="kgSeaV">${G.hm.sea}</span></label></div>
+        <canvas id="kgHmCv" style="max-width:100%;max-height:300px;image-rendering:pixelated;border-radius:6px"></canvas>
+        <div class="small">Синее — будет морем. Климат, биомы, реки, поселения и дороги генератор достроит сам; размер мира и гористость берутся из картинки.</div>` : ''}</div>
+    <div class="grid2">${KM_GEN.filter(x => !G.hm || !['size', 'sea', 'mount'].includes(x[0])).map(([k, n, lo, hi, st]) => `<label>${n} <input type="range" data-kg="${k}" min="${lo}" max="${hi}" step="${st}" value="${G.params[k]}"> <span class="tnum" data-kgv="${k}">${G.params[k]}</span></label>`).join('')}</div>
     <div class="row"><button id="kgShow" class="primary">Показать</button><button id="kgUse"${G.info ? '' : ' disabled'}>Взять этот мир</button><button id="kgCancel">Отмена</button>
     <span class="small" id="kgMsg">${G.info ? `${G.info.w}×${G.info.h} км, поселений ${G.info.towns.length}, клеток ${Math.ceil(G.info.w / G.info.cellKm)}² по 305 м` : ''}</span></div>
     <canvas id="kgCv" width="512" height="512" style="width:100%;max-width:512px;image-rendering:pixelated;border-radius:8px;display:${G.info ? 'block' : 'none'}"></canvas></details>`;
@@ -508,13 +515,54 @@ function kmBindWorld(){
   $('kgSeed').oninput = () => { G.params.seed = +$('kgSeed').value || 1; };
   click('kgDice', () => { G.params.seed = 1 + Math.floor(Math.random() * 999999); $('kgSeed').value = G.params.seed; });
   click('kgCancel', () => { KMP.gen = null; kmpRender(); });
-  click('kgShow', async () => { $('kgMsg').textContent = 'строю мир…';
+  if ($('kgFile')) $('kgFile').onchange = e => { const f = e.target.files[0]; if (f) kmHmLoad(f); };
+  click('kgHmOff', () => { G.hm = null; G.info = null; kmpRender(); });
+  if (G.hm){
+    $('kgKmpp').oninput = () => { G.hm.kmpp = Math.max(0.05, +$('kgKmpp').value || 1); $('kgHmSize').textContent = kmHmSize(); };
+    $('kgSea').oninput = () => { G.hm.sea = +$('kgSea').value; $('kgSeaV').textContent = G.hm.sea; kmHmDraw(); };
+    kmHmDraw();
+  }
+  click('kgShow', async () => { $('kgMsg').textContent = G.hm && !G.hm.token ? 'загружаю карту высот…' : 'строю мир…';
+    if (G.hm && !G.hm.token){   // карта высот — на сервер один раз (серое, base64)
+      let bin = ''; for (let i = 0; i < G.hm.px.length; i += 0x8000) bin += String.fromCharCode.apply(null, G.hm.px.subarray(i, i + 0x8000));
+      const u = await api({cmd: 'kmp_hmap', id: KMP.id, name: kmpName(), data: btoa(bin), w: G.hm.w, h: G.hm.h});
+      if (u.type !== 'kmp_hmap'){ $('kgMsg').textContent = u.err || 'не загрузилось'; return; }
+      G.hm.token = u.token; $('kgMsg').textContent = 'строю мир…';
+    }
+    if (G.hm) Object.assign(G.params, {hmap: G.hm.token, hw: G.hm.w, hh: G.hm.h, kmpp: G.hm.kmpp, hmSea: G.hm.sea}); else ['hmap', 'hw', 'hh', 'kmpp', 'hmSea'].forEach(k => delete G.params[k]);
     const r = await api({cmd: 'kmp_world_preview', id: KMP.id, name: kmpName(), params: G.params});
     if (r.type !== 'kmp_preview'){ $('kgMsg').textContent = r.err || 'ошибка'; return; }
     G.info = r.info; G.tiles = []; kmpRender(); kmPreviewDraw(); });
-  click('kgUse', () => confirm(`Сделать «${G.name}» миром кампании? Отряд останется на тех же числах км — поставьте его заново.`) &&
-    kmpCall({cmd: 'kmp_world_use', title: G.name, params: G.params}).then(v => { if (v.type === 'kmp'){ KMP.gen = null; kmFit(); kmpRender(); } }));
+  click('kgUse', () => (!G.hm || G.hm.token || (toast('Сначала «Показать»: карта высот ещё не загружена'), false)) && confirm(`Сделать «${G.name}» миром кампании? Отряд останется на тех же числах км — поставьте его заново.`) &&
+    kmpCall({cmd: 'kmp_world_use', title: G.name, params: G.hm ? Object.assign(G.params, {hmap: G.hm.token, hw: G.hm.w, hh: G.hm.h, kmpp: G.hm.kmpp, hmSea: G.hm.sea}) : G.params}).then(v => { if (v.type === 'kmp'){ KMP.gen = null; kmFit(); kmpRender(); } }));
   if (G.info) kmPreviewDraw();
+}
+// ---- карта высот: картинка → серое ≤ KM_HMAX по большей стороне (усреднением) → предпросмотр с морем ----
+const KM_HMAX = 1024;
+function kmHmSize(){ const H = KMP.gen.hm; const w = H.w * H.kmpp, h = H.h * H.kmpp, big = Math.max(w, h);
+  return `мир ${Math.round(w)} × ${Math.round(h)} км${big > 5000 ? ' — больше 5000 км: уменьшите км на точку' : ''}`; }
+function kmHmLoad(file){
+  const img = new Image(), url = URL.createObjectURL(file);
+  img.onload = () => {
+    const k = Math.min(1, KM_HMAX / Math.max(img.width, img.height)), w = Math.max(2, Math.round(img.width * k)), h = Math.max(2, Math.round(img.height * k));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d'); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, w, h);   // уменьшение с усреднением
+    const d = g.getImageData(0, 0, w, h).data, px = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) px[i] = Math.round(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
+    URL.revokeObjectURL(url);
+    KMP.gen.hm = {w, h, px, kmpp: +(Math.min(1000 / Math.max(w, h), 5000 / Math.max(w, h))).toFixed(2), sea: 0.3, token: null, src: file.name};
+    KMP.gen.info = null; kmpRender();
+  };
+  img.onerror = () => toast('Не удалось прочитать картинку');
+  img.src = url;
+}
+function kmHmDraw(){
+  const H = KMP.gen && KMP.gen.hm, cv = $('kgHmCv'); if (!H || !cv) return;
+  cv.width = H.w; cv.height = H.h;
+  const g = cv.getContext('2d'), im = g.createImageData(H.w, H.h), sea = H.sea * 255;
+  for (let i = 0; i < H.px.length; i++){ const v = H.px[i], wet = v < sea;
+    im.data[i * 4] = wet ? 60 : v; im.data[i * 4 + 1] = wet ? 110 : v; im.data[i * 4 + 2] = wet ? 190 : v; im.data[i * 4 + 3] = 255; }
+  g.putImageData(im, 0, 0);
 }
 async function kmPreviewDraw(){   // обзор всего мира предпросмотра: куски верхнего уровня
   const G = KMP.gen, cv = $('kgCv'); if (!G || !G.info || !cv) return;
