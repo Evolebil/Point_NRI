@@ -184,7 +184,8 @@ def load_cards(vault, errors):
             p = os.path.join(dp, f)
             try:
                 with open(p, encoding="utf-8") as fh:
-                    props, body = frontmatter(fh.read())
+                    raw = fh.read()
+                props, body = frontmatter(raw)
             except (OSError, UnicodeDecodeError) as e:
                 errors.append(f"{os.path.relpath(p, vault)}: не читается ({e})")
                 continue
@@ -194,7 +195,7 @@ def load_cards(vault, errors):
             name = str(props.get("имя") or f[:-3])
             props["_файл"] = os.path.relpath(p, vault)
             if t == "диалог":
-                props["_текст"] = body
+                props["_сырой"] = raw
             cards.setdefault(t, {})[name] = props
     return cards
 
@@ -237,6 +238,268 @@ class Vault:
         self.cards = load_cards(vault, errors)
         self.errors = errors
         return self.data, self.cards, self.errors
+
+
+# ---------------------------------------------------------------- разговоры: деревья диалогов (ТЗ §3.3, Д3)
+
+# таблица реакций DMG: СЛ просьбы по отношению NPC и риску (None — не сделает ни при каком броске)
+REACTION_DC = {"дружелюбный": {"нет": 0, "малый": 10, "большой": 20},
+               "безразличный": {"нет": 10, "малый": 20, "большой": None},
+               "враждебный": {"нет": 20, "малый": None, "большой": None}}
+ATT_ORDER = ["враждебный", "безразличный", "дружелюбный"]
+SKILLS = ["Атлетика", "Акробатика", "Ловкость рук", "Скрытность", "Магия", "История", "Анализ", "Природа", "Религия",
+          "Уход за животными", "Проницательность", "Медицина", "Внимательность", "Выживание", "Обман", "Запугивание",
+          "Выступление", "Убеждение", "СИЛ", "ЛОВ", "ТЕЛ", "ИНТ", "МДР", "ХАР"]
+# состязания в разговоре (РАЗ-05): навык говорящего → навык NPC
+CONTEST = {"Обман": "Проницательность", "Проницательность": "Обман", "Ловкость рук": "Внимательность", "Скрытность": "Внимательность"}
+_MONEY = r"(\d+\s*(?:зм|см|мм)(?:\s+\d+\s*(?:зм|см|мм))*)"
+
+
+def link_name(v):
+    """«[[Ролан]]», «[[Ролан|лорд]]», «Ролан» → «Ролан»."""
+    m = re.match(r"^\s*\[\[([^\]|#]+)", str(v or ""))
+    return (m.group(1) if m else str(v or "")).strip()
+
+
+def money_cp(t):
+    tot = 0
+    for n, u in re.findall(r"(\d+)\s*(зм|см|мм)", t):
+        tot += int(n) * {"зм": 100, "см": 10, "мм": 1}[u]
+    return tot
+
+
+def parse_dialog(text, errors, src="диалог"):
+    """Узлы дерева: {id: {"lines": [реплики], "opts": [варианты], "do": [действия-события], "shop", "end", "goto"}}.
+    Вариант: {"text", "cond": [условия], "check": {"what","dc","hidden","risk"} | None, "ok", "fail"}."""
+    props, body = frontmatter(text)
+    nodes, cur = {}, None
+    for i, ln in enumerate(body.split("\n"), 1):
+        s = ln.strip()
+        if not s:
+            continue
+        m = re.match(r"^##\s+(.+)$", s)
+        if m:
+            cur = m.group(1).strip()
+            nodes[cur] = {"lines": [], "opts": [], "do": [], "shop": False, "end": False, "goto": "", "fight": ""}
+            continue
+        if cur is None:
+            continue
+        n = nodes[cur]
+        if s.startswith("- "):
+            o = {"text": "", "cond": [], "check": None, "ok": "", "fail": ""}
+            rest = s[2:].strip()
+            while rest.startswith("["):
+                j = rest.find("]")
+                if j < 0:
+                    break
+                tag, rest = rest[1:j].strip(), rest[j + 1:].strip()
+                if tag.startswith("если:"):
+                    o["cond"].append(tag[5:].strip())
+                    continue
+                parts = [p.strip() for p in tag.split(",")]
+                m2 = re.match(r"^(.+?)(?:\s+(\d+))?$", parts[0])
+                what = m2.group(1).strip()
+                if what not in SKILLS:
+                    errors.append(f"{src}, строка {i}: неизвестный навык «{what}»")
+                    continue
+                ck = {"what": what, "dc": int(m2.group(2)) if m2.group(2) else None, "hidden": False, "risk": "нет"}
+                for p in parts[1:]:
+                    if p == "скрыто":
+                        ck["hidden"] = True
+                    elif p.startswith("риск"):
+                        ck["risk"] = p.split()[-1]
+                o["check"] = ck
+            if "→" in rest:
+                rest, tgt = rest.split("→", 1)
+                tgt = [t.strip() for t in tgt.split("|")]
+                o["ok"] = tgt[0]
+                o["fail"] = tgt[1] if len(tgt) > 1 else cur
+            o["text"] = rest.strip()
+            n["opts"].append(o)
+        elif s.startswith("!"):
+            m2 = re.match(r"^(\S+?)(?::\s*|\s+|$)(.*)$", s[1:].strip())   # «!дать: 100 зм отряду», «!отношение +1», «!конец»
+            key, arg = m2.group(1).strip(), m2.group(2).strip()
+            if key in ("дать", "взять"):
+                sg = 1 if key == "дать" else -1
+                ev = {"type": "gm"}
+                mm = re.search(_MONEY, arg)
+                if mm:
+                    ev["purse"] = sg * money_cp(mm.group(1))
+                    arg = (arg[:mm.start()] + arg[mm.end():]).strip()
+                else:
+                    mq = re.search(r"[×x]\s*(\d+)\s*$", arg)
+                    ev["item"] = re.sub(r"[×x]\s*\d+\s*$", "", arg).strip()
+                    ev["qty"] = sg * (int(mq.group(1)) if mq else 1)
+                    arg = ""
+                hero = arg.replace("отряду", "").replace("у отряда", "").strip()
+                if hero:
+                    ev["hero"] = hero
+                n["do"].append(ev)
+            elif key == "сведения":
+                n["do"].append({"type": "learn", "fact": arg})
+            elif key == "отношение":
+                n["do"].append({"type": "attitude", "npc": "", "delta": int(arg or 0)})   # npc подставляется при разговоре
+            elif key == "репутация":
+                f, _, d = arg.rpartition(" ")
+                n["do"].append({"type": "rep", "faction": f.strip(), "delta": int(d or 0)})
+            elif key == "лавка":
+                n["shop"] = True
+            elif key == "конец":
+                n["end"] = True
+            elif key == "бой":
+                n["fight"] = link_name(arg)
+                n["do"].append({"type": "note", "text": "бой: " + (link_name(arg) or "противник")})
+            else:
+                errors.append(f"{src}, строка {i}: неизвестное действие «!{key}»")
+        elif s.startswith("→"):
+            n["goto"] = s[1:].strip()
+        else:
+            n["lines"].append(s)
+    start = str(props.get("начало") or (next(iter(nodes)) if nodes else ""))
+    for nid, n in nodes.items():   # ссылки на несуществующие узлы
+        for o in n["opts"]:
+            for t in (o["ok"], o["fail"]):
+                if t and t not in nodes:
+                    errors.append(f"{src}: узел «{nid}» ведёт в несуществующий «{t}»")
+        if n["goto"] and n["goto"] not in nodes:
+            errors.append(f"{src}: узел «{nid}» ведёт в несуществующий «{n['goto']}»")
+    if start and start not in nodes:
+        errors.append(f"{src}: начального узла «{start}» нет")
+    return {"npc": link_name(props.get("npc")), "start": start, "nodes": nodes}
+
+
+def cond_ok(c, state, hero, npc_card):
+    """Условие варианта: «язык латынь», «отношение дружелюбный» (не ниже), «сведения X», «деньги 10 зм» (не меньше)."""
+    k, _, v = c.partition(" ")
+    v = v.strip()
+    if k == "язык":
+        return hero is not None and v in hero.get("langs", [])
+    if k == "отношение":
+        att = state["npcs"].get(npc_card.get("имя", ""), {}).get("attitude", npc_card.get("отношение", "безразличный"))
+        return v in ATT_ORDER and ATT_ORDER.index(att) >= ATT_ORDER.index(v)
+    if k == "сведения":
+        return v in state["facts"]
+    if k == "деньги":
+        return state["purse"] >= money_cp(v)
+    return False
+
+
+class Talk:
+    """Разговоры кампании: карточки NPC и деревья из хранилища; ход по дереву превращается в события журнала."""
+
+    def __init__(self, cards, errors):
+        self.npcs = cards.get("npc", {})
+        self.trees = {}
+        for name, d in cards.get("диалог", {}).items():
+            t = parse_dialog(d.get("_сырой", ""), errors, d.get("_файл", name))
+            self.trees[name] = t
+
+    def tree_of(self, npc):
+        card = self.npcs.get(npc, {})
+        name = link_name(card.get("диалог"))
+        if name in self.trees:
+            return self.trees[name]
+        for t in self.trees.values():
+            if t["npc"] == npc:
+                return t
+        return None
+
+    def node_do(self, npc, node):
+        """Действия узла как события («!отношение» — к этому NPC); переход «→» без вариантов — сразу в следующий узел."""
+        t = self.tree_of(npc)
+        seen, do, shop, end = set(), [], False, False
+        while t and node in t["nodes"] and node not in seen:
+            seen.add(node)
+            n = t["nodes"][node]
+            for e in n["do"]:
+                e = dict(e)
+                if e["type"] == "attitude":
+                    e["npc"] = npc
+                do.append(e)
+            shop |= n["shop"]
+            if n["end"]:
+                end = True
+                break
+            if n["goto"] and not n["opts"]:
+                node = n["goto"]
+                continue
+            break
+        return ("" if end else node), do, shop
+
+    def start(self, npc):
+        t = self.tree_of(npc)
+        if t is None:
+            return None
+        node, do, shop = self.node_do(npc, t["start"])
+        card = self.npcs.get(npc, {})
+        return {"type": "dialog", "npc": npc, "node": node, "do": do, "shop": shop,
+                "attitude": card.get("отношение", "безразличный")}
+
+    def view(self, state, hero=None):
+        """Текущий узел для экрана: реплики, варианты с пометкой доступности и проверки."""
+        d = state.get("dialog", {})
+        npc = d.get("npc")
+        if not npc:
+            return None
+        t, card = self.tree_of(npc), self.npcs.get(npc, {})
+        n = (t or {}).get("nodes", {}).get(d.get("node"), {})
+        att = state["npcs"].get(npc, {}).get("attitude", card.get("отношение", "безразличный"))
+        opts = []
+        for i, o in enumerate(n.get("opts", [])):
+            ok = all(cond_ok(c, state, hero, card) for c in o["cond"])
+            ck = o["check"]
+            info = ""
+            if ck:
+                dc = self._dc(ck, att)
+                info = ck["what"] + (f" против {CONTEST[ck['what']]} NPC" if ck["what"] in CONTEST else (f", СЛ {dc}" if dc is not None else ", невозможно"))
+                info += ", скрыто" if ck["hidden"] else ""
+            opts.append({"i": i, "text": o["text"], "ok": ok, "check": info, "cond": o["cond"]})
+        langs = card.get("языки") or []
+        return {"npc": npc, "node": d.get("node"), "lines": n.get("lines", []), "opts": opts, "attitude": att,
+                "shop": d.get("shop") and card.get("лавка") or [], "langs": langs, "card": {k: v for k, v in card.items() if not k.startswith("_")}}
+
+    @staticmethod
+    def _dc(ck, att):
+        if ck["dc"] is not None:
+            return ck["dc"]
+        return REACTION_DC.get(att, REACTION_DC["безразличный"]).get(ck["risk"], 10)
+
+    def say(self, state, i, hero, hero_info=None):
+        """Выбор варианта i говорящим героем → событие (dialog без броска или check/contest с переходом)."""
+        d = state.get("dialog", {})
+        npc = d.get("npc")
+        t, card = self.tree_of(npc), self.npcs.get(npc, {})
+        if not t or d.get("node") not in t["nodes"]:
+            return None, "разговора нет"
+        opts = t["nodes"][d["node"]]["opts"]
+        if not 0 <= i < len(opts):
+            return None, "нет такого варианта"
+        o = opts[i]
+        if not all(cond_ok(c, state, hero_info, card) for c in o["cond"]):
+            return None, "этот вариант сейчас недоступен"
+        ck = o["check"]
+        if not ck:
+            node, do, shop = self.node_do(npc, o["ok"] or d["node"])
+            return {"type": "dialog", "node": node, "do": do, "shop": shop, "said": o["text"], "hero": hero}, None
+        att = state["npcs"].get(npc, {}).get("attitude", card.get("отношение", "безразличный"))
+        okN, okDo, okShop = self.node_do(npc, o["ok"] or d["node"])
+        fN, fDo, fShop = self.node_do(npc, o["fail"] or d["node"])
+        dlg = {"npc": npc, "ok": okN, "okDo": okDo, "okShop": okShop, "fail": fN, "failDo": fDo, "failShop": fShop}
+        # нет общего языка — объясняются жестами: помеха (Д4); языки NPC не указаны — считаем, что понимают
+        langs = card.get("языки") or []
+        dis = bool(langs and hero_info is not None and not set(langs) & set(hero_info.get("langs", [])))
+        shift = state["npcs"].get(npc, {}).get("shift", 0)
+        if ck["what"] in CONTEST:
+            vs = CONTEST[ck["what"]]
+            return {"type": "contest", "hero": hero, "what": ck["what"], "vs": npc, "vsWhat": vs, "dis": dis,
+                    "vsMod": int((card.get("навыки") or {}).get(vs, 0)), "hidden": ck["hidden"], "said": o["text"], "dlg": dlg}, None
+        dc = self._dc(ck, att)
+        if dc is None:   # просьба не по отношению — NPC отказывает без броска
+            node, do, shop = self.node_do(npc, o["fail"] or d["node"])
+            return {"type": "dialog", "node": node, "do": do, "shop": shop, "said": o["text"], "hero": hero,
+                    "text": "не станет: отношение не позволяет"}, None
+        return {"type": "check", "hero": hero, "what": ck["what"], "dc": dc, "mod": shift, "dis": dis, "hidden": ck["hidden"],
+                "said": o["text"], "dlg": dlg}, None
 
 
 # ---------------------------------------------------------------- журнал и программа правил
@@ -300,6 +563,17 @@ class Campaign:
         if r.get("type") != "state":
             raise RuntimeError(f"журнал кампании {self.cid} не сворачивается: {r.get('err')}")
         return r["state"]
+
+    def talk(self):
+        """Разговоры по текущему содержимому хранилища (пересобираются, когда меняются файлы)."""
+        data, cards, errors = self.vault.get()
+        if getattr(self, "_talk_stamp", None) != self.vault.stamp or not hasattr(self, "_talk"):
+            self.talk_errors = []
+            self._talk, self._talk_stamp = Talk(cards, self.talk_errors), self.vault.stamp
+        return self._talk
+
+    def hero(self, name):
+        return next((h for h in self.state["heroes"] if h["name"] == name), None)
 
     def propose(self, act, who="мастер"):
         """Черновик события (МАС-03): состояние не меняется. Возвращает {"id", "ev"} или {"err"}."""
@@ -407,7 +681,7 @@ class Campaign:
 # ---------------------------------------------------------------- команды сервера (play_server.py: cmd «kmp_*»)
 
 CAMPS, CAMPS_LOCK, VAULT = {}, threading.Lock(), None
-MASTER_ONLY = {"kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export"}
+MASTER_ONLY = {"kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export", "kmp_talk", "kmp_talk_end"}
 
 
 def _key(name):
@@ -477,6 +751,20 @@ def kmp_cmd(msg, sid=""):
                 r = c.cancel(int(msg.get("draft", 0)))
             elif cmd == "kmp_direct":
                 r = c.direct(msg.get("act") or {})
+            elif cmd == "kmp_talk":   # мастер начинает разговор с NPC по его дереву
+                act = c.talk().start(str(msg.get("npc", "")))
+                r = {"err": "у NPC нет дерева диалога"} if act is None else c.direct(act)
+            elif cmd == "kmp_talk_end":
+                r = c.direct({"type": "dialog", "node": ""})
+            elif cmd == "kmp_say":   # вариант разговора: игрок — черновик мастеру, мастер — тоже черновик (видит бросок)
+                hero = str(msg.get("hero", ""))
+                act, e = c.talk().say(c.state, int(msg.get("i", -1)), hero, c.hero(hero))
+                if e:
+                    return {"type": "error", "err": e}
+                if act["type"] == "dialog" and master:
+                    r = c.direct(act)
+                else:
+                    r = c.propose(act, "мастер" if master else str(msg.get("name"))[:40])
             elif cmd == "kmp_undo":
                 r = c.undo()
             elif cmd == "kmp_export":
@@ -486,11 +774,15 @@ def kmp_cmd(msg, sid=""):
             if r.get("err"):
                 return {"type": "error", "err": r["err"]}
             v = c.view(None if master else name)
+            tk = c.talk()
+            v["talk"] = tk.view(c.state, c.hero(str(msg.get("hero", ""))))
             v.update({"type": "kmp", "id": c.cid, "title": c.meta.get("имя", c.cid), "master": master,
                       "drafts": [_draft_view(d) for d in sorted(c.drafts.items())
                                  if master or _key(d[1]["who"]) == name]})
             if master:
-                v["errors"] = c.vault.get()[2]
+                v["errors"] = c.vault.get()[2] + c.talk_errors
+                v["npcCards"] = [{"name": n, "dialog": tk.tree_of(n) is not None, "attitude": d.get("отношение", "безразличный"),
+                                  "langs": d.get("языки") or [], "knows": d.get("знает") or []} for n, d in sorted(tk.npcs.items())]
                 data = c.vault.get()[0]
                 v["terrains"] = TERRAINS
                 v["tables"] = {t: len(data["table"].get(t, [])) for t in TERRAINS}
@@ -549,6 +841,50 @@ def _check():
         c2.direct({"type": "note", "text": "b"})
         t("устаревший черновик не принимается", "err" in c2.accept(stale["id"]))
         c2.close()
+
+    # разговоры: примеры карточек docs/primery-kartochek во временном хранилище
+    import shutil
+    with tempfile.TemporaryDirectory() as tmp:
+        vd = os.path.join(tmp, "vault")
+        shutil.copytree(os.path.join(ROOT, "docs", "primery-kartochek"), vd)
+        tv = Vault({"хранилище": vd, "акт": "нет.md"})
+        _, cards, _ = tv.get()
+        errs = []
+        tk = Talk(cards, errs)
+        t("примеры: деревья разобраны без ошибок " + "; ".join(errs[:3]), not errs and len(tk.trees) == 2 and len(tk.npcs) == 2)
+        tr = tk.tree_of("Ролан")
+        o = tr["nodes"]["приветствие"]["opts"]
+        t("вариант: проверка, риск, условие, переходы", o[4]["check"] == {"what": "Убеждение", "dc": None, "hidden": False, "risk": "малый"}
+          and o[4]["ok"] == "настойчивость" and o[4]["fail"] == "отказ" and o[3]["cond"] == ["язык латынь"])
+        t("лавка Лис из свойств", tk.npcs["Лисы Лангедока"]["лавка"][0]["вещь"] == "подсказка о верхнем кристалле")
+        c = Campaign.create("t2", "разговор", 5, "мастер", root=tmp, vault=tv)
+        c.direct({"type": "hero", "name": "Рыцарь", "char": rycar})
+        c.direct(tk.start("Ролан"))
+        v = tk.view(c.state, c.hero("Рыцарь"))
+        t("начало разговора: узел и отношение с карточки", v["node"] == "приветствие" and v["attitude"] == "безразличный" and not v["opts"][3]["ok"])
+        act, e = tk.say(c.state, 4, "Рыцарь", c.hero("Рыцарь"))
+        t("просьба с малым риском у безразличного — СЛ 20 (DMG)", act["type"] == "check" and act["dc"] == 20 and act["dlg"]["fail"] == "приветствие"
+          and act["dlg"]["failDo"] == [{"type": "attitude", "npc": "Ролан", "delta": -1}])
+        r = c.propose(act)
+        c.accept(r["id"])
+        won = c.journal[-1]["res"]["ok"]
+        t("проверка двигает разговор", c.state["dialog"]["node"] == "приветствие"
+          and c.state["npcs"]["Ролан"]["shift"] == (1 if won else -1))
+        act, e = tk.say(c.state, 5, "Рыцарь", c.hero("Рыцарь"))
+        c.direct(act)
+        t("переход по цепочке: сведения, аванс 100 зм, конец разговора", c.state["purse"] == 10000 and "болотные признаки у Каркассона" in c.state["facts"]
+          and c.state["dialog"]["npc"] == "")
+        c.direct(tk.start("Лисы Лангедока"))
+        act, e = tk.say(c.state, 1, "Рыцарь", c.hero("Рыцарь"))
+        t("Проницательность в разговоре — состязание с Обманом NPC", act["type"] == "contest" and act["vsWhat"] == "Обман" and act["vsMod"] == 5)
+        act, e = tk.say(c.state, 0, "Рыцарь", c.hero("Рыцарь"))
+        c.direct(act)
+        v = tk.view(c.state, c.hero("Рыцарь"))
+        t("узел с лавкой показывает товары", v["shop"] and v["shop"][0]["цена"] == "20 зм" and v["opts"][0]["ok"])
+        act, e = tk.say(c.state, 0, "Рыцарь", c.hero("Рыцарь"))
+        c.direct(act)
+        t("покупка подсказки за 20 зм", c.state["purse"] == 8000 and "где верхний кристалл" in c.state["facts"])
+        c.close()
     return ok
 
 

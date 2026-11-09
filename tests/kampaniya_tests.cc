@@ -251,6 +251,44 @@ int main() {
         T("T231", saves == 6 && dcOk == 6 && r["res"]["km"].num() == 48, "форсированный марш");
     }
 
+    // T232 разговор: начало — отношение с карточки, действия узла (деньги, сведения, отношение) применяются
+    {
+        kmp::State a = fresh();
+        run(a, ct, "{\"type\":\"dialog\",\"npc\":\"Ролан\",\"node\":\"приветствие\",\"attitude\":\"безразличный\"}");
+        const bool start = a.dlgNpc == "Ролан" && a.dlgNode == "приветствие" && a.npcs["Ролан"].tier == 0;
+        run(a, ct, "{\"type\":\"dialog\",\"node\":\"аванс\",\"do\":[{\"type\":\"gm\",\"purse\":10000},{\"type\":\"learn\",\"fact\":\"болото\"},"
+                   "{\"type\":\"attitude\",\"npc\":\"Ролан\",\"delta\":1}],\"shop\":true}");
+        const bool acts = a.purse == 10000 && a.facts.count("болото") && a.npcs["Ролан"].shift == 1 && a.dlgShop && a.dlgNpc == "Ролан";
+        run(a, ct, "{\"type\":\"dialog\",\"node\":\"\"}");
+        T("T232", start && acts && a.dlgNpc.empty() && !a.dlgShop, "разговор: узлы и действия узла");
+    }
+    // T233 проверка из разговора ведёт в узел успеха или провала с его действиями
+    {
+        int okN = 0, failN = 0, bad = 0;
+        for (int sd = 1; sd <= 60; sd++) {
+            kmp::State a = fresh(sd);
+            run(a, ct, "{\"type\":\"dialog\",\"npc\":\"Ролан\",\"node\":\"приветствие\"}");
+            Json e = run(a, ct, "{\"type\":\"check\",\"hero\":\"Лис\",\"what\":\"Убеждение\",\"dc\":20,\"dlg\":{\"ok\":\"аванс-больше\",\"okDo\":[{\"type\":\"gm\",\"purse\":5000}],"
+                                "\"fail\":\"отказ\",\"failDo\":[{\"type\":\"attitude\",\"npc\":\"Ролан\",\"delta\":-1}]}}");
+            const bool ok = e["res"]["ok"].flag();
+            (ok ? okN : failN)++;
+            if (ok ? (a.dlgNode != "аванс-больше" || a.purse != 5000) : (a.dlgNode != "отказ" || a.npcs["Ролан"].shift != -1)) bad++;
+        }
+        T("T233", okN && failN && !bad, "проверка в разговоре: переход по итогу");
+    }
+    // T234 состязание в разговоре (Обман против Проницательности NPC): победа говорящего → ok
+    {
+        int bad = 0;
+        for (int sd = 1; sd <= 40; sd++) {
+            kmp::State a = fresh(sd);
+            run(a, ct, "{\"type\":\"dialog\",\"npc\":\"Ролан\",\"node\":\"приветствие\"}");
+            Json e = run(a, ct, "{\"type\":\"contest\",\"hero\":\"Лис\",\"what\":\"Обман\",\"vs\":\"Ролан\",\"vsWhat\":\"Проницательность\",\"vsMod\":3,"
+                                "\"dlg\":{\"ok\":\"поверил\",\"fail\":\"раскусил\"}}");
+            if (a.dlgNode != (e["res"]["win"].str() == "Лис" ? "поверил" : "раскусил")) bad++;
+        }
+        T("T234", !bad, "состязание в разговоре");
+    }
+
     std::printf("\nкампания: %d прошло, %d не прошло\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

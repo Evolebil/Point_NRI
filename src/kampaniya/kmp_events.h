@@ -5,7 +5,10 @@
 // перебрасывает (попытка +1), правит итог (поле "edit":true) или отменяет. Принятое событие пишется в журнал и
 // применяется: apply берёт готовые итоги из события и костей не бросает — повтор журнала даёт то же состояние.
 //
-// Виды ("type"): setup, hero, check, contest, group, day, rest, buy, sell, quest, learn, turnin, attitude, rep, gm, note.
+// Виды ("type"): setup, hero, check, contest, group, day, rest, buy, sell, quest, learn, turnin, attitude, rep, gm, note,
+// dialog. Разговор (Д3): дерево разбирает web/kampaniya.py; событие dialog несёт узел и действия узла ("do" — список
+// событий без бросков: learn, gm, attitude, rep, note), а проверка из разговора — "dlg":{"npc","ok","okDo","fail","failDo"}:
+// по её итогу разговор уходит в узел ok или fail и выполняются действия этого узла.
 // ============================================================================
 #pragma once
 #include "kmp_state.h"
@@ -251,7 +254,8 @@ inline std::string propose(const State& s, const Content& ct, const Json& act, c
         const long long next = confirm ? Q.tier : std::llround(Q.tier * Q.step);
         res = "{\"quest\":" + q(qid) + ",\"fact\":" + q(f) + ",\"party\":" + q(act["party"].str("мы")) + ",\"confirm\":" + bl(confirm) + ",\"pay\":" + num(pay) +
               ",\"tier\":" + num(next) + "}";
-    } else if (type == "setup" || type == "hero" || type == "quest" || type == "learn" || type == "attitude" || type == "rep" || type == "gm" || type == "note") {
+    } else if (type == "setup" || type == "hero" || type == "quest" || type == "learn" || type == "attitude" || type == "rep" || type == "gm" || type == "note" ||
+               type == "dialog") {
         // без бросков: событие = запрос как есть
         std::string body;
         for (auto& kv : act.o)
@@ -285,6 +289,25 @@ inline bool addHero(State& s, const Coef& C, const Json& ev, std::string& err) {
 
 inline long long cpOf(const Json& j) { return j.t == Json::STR ? parseMoney(j.str()) : (long long)j.dbl(0); }
 
+inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err);
+// действия узла разговора: события без бросков, номер — тот же, что у события разговора
+inline bool applyDo(State& s, const Coef& C, const Json& list, int n, std::string& err) {
+    for (auto& d : list.a) {
+        const std::string t = d["type"].str();
+        if (t != "learn" && t != "gm" && t != "attitude" && t != "rep" && t != "note") { err = "в разговоре нельзя: " + t; return false; }
+        std::string j = jsonOut(d);
+        j = "{\"n\":" + num(n) + "," + j.substr(1);
+        if (!apply(s, C, parseJson(j), err)) return false;
+    }
+    return true;
+}
+// переход разговора: узел, лавка, конец
+inline void dlgGo(State& s, const Json& d, const std::string& node) {
+    if (d.has("npc")) s.dlgNpc = d["npc"].str();
+    s.dlgNode = node, s.dlgShop = false;
+    if (node.empty()) s.dlgNpc.clear();
+}
+
 inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
     const std::string type = ev["type"].str();
     const Json& r = ev["res"];
@@ -307,6 +330,13 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
     } else if (type == "check" || type == "contest" || type == "group") {
         for (auto& c : ev["checks"].a)
             say(c["who"].str() + ": " + c["what"].str() + " " + num(c["total"].num()) + (type == "check" ? (c["ok"].flag() ? " — успех" : " — провал") : ""));
+        const Json& d = ev["act"]["dlg"];
+        if (d.t == Json::OBJ) {   // проверка из разговора: успех (у состязания — победа говорящего) → ok, иначе → fail
+            const bool ok = type == "contest" ? r["win"].str() == ev["act"]["hero"].str() : r["ok"].flag();
+            dlgGo(s, d, d[ok ? "ok" : "fail"].str());
+            if (!applyDo(s, C, d[ok ? "okDo" : "failDo"], ev["n"].num(s.n + 1), err)) return false;
+            if (d[ok ? "okShop" : "failShop"].flag()) s.dlgShop = true;
+        }
     } else if (type == "day") {
         s.day++, s.hour = 8 - 0;   // утро следующего дня
         s.km += r["km"].dbl(0);
@@ -400,6 +430,15 @@ inline bool apply(State& s, const Coef& C, const Json& ev, std::string& err) {
         if (ev.has("text")) say("мастер: " + ev["text"].str());
     } else if (type == "note") {
         say(ev["text"].str());
+    } else if (type == "dialog") {   // разговор: начать, перейти в узел (с его действиями), закончить (узел пустой)
+        if (ev["npc"].t == Json::STR && ev["npc"].str() != s.dlgNpc && ev["node"].str().size()) {
+            Npc& p = s.npcs[ev["npc"].str()];
+            if (p.name.empty()) p.name = ev["npc"].str(), p.tier = attTier(ev["attitude"].str("безразличный"));   // первое знакомство — отношение с карточки
+            say("разговор: " + ev["npc"].str());
+        }
+        dlgGo(s, ev, ev["node"].str());
+        if (!applyDo(s, C, ev["do"], ev["n"].num(s.n + 1), err)) return false;
+        s.dlgShop = ev["shop"].flag();
     } else {
         err = "неизвестное событие: " + type;
         return false;
@@ -423,7 +462,11 @@ inline std::string stateJson(const State& s) {
         for (auto& kv : h.inv) o += std::string(k++ ? "," : "") + q(kv.first) + ":" + num(kv.second);
         o += "},\"skills\":{";
         for (int sk = 0; sk < SK_N; sk++) o += std::string(sk ? "," : "") + q(SKN[sk]) + ":" + num(heroSkill(h.b, sk));
-        o += "},\"passivePerception\":" + num(passive(h, "Внимательность")) + "}";
+        o += "},\"passivePerception\":" + num(passive(h, "Внимательность")) + ",\"langs\":[";
+        for (size_t j = 0; j < h.langs.size(); j++) o += std::string(j ? "," : "") + q(h.langs[j]);
+        o += "],\"tools\":[";
+        for (size_t j = 0; j < h.tools.size(); j++) o += std::string(j ? "," : "") + q(h.tools[j]);
+        o += "]}";
     }
     o += "],\"inv\":{";
     int k = 0;
@@ -440,7 +483,7 @@ inline std::string stateJson(const State& s) {
     o += "},\"quests\":{";
     k = 0;
     for (auto& kv : s.quests) o += std::string(k++ ? "," : "") + q(kv.first) + ":{\"tier\":" + num(kv.second.tier) + ",\"turnedIn\":" + num((long long)kv.second.turnedIn.size()) + "}";
-    o += "},\"log\":[";
+    o += "},\"dialog\":{\"npc\":" + q(s.dlgNpc) + ",\"node\":" + q(s.dlgNode) + ",\"shop\":" + bl(s.dlgShop) + "},\"log\":[";
     const size_t from = s.log.size() > 50 ? s.log.size() - 50 : 0;
     for (size_t i = from; i < s.log.size(); i++) o += std::string(i > from ? "," : "") + q(s.log[i]);
     return o + "]}";

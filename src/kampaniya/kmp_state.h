@@ -47,6 +47,8 @@ struct State {
     std::map<std::string, Npc> npcs;
     std::map<std::string, int> rep;   // фракция → известность
     std::map<std::string, Quest> quests;
+    std::string dlgNpc, dlgNode;      // разговор: с кем и в каком узле дерева (пусто — разговора нет)
+    bool dlgShop = false;             // в разговоре открыта лавка NPC
     std::vector<std::string> log;     // короткие строки для экрана
 };
 
