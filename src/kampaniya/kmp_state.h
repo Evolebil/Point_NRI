@@ -2,7 +2,7 @@
 // Кампания: состояние (герои, отряд, NPC, задания) и проверки характеристик и навыков (А1, НАВ-01, НАВ-02).
 // ============================================================================
 #pragma once
-#include "kmp_core.h"
+#include "kmp_world.h"
 
 namespace kmp {
 
@@ -43,8 +43,8 @@ struct State {
     bool returnTrip = false;
     double km = 0;                    // пройдено всего
     std::string place;                // где отряд (место региона или описание)
-    bool hasPos = false;              // позиция на карте региона (Б1) и маршрут — пункты, которые ещё впереди (Б2)
-    double lon = 0, lat = 0;
+    bool hasPos = false;              // позиция на карте мира (км от северо-западного угла) и маршрут — пункты, которые ещё впереди
+    double x = 0, y = 0;
     std::vector<std::pair<double, double>> route;
     std::set<std::string> facts;      // сведения отряда
     std::map<std::string, Npc> npcs;

@@ -527,6 +527,42 @@ class Engine:
         self.p.wait(timeout=5)
 
 
+WORLDS = os.path.join(STATE, "miry")
+WORLD_KEYS = {"size": (10, 5000, 800), "seed": (1, 10 ** 9, 1), "sea": (0, 0.9, 0.3), "mount": (0, 1, 0.5), "rough": (0, 1, 0.5),
+              "climate": (-1, 1, 0), "humid": (-1, 1, 0), "towns": (0.05, 10, 1), "rivers": (0.05, 3, 1)}
+
+
+def world_params(raw):
+    """Параметры генератора из запроса: только известные, в своих пределах."""
+    out = {}
+    for k, (lo, hi, d) in WORLD_KEYS.items():
+        try:
+            v = float((raw or {}).get(k, d))
+        except (TypeError, ValueError):
+            v = d
+        out[k] = int(min(hi, max(lo, v))) if k == "seed" else min(hi, max(lo, v))
+    return out
+
+
+def load_world(wid):
+    try:
+        with open(os.path.join(WORLDS, re.sub(r"[^0-9A-Za-z_-]", "", str(wid)), "world.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def save_world(name, params, author):
+    os.makedirs(WORLDS, exist_ok=True)
+    wid = ""
+    while not wid or os.path.exists(os.path.join(WORLDS, wid)):
+        wid = "w" + "".join(random.choice("abcdefghjkmnpqrstuvwxyz23456789") for _ in range(6))
+    os.makedirs(os.path.join(WORLDS, wid))
+    with open(os.path.join(WORLDS, wid, "world.json"), "w", encoding="utf-8") as f:
+        json.dump({"имя": name, "тип": "генератор", "параметры": params, "автор": author}, f, ensure_ascii=False)
+    return wid
+
+
 class Campaign:
     """Кампания: meta.json (имя, зерно, мастер) + journal.jsonl. Состояние = свёртка журнала (НФ-01)."""
 
@@ -566,8 +602,9 @@ class Campaign:
         self.eng.talk({"cmd": "content", "data": data})
         return errors
 
+    # ---- мир кампании (ТЗ v2 §3): «акт1» — сетка Акта I из config «регион»; иначе — мир генератора из state/kampaniya/miry ----
     def region(self):
-        """Карта региона (web/data/region_*.json из config «регион») или None."""
+        """Сетка Акта I (web/data/region_*.json из config «регион») или None."""
         rp = self.vault.cfg.get("регион")
         if not rp:
             return None
@@ -581,13 +618,52 @@ class Campaign:
             self._region_path = p
         return self._region
 
+    def world_msg(self, wid, use):
+        """Команда движку для мира wid ("акт1" или id мира генератора)."""
+        if wid == "акт1":
+            reg = self.region()
+            return None if reg is None else {"cmd": "world", "id": "акт1", "kind": "act", "data": reg, "use": use}
+        w = load_world(wid)
+        return None if w is None else {"cmd": "world", "id": wid, "kind": "gen", "params": dict(w["параметры"], name=w["имя"]), "use": use}
+
+    def set_world(self, wid):
+        """Сделать мир миром кампании: сразу в движок и в meta.json (переживает перезапуск)."""
+        m = self.world_msg(wid, True)
+        if m is None:
+            return {"err": "нет такого мира"}
+        r = self.eng.talk(m)
+        if r.get("type") != "world":
+            return {"err": r.get("err")}
+        self.meta["мир"] = wid
+        with open(os.path.join(self.dir, "meta.json"), "w", encoding="utf-8") as f:
+            json.dump(self.meta, f, ensure_ascii=False)
+        self.tiles, self.info = {}, r["info"]
+        return {"info": r["info"]}
+
+    def tile(self, wid, z, tx, ty):
+        """Кусок обзора — из кэша (последние 300) или от движка."""
+        key = (wid, z, tx, ty)
+        t = self.tiles.get(key)
+        if t is None:
+            r = self.eng.talk({"cmd": "tile", "id": wid, "z": z, "tx": tx, "ty": ty})
+            if r.get("type") != "tile":
+                return None
+            t = self.tiles[key] = r["tile"]
+            if len(self.tiles) > 300:
+                self.tiles.pop(next(iter(self.tiles)))
+        return t
+
     def _load(self):
         self._content()
-        reg = self.region()
-        if reg:
-            r = self.eng.talk({"cmd": "region", "data": reg})
-            if r.get("type") != "ok":
+        self.tiles, self.info = {}, None
+        wid = self.meta.get("мир") or ("акт1" if self.region() else None)
+        m = self.world_msg(wid, True) if wid else None
+        if m:
+            r = self.eng.talk(m)
+            if r.get("type") != "world":
                 raise RuntimeError(r.get("err"))
+            self.info = r["info"]
+            self.meta.setdefault("мир", wid)
         r = self.eng.talk({"cmd": "load", "seed": self.meta["seed"], "journal": self.journal})
         if r.get("type") != "state":
             raise RuntimeError(f"журнал кампании {self.cid} не сворачивается: {r.get('err')}")
@@ -710,7 +786,7 @@ class Campaign:
 # ---------------------------------------------------------------- команды сервера (play_server.py: cmd «kmp_*»)
 
 CAMPS, CAMPS_LOCK, VAULT = {}, threading.Lock(), None
-MASTER_ONLY = {"kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export", "kmp_talk", "kmp_talk_end"}
+MASTER_ONLY = {"kmp_world_use", "kmp_world_preview", "kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export", "kmp_talk", "kmp_talk_end"}
 
 
 def _key(name):
@@ -725,7 +801,7 @@ def _camp(cid):
     if VAULT is None:
         VAULT = Vault()
     if cid not in CAMPS:
-        CAMPS[cid] = Campaign(cid, VAULT)
+        CAMPS[cid] = Campaign(cid, VAULT, root=STATE)
     return CAMPS[cid]
 
 
@@ -771,7 +847,7 @@ def kmp_cmd(msg, sid=""):
                     cid = "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(5))
                 if VAULT is None:
                     VAULT = Vault()
-                CAMPS[cid] = Campaign.create(cid, title, int(msg.get("seed") or random.randint(1, 99999)), name, vault=VAULT,
+                CAMPS[cid] = Campaign.create(cid, title, int(msg.get("seed") or random.randint(1, 99999)), name, root=STATE, vault=VAULT,
                                              master_name=str(msg.get("name"))[:40])
                 c, cmd = CAMPS[cid], "kmp_open"
             else:
@@ -782,9 +858,29 @@ def kmp_cmd(msg, sid=""):
             if cmd in MASTER_ONLY and not master:
                 return {"type": "error", "err": "это может только мастер"}
             r = {}
-            if cmd == "kmp_region":   # карта для страницы — один раз (сетка ~140 КБ)
-                reg = c.region()
-                return {"type": "kmp_region", "region": reg} if reg else {"type": "error", "err": "карты региона нет"}
+            if cmd == "kmp_worldinfo":   # мир кампании: размер, уровни обзора, поселения (один раз на страницу)
+                return {"type": "kmp_worldinfo", "wid": c.meta.get("мир"), "info": c.info} if c.info else {"type": "error", "err": "мира нет"}
+            if cmd == "kmp_tile":   # кусок обзора: мир кампании, а мастеру — и мир предпросмотра
+                wid = str(msg.get("wid") or c.meta.get("мир") or "")
+                if wid != c.meta.get("мир") and not (master and wid == "предпросмотр"):
+                    return {"type": "error", "err": "чужой мир"}
+                t = c.tile(wid, int(msg.get("z", 0)), int(msg.get("tx", 0)), int(msg.get("ty", 0)))
+                return {"type": "kmp_tile", "tile": t} if t else {"type": "error", "err": "нет куска"}
+            if cmd == "kmp_world_preview":   # мастер: мир по параметрам — посмотреть, не меняя мира кампании
+                if not master:
+                    return {"type": "error", "err": "мир выбирает мастер"}
+                r = c.eng.talk({"cmd": "world", "id": "предпросмотр", "kind": "gen", "params": world_params(msg.get("params")), "use": False})
+                c.tiles = {k: v for k, v in c.tiles.items() if k[0] != "предпросмотр"}
+                return {"type": "kmp_preview", "info": r.get("info")} if r.get("type") == "world" else {"type": "error", "err": r.get("err")}
+            if cmd == "kmp_world_use":   # мастер: взять мир (новый по параметрам или «акт1»)
+                if not master:
+                    return {"type": "error", "err": "мир выбирает мастер"}
+                wid = "акт1" if msg.get("act1") else save_world(str(msg.get("title") or "Мир")[:60], world_params(msg.get("params")), name)
+                r = c.set_world(wid)
+                if r.get("err"):
+                    return {"type": "error", "err": r["err"]}
+                r = c.direct({"type": "note", "text": "мир кампании: " + (r["info"].get("name") or wid)})
+                cmd = "kmp_open"   # дальше — как открытие: ответ с журналом и состоянием
             if cmd == "kmp_propose":
                 act = msg.get("act") or {}
                 if not master and act.get("type") not in ("hero", "check", "contest", "buy", "sell", "note", "route"):

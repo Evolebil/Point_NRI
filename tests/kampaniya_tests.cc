@@ -291,45 +291,82 @@ int main() {
         T("T234", !bad, "состязание в разговоре");
     }
 
-    // T235 путь по карте: полоса клеток по 0,1° долготы на широте 46° (~7,7 км): 2 клетки дороги, 4 пашни, 2 леса, вода
+    // T235 путь по миру: полоса по 7,5 км вдоль x — 2 клетки дороги, 4 пашни (река в 4-й), 2 леса, вода
     {
+        struct Strip : kmp::World {
+            std::string t = "000000117", r = "110000000", v = "000100000";
+            kmp::WCell at(double x, double y, double) const override {
+                kmp::WCell c;
+                const int i = (int)std::floor(x / 7.5);
+                if (i < 0 || i >= 9 || y < 0 || y > 7.5) { c.terr = kmp::TERR_WATER; return c; }
+                c.terr = t[i] - '0', c.road = r[i] == '1', c.river = v[i] == '1';
+                return c;
+            }
+        };
+        auto W = std::make_shared<Strip>();
+        W->w = 67.5, W->h = 7.5;
         kmp::Content c2;
-        kmp::Region& R = c2.region;
-        R.w = 9, R.h = 1, R.lon0 = 0, R.lat0 = 46.05, R.dlon = 0.1, R.dlat = 0.1;
-        R.terr = "000000117", R.road = "110000000", R.river = "000100000";
+        c2.world = W;
         kmp::State a = fresh();
-        a.food = a.water = 100, a.hasPos = true, a.lon = 0.01, a.lat = 46.0;
-        run(a, c2, "{\"type\":\"route\",\"path\":[[0.85,46.0]]}");
+        a.food = a.water = 100, a.hasPos = true, a.x = 0.1, a.y = 3.75;
+        run(a, c2, "{\"type\":\"route\",\"path\":[[63.7,3.75]]}");
         Json d1 = run(a, c2, "{\"type\":\"day\"}");
-        // 35 км по дороге: 15,4 км дороги ×1, дальше пашни ×0,75 (19,6 → 14,7 км) → ~30 км; больше времени — на пашнях, реку перешли
-        const double lon1 = a.lon;
-        const bool day1 = std::abs(d1["res"]["km"].num() - 30) <= 1 && d1["res"]["terrain"].str() == "Река и переправа" && !d1["res"]["road"].flag() && lon1 > 0.38 && lon1 < 0.42;
+        // 35 км: 14,9 км дороги ×1, дальше пашни ×0,75 (20,1 → 15,1 км) → ~30 км; больше времени — на пашнях, реку перешли
+        const bool day1 = std::abs(d1["res"]["km"].num() - 30) <= 1 && d1["res"]["terrain"].str() == "Река и переправа" && !d1["res"]["road"].flag() && a.x > 29 && a.x < 31;
         Json d2 = run(a, c2, "{\"type\":\"day\"}");
         Json d3 = run(a, c2, "{\"type\":\"day\"}");
-        T("T235", day1 && d2["res"]["terrain"].str() == "Пашни и сёла" && d3["res"]["blocked"].flag() && a.lon < 0.8 && a.route.size() == 1 &&
+        T("T235", day1 && d2["res"]["terrain"].str() == "Пашни и сёла" && d3["res"]["blocked"].flag() && a.x < 60.1 && a.route.size() == 1 &&
                       d3["res"]["terrain"].str() == "Лес",
-          "путь по карте: местность и дорога дня из пути, вода не пускает");
-        // T236 мастер задал местность сам — карта не используется; без маршрута — тоже
+          "путь по миру: местность и дорога дня из пути, вода не пускает");
+        // T236 мастер задал местность сам — мир не используется
         Json m = run(a, c2, "{\"type\":\"day\",\"terrain\":\"Горы\"}");
         T("T236", m["res"]["terrain"].str() == "Горы" && !m["res"].has("pos"), "местность от мастера важнее карты");
     }
-    // T237 настоящая карта Акта I: Париж → Орлеан (~110 км по прямой, по римской дороге) — 3–4 дня пешком
+    // T237 Акт I как мир: Париж → Орлеан (~110 км по прямой, по римской дороге) — 3–5 дней пешком
     {
         std::ifstream f("web/data/region_act1.json");
         std::stringstream ss;
         ss << f.rdbuf();
         Json d = parseJson(ss.str());
-        kmp::Content c2;
-        kmp::Region& R = c2.region;
+        auto A = std::make_shared<kmp::ActWorld>();
+        kmp::Region& R = A->R;
         R.w = d["w"].num(0), R.h = d["h"].num(0), R.lon0 = d["lon0"].dbl(0), R.lat0 = d["lat0"].dbl(0), R.dlon = d["dlon"].dbl(1), R.dlat = d["dlat"].dbl(1);
         R.terr = d["terrain"].str(), R.road = d["road"].str(), R.river = d["river"].str();
+        A->build({});
+        kmp::Content c2;
+        c2.world = A;
+        double px, py, ox, oy;
+        A->toKm(2.35, 48.86, px, py), A->toKm(1.909, 47.902, ox, oy);
         kmp::State a = fresh();
-        a.food = a.water = 100, a.purse = 100000, a.hasPos = true, a.lon = 2.35, a.lat = 48.86;
-        run(a, c2, "{\"type\":\"route\",\"path\":[[1.909,47.902]]}");
+        a.food = a.water = 100, a.purse = 100000, a.hasPos = true, a.x = px, a.y = py;
+        run(a, c2, "{\"type\":\"route\",\"path\":[[" + std::to_string(ox) + "," + std::to_string(oy) + "]]}");
         int days = 0;
         while (!a.route.empty() && days < 10) run(a, c2, "{\"type\":\"day\"}"), days++;
-        T("T237", R.ok() && R.terrAt(R.cell(2.35, 48.86)) == kmp::TERR_TOWN && days >= 3 && days <= 5 && kmp::kmBetween(a.lon, a.lat, 1.909, 47.902) < 0.1,
-          "карта Акта I: Париж — Орлеан за " + std::to_string(days) + " дня");
+        T("T237", R.ok() && A->at(px, py, 0).terr == kmp::TERR_TOWN && days >= 3 && days <= 5 && std::hypot(a.x - ox, a.y - oy) < 0.1 && A->w > 700 && A->w < 850,
+          "Акт I как мир (" + std::to_string((int)A->w) + " км): Париж — Орлеан за " + std::to_string(days) + " дня");
+    }
+    // T238 мир по параметрам: тот же вход — те же клетки и куски; порядок запросов не важен; доля воды ≈ заданной
+    {
+        auto mk = [](uint64_t seed) { auto G = std::make_shared<kmp::GenWorld>(); G->p.sizeKm = 300, G->p.seed = seed, G->p.sea = 0.4; G->build(); return G; };
+        auto g1 = mk(5), g2 = mk(5), g3 = mk(6);
+        const std::string t1 = kmp::tileJson(*g1, 1, 1, 1), t2a = kmp::tileJson(*g2, 0, 3, 3), t2 = kmp::tileJson(*g2, 1, 1, 1), t1a = kmp::tileJson(*g1, 0, 3, 3);
+        int water = 0, n = 0;
+        for (int j = 0; j < 60; j++)
+            for (int i = 0; i < 60; i++) water += g1->at((i + 0.5) * 5, (j + 0.5) * 5, 0).terr == kmp::TERR_WATER, n++;
+        T("T238", t1 == t2 && t1a == t2a && t1 != kmp::tileJson(*g3, 1, 1, 1) && std::abs(water / (double)n - 0.4) < 0.08 && !g1->towns.empty() && !g1->roads.segs.empty(),
+          "мир по параметрам детерминирован; воды " + std::to_string(water * 100 / n) + "% при заданных 40%");
+    }
+    // T239 масштаб: клетка 1000 фт; мир 5000 км помещается в куски на уровне zMax; поселение стоит на суше, к нему ведёт дорога
+    {
+        auto G = std::make_shared<kmp::GenWorld>();
+        G->p.sizeKm = 5000, G->p.seed = 3;
+        G->build();
+        const kmp::Town& t = G->towns[0];
+        const bool onLand = G->at(t.x, t.y, 0).terr == kmp::TERR_TOWN;
+        bool road = false;
+        for (int k = 0; k < 64 && !road; k++) road = G->at(t.x + std::cos(k * 0.1) * t.r * 1.5, t.y + std::sin(k * 0.1) * t.r * 1.5, 0.6).road;
+        T("T239", std::abs(kmp::CELL_KM - 0.3048) < 1e-9 && (256 << G->zMax()) >= G->cellsW() && G->cellsW() > 16000 && onLand && road,
+          "масштаб: клетка 1000 фт, мир 5000 км — " + std::to_string(G->cellsW()) + " клеток, zMax " + std::to_string(G->zMax()));
     }
 
     std::printf("\nкампания: %d прошло, %d не прошло\n", g_pass, g_fail);
