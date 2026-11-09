@@ -138,6 +138,19 @@ static void reachable(const World& w, const Fighter& me, const Fighter* e, int b
         std::push_heap(q.begin(), q.end(), std::greater<>());
     };
     push(me.y * W + me.x + (me.up ? W * W : 0), 0);
+    // враги, которых обходит поиск: живые чужие (союзников, мёртвых и себя touchesAt и так отбрасывает), с грубой рамкой —
+    // квадрат бойца в узле не больше полного (fpAt <= fpFull), поэтому дальний враг отсекается без точной проверки
+    // (результат тот же, что у перебора всех бойцов; перебор с touchesAt на каждом соседе был больше половины времени)
+    struct FoeBox { int i, xlo, xhi, ylo, yhi; };
+    static thread_local std::vector<FoeBox> foes;
+    foes.clear();
+    const int M = fpFull(me);
+    for (size_t i = 0; i < w.f.size(); i++) {
+        const Fighter& g = w.f[i];
+        if (g.team == me.team || g.hp <= 0 || &g == &me) continue;
+        const int gn = fpN(g);
+        foes.push_back({(int)i, g.x - M, g.x + gn, g.y - M, g.y + gn});
+    }
     std::vector<std::pair<int, int>> all;
     while (!q.empty()) {
         std::pop_heap(q.begin(), q.end(), std::greater<>());
@@ -155,10 +168,11 @@ static void reachable(const World& w, const Fighter& me, const Fighter* e, int b
                     const int nx = x + dx, ny = y + dy;
                     if ((!dx && !dy) || !stepOK(w, me, x, y, l, nx, ny, nl)) continue;
                     bool foe = false;   // известные враги обходятся, как в pathTo движка
-                    for (size_t i = 0; i < w.f.size(); i++) {
-                        const Fighter& g = w.f[i];
-                        if (g.team != me.team && touchesAt(w, me, nx, ny, nl, g) && isKnown(w, me.team, (int)i)) foe = true;
-                    }
+                    for (const FoeBox& fb : foes)
+                        if (nx > fb.xlo && nx < fb.xhi && ny > fb.ylo && ny < fb.yhi && touchesAt(w, me, nx, ny, nl, w.f[fb.i]) && isKnown(w, me.team, fb.i)) {
+                            foe = true;
+                            break;
+                        }
                     if (foe) continue;
                     const int n = ny * W + nx + nl * W * W, nv = v + stepCostL(w, me, x, y, l, nx, ny, nl);
                     if (nv <= budget && nv < cost[n]) push(n, nv);
