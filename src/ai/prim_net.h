@@ -891,6 +891,7 @@ struct Ctx {
     // только «конец хода»), решений, где «конец хода» был закрыт запретом пустого хода
     long long turns = 0, movedTurns = 0, capHits = 0, forcedEnds = 0, endBlocked = 0;
     long long kinds[2][PR_N] = {};      // выбранные примитивы по сторонам и видам (разбор поведения сети)
+    long long atkOpen[2] = {}, atkKinds[2][PR_N] = {};   // решений, когда атака оружием доступна, и что сеть тогда выбрала
     double gamma = 0.99, timePen = 0;   // для потенциальной награды и штрафа за решение
     double roundPen = 0;                // штраф за каждый свой раунд боя (затяжка невыгодна; решение владельца 2026-10-28)
     double temp = 1.0;                  // температура выбора, когда greedy = false (1 — как в обучении)
@@ -1240,6 +1241,10 @@ static void netTurnP(World& w, int idx) {
             evPush(buf + g_stages + "]}");
         }
         c->kinds[me.team & 1][std::clamp(p.kind, 0, PR_N - 1)]++;
+        if (o.typeMask[PR_ATTACK]) {
+            c->atkOpen[me.team & 1]++;
+            c->atkKinds[me.team & 1][std::clamp(p.kind, 0, PR_N - 1)]++;
+        }
         if (p.kind <= PR_END) {
             ended = true;
             break;
