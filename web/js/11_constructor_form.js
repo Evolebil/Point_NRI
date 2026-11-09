@@ -151,7 +151,7 @@ function moreHTML(P, dt){
 const STEPS = [
   {n:'Основа'}, {n:'Характеристики и КД', cats:['stat', 'ac']}, {n:'Владения'}, {n:'Оружие', cats:['weapon']},
   {n:'Способности', cats:['ability', 'minions']}, {n:'Защита', adv:true}, {n:'Движение и чувства', adv:true}, {n:'Особенности', adv:true}];
-let STEP = 0, SIMPLE = false;
+let STEP = 0, SIMPLE = false, WPN_OPEN = false;   // WPN_OPEN — раскрыта ли ручная настройка оружия
 try { SIMPLE = localStorage.getItem('dnd_simple') === '1'; } catch (e) {}
 // простой режим прячет шаги для опытных (adv); купленное на них остаётся и считается в цене
 const stepVis = i => !SIMPLE || !STEPS[i].adv;
@@ -189,12 +189,25 @@ function stepNote(i){
     L(p.res) + L(p.imm) + L(p.vuln) + L(p.immCond) + !!p.resNM + !!p.immNM + (+p.parry > 0) + !!p.uncanny + !!p.riposte + !!p.magicRes + !!p.spellRes + !!p.critImm,
     !!p.fly + !!p.immPush + !!p.disengB + !!p.ignDiff + !!p.climbS + !!p.swimS + !!p.burrowS + !!p.evasion + !!p.sunSens + (+p.lair > 0) + (+p.dv > 0) + (+p.blindsight > 0) + (+p.truesight > 0),
     L(p.rules) + L(p.trigs) + (+p.regenN > 0) + (+p.surge > 0) + (+p.legRes > 0) + (+p.legAct > 0) + !!p.wMagic + ((p.slots || []).some(x => +x > 0)) + (+(p.aura || {}).rad > 0) + (+(p.rider || {}).n > 0 || +(p.rider || {}).cond > 0)][i];
-  return n ? 'выбрано ' + n : 'ничего';
+  return n ? 'выбрано ' + n : (i >= 5 ? 'пусто, необязательно' : 'пусто');
+}
+// на каком шаге ошибка сборки (П-3): по словам из ответа движка; -1 — не понять, показываем только наверху
+const STEP_ERR = [[3, /оружи|второй рук|атак за|кубик|досягаем|боеприпас|двуруч/i], [4, /способност|ячейк|призыв|приспешник|область|реакци/i],
+  [2, /навык|экспертиз|мастерств|инструмент|спасброс/i], [5, /резист|иммунитет|уязвим|парир/i], [6, /скорост|полёт|зрени|логов|свет/i],
+  [1, /доспех|КД|щит|характеристик|СИЛ|ЛОВ|ТЕЛ|ИНТ|МДР|ХАР/], [0, /бюджет|перерасход|размер/i]];
+function stepIssue(){
+  const d = lastPrice; if (!d || d.ok) return -1;
+  const hit = STEP_ERR.find(([, re]) => re.test(d.err || '')); return hit ? hit[0] : -1;
 }
 function renderSteps(){
   const bar = $('stepBar'); if (!bar) return;
   if (!stepVis(STEP)) STEP = Math.max(0, stepPrev(STEP));
-  bar.innerHTML = STEPS.map((s, i) => !stepVis(i) ? '' : `<button class="step-b${i === STEP ? ' on' : ''}" data-step="${i}"><span>${i + 1} · ${esc(s.n)}</span><small>${esc(stepNote(i))}</small></button>`).join('');
+  const bad = stepIssue();
+  bar.innerHTML = STEPS.map((s, i) => { if (!stepVis(i)) return ''; const note = stepNote(i), mark = i === bad ? '⚠' : /^пусто|^—$/.test(note) ? '·' : '✓';
+    return `<button class="step-b${i === STEP ? ' on' : ''}" data-step="${i}"${i === bad ? ' style="outline:2px solid var(--bad)"' : ''} title="${i === bad ? 'Здесь ошибка — откройте шаг' : ''}"><span>${mark} ${i + 1} · ${esc(s.n)}</span><small>${esc(note)}</small></button>`; }).join('');
+  document.querySelectorAll('[data-cnt]').forEach(el => { el.textContent = ((S.passives || {})[el.dataset.cnt] || []).length; });
+  const fe = $('formErr');
+  if (fe) fe.innerHTML = lastPrice && !lastPrice.ok ? `<div class="err" style="margin:6px 0">Персонаж пока не готов: ${esc(lastPrice.err || '')}${bad >= 0 ? ` <button data-step="${bad}">Открыть шаг «${esc(STEPS[bad].n)}»</button>` : ''}</div>` : '';
   document.querySelectorAll('#form .stepbox').forEach(el => el.classList.toggle('on', +el.dataset.box === STEP));
 }
 function goStep(i){
@@ -220,7 +233,7 @@ function buildForm(){
   S.passives = S.passives || {};
   const p = S.passives, PP = f => 'passives.' + f;
   const box = (i, inner) => `<div class="stepbox" data-box="${i}">${inner}${stepNav(i)}</div>`;
-  let h = `<div class="steps" id="stepBar"></div>`;
+  let h = `<div id="formErr"></div><div class="steps" id="stepBar"></div>`;
   // 0 · основа
   h += box(0, `<div class="card"><h3>Основа</h3>
     <div class="row"><label><input type="checkbox" id="simpleMode"${SIMPLE ? ' checked' : ''}> Простой режим</label><span class="small">только основные шаги; защита, движение и особенности — в полном режиме (купленное там остаётся)</span></div>
@@ -233,13 +246,16 @@ function buildForm(){
     <div class="hint">Дальше по шагам: характеристики, владения, оружие, способности, защита, движение, особенности. Шаги можно проходить в любом порядке; справа — сколько потрачено и все покупки.</div></div>`);
   // 1 · характеристики и КД
   let st = `<div class="card"><h3>Характеристики и КД</h3>
-    <div class="hint">Цена значения V (1–${LIM.stat}): V·(V+1)/2 − 55. Десять бесплатно, 16 стоит 81, 20 стоит 155; опустите до 8 — получите 19 очков. </div>
+    <div class="hint">Десять в каждой характеристике — бесплатно. Выше — платите, ниже — очки возвращаются в бюджет:</div>
+    <table class="small tnum" style="border-collapse:collapse;margin:4px 0"><tr><th style="text-align:left;padding-right:8px">значение</th>${STAT_TABLE.map(v => `<td style="padding:0 6px">${v}</td>`).join('')}</tr>
+      <tr><th style="text-align:left;padding-right:8px;cursor:help" title="Формула: значение × (значение + 1) / 2 − 55">цена, оч. ?</th>${STAT_TABLE.map(v => { const c = v * (v + 1) / 2 - 55;
+        return `<td style="padding:0 6px;color:${c < 0 ? 'var(--good)' : 'inherit'}">${c > 0 ? c : c < 0 ? '+' + (-c) : '0'}</td>`; }).join('')}</tr></table>
     <div class="hint"><b>Главная характеристика</b> — любая из шести, отметьте кружок «главная» справа. От неё бросок атаки способностей и СЛ спасбросков против них (8 + мастерство + её модификатор). Оружие бьёт своей: СИЛ, фехтовальное и боеприпасы — ЛОВ.</div>`;
   STAT_N.forEach((n, i) => {
-    st += `<div class="statrow"><span class="nm">${n}</span><input type="range" min="1" max="${LIM.stat}" data-p="stats.${i}" data-t="int">${numIn('stats.' + i, 1, LIM.stat, 1, 56)}<span class="tnum small" data-statcost="${i}"></span>
-      <label class="small"><input type="radio" name="main" data-main="${i}"> главная (способности)</label></div>`;
+    st += `<div class="statrow"><span class="nm" title="${STAT_FULL[i]}" style="cursor:help">${n}</span><input type="range" min="1" max="${LIM.stat}" data-p="stats.${i}" data-t="int">${numIn('stats.' + i, 1, LIM.stat, 1, 56)}<span class="tnum small" data-statcost="${i}"></span>
+      <label class="small" title="От главной характеристики — бросок атаки способностей и СЛ спасбросков против них"><input type="radio" name="main" data-main="${i}"> главная</label></div>`;
   });
-  st += `<div class="statrow"><span class="nm">КД</span><input type="range" min="0" max="${LIM.ac}" data-p="acV" data-t="int">${numIn('acV', 0, LIM.ac, 1, 56)}<span class="tnum small" data-accost></span><span class="small" data-acval></span></div>
+  st += `<div class="statrow"><span class="nm" title="Класс доспеха: чтобы попасть, атака должна набрать не меньше" style="cursor:help">КД</span><input type="range" min="0" max="${LIM.ac}" data-p="acV" data-t="int">${numIn('acV', 0, LIM.ac, 1, 56)}<span class="tnum small" data-accost></span><span class="small" data-acval></span></div>
     <div class="hint">КД = 10 + купленные единицы + ЛОВ (по доспеху) + щит. Средний доспех пропускает ЛОВ не больше +2, тяжёлый — не пропускает вовсе; за срезанную ЛОВ очки возвращаются.</div>
     <div class="row"><label>Защита без доспеха: + модификатор ${selIn('passives.unarmoredStat', [[-1, 'нет'], ...STAT_N.map((n, j) => [j, n])])}</label><span class="small">(как у монаха и варвара: только без доспеха; цена — такой же КД по лестнице)</span></div>
     <div class="row"><label>Доспех ${selIn('armor.kind', [[0,'без доспеха'],[1,'лёгкий'],[2,'средний (ЛОВ до +2)'],[3,'тяжёлый (без ЛОВ, СИЛ 13+)']])}</label>
@@ -250,15 +266,17 @@ function buildForm(){
   h += box(2, `<div class="card"><h3>Владения</h3>
     <div class="hint">Как в D&D: бонус мастерства — один на всё, чем вы владеете. +2 даром, каждая единица сверх — ${U.prof1} оч. Цена владения растёт с мастерством (× мастерство/2). Экспертиза удваивает мастерство в навыке. ⚔ — навык работает в бою (${U.skillC} оч.), остальные нужны вне боя (${U.skillNC} оч.).</div>
     <div class="row"><label>Бонус мастерства +${numIn('prof', 2, 6, 1, 56)}</label><label>Инструментов ${numIn('passives.tools', 0, 40, 1, 56)}</label></div>
-    <div class="sec-h">Спасброски (${U.saveProf} оч. × мастерство/2)</div>${chipsFor('passives.saveProf', STAT_N)}
+    <div class="sec-h">Спасброски (${U.saveProf} оч. × мастерство/2) · выбрано <span data-cnt="saveProf"></span></div>${chipsFor('passives.saveProf', STAT_N)}
     <div data-chipscope="skl"><div class="row">${chipSearch('skl')}<span class="small">ищет по названию навыка и характеристике</span></div>
-    <div class="sec-h">Навыки — по характеристикам</div>${chipGroups('passives.skills', SKL, i => CAT.skills[i].stat, STAT_N)}
-    <div class="sec-h">Экспертиза (только в навыке с владением)</div>${chipGroups('passives.expert', SKL, i => CAT.skills[i].stat, STAT_N)}</div>
+    <details open><summary class="sec-h">Навыки — по характеристикам · выбрано <span data-cnt="skills"></span> из ${(CAT.skills || []).length}</summary>${chipGroups('passives.skills', SKL, i => CAT.skills[i].stat, STAT_N)}</details>
+    <details${(p.expert || []).length ? ' open' : ''}><summary class="sec-h">Экспертиза (только в навыке с владением) · выбрано <span data-cnt="expert"></span></summary>${chipGroups('passives.expert', SKL, i => CAT.skills[i].stat, STAT_N)}</details></div>
     <div class="hint">Оружием и доспехами владеют на своих шагах (галочки «Владею этим оружием», «Владею доспехом и щитом»); инструменты — числом выше.</div></div>`);
   // 3 · оружие
   h += box(3, `<div class="card"><h3>Оружие</h3>
     <div class="row">${chkIn('weapon.armed', 'Есть оружие (иначе безоружный)')}<label>Безоружный удар (когда нет оружия): грань ${selIn('weapon.fistS', DIE_OPTS())}</label><span class="small">к2 ≈ обычный удар кулаком (1 + СИЛ), к6–к10 — монах</span></div>
-    <div class="row">${presetSel('wpn', WEAPON_PRESETS)}<span class="small">заготовка заполнит урон, дальность и свойства — дальше правьте как угодно</span></div>
+    <div class="row"><label><b>Готовое оружие</b> ${presetSel('wpn', WEAPON_PRESETS).replace('+ из заготовки…', 'выберите из книги игрока…')}</label><span class="small">заполнит урон, дальность и свойства</span></div>
+    <div class="card" style="margin:6px 0"><div data-wpnsum></div><div class="small" data-wpnwarn style="color:var(--bad)"></div></div>
+    <details id="wpnManual"${WPN_OPEN ? ' open' : ''} ontoggle="WPN_OPEN = this.open"><summary>Настроить вручную: кубики, тип урона, дальность, свойства</summary>
     <div id="wpn">
       <details class="descbox"${S.weapon && S.weapon._desc ? ' open' : ''}><summary>Описание оружия для игроков</summary>
         <textarea data-p="weapon._desc" data-t="str" rows="2" placeholder="Например: ржавая алебарда с зазубринами"></textarea>
@@ -275,7 +293,7 @@ function buildForm(){
       <div class="sec-h">Запас костей (кости превосходства, ки)</div>
       <div class="grid2"><label>костей ${numIn('weapon.poolN', 0, LIM.count, 1, 56)}</label><label>грань ${selIn('weapon.poolS', DIE_OPTS())}</label></div>
       <div class="hint">Перезарядка (арбалеты) = 1 атака за действие. Приёмы, которые тратят кости запаса, — способности «При попадании оружием».</div>
-    </div>
+    </div></details>
     <div class="sec-h">Запасное оружие</div>
     <div class="hint">Можно держать несколько видов оружия и менять их в бою: первая смена за ход бесплатна, вторая — бонусным действием, третья — действием. Каждое стоит как отдельное оружие.</div>
     ${(S.altWeapons || []).map((q, i) => { const W = f => `altWeapons.${i}.${f}`; return `<div class="abil"><div class="top"><b>${i + 2}.</b>

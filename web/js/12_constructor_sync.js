@@ -104,7 +104,9 @@ $('form').addEventListener('click', e => {
 });
 $('form').addEventListener('change', e => {   // заготовки из выпадающего списка
   const el = e.target.closest('[data-presetsel]');
-  if (el && el.value !== ''){ const v = el.value; el.value = ''; if (el.dataset.presetsel === 'char') applyCharPreset(v); else addPreset(el.dataset.presetsel, v); return; }
+  if (el && el.value !== ''){ const v = el.value; el.value = '';
+    if (el.dataset.presetsel === 'char'){ if (confirm('Готовый персонаж заменит всё, что вы собрали (бюджет останется вашим). Продолжить?')) applyCharPreset(v); }
+    else addPreset(el.dataset.presetsel, v); return; }
   if (e.target.id === 'simpleMode'){ SIMPLE = e.target.checked; try { localStorage.setItem('dnd_simple', SIMPLE ? '1' : '0'); } catch (x) {} buildForm(); goStep(STEP); }
 });
 // заготовки оружия (как в D&D): меняют только урон, дальность и свойства; число атак, владение и описание остаются
@@ -205,9 +207,13 @@ function renderPrice(){
     renderPrice.last = d;
   }
   const dHp = renderPrice.dHp || 0;
-  $('verdict').innerHTML = d.ok ? `<div class="ok">Персонаж готов: ${b.hp} ХП${dHp ? ` <b style="color:${dHp > 0 ? 'var(--good)' : 'var(--bad)'}">(${dHp > 0 ? '+' : ''}${dHp} ХП: ${dHp > 0 ? 'освободилось' : 'потрачено'} ${Math.abs(2 * dHp)} оч.)</b>` : ''}, КД ${b.ac}, скорость ${b.speed} фт.</div>
+  const big = (v, n, t) => `<div style="text-align:center;min-width:70px" title="${t}"><div class="big tnum" style="font-size:24px">${v}</div><div class="small">${n}</div></div>`;
+  $('verdict').innerHTML = d.ok ? `<div class="small" style="margin-top:6px">Персонаж собран — можно в бой или в кампанию:</div>
+    <div style="display:flex;gap:6px;margin:4px 0">${big(b.hp, 'ХП', 'Хиты: здоровье')}${big(b.ac, 'КД', 'Класс доспеха')}${big(b.speed + ' фт', 'скорость', 'Шагов по 5 фт за ход')}</div>
+    ${dHp ? `<div class="small"><b style="color:${dHp > 0 ? 'var(--good)' : 'var(--bad)'}">${dHp > 0 ? '+' : ''}${dHp} ХП: ${dHp > 0 ? 'освободилось' : 'потрачено'} ${Math.abs(2 * dHp)} оч.</b></div>` : ''}
     <div class="small">Всё, что не потрачено, уходит в хиты: 2 очка = 1 ХП.</div>${budgetLine(b)}` : `<div class="err">${esc(d.err)}</div>`;
   $('toOpp').disabled = !d.ok;
+  weaponSummary();
   $('items').innerHTML = b ? b.items.map(it => `<div class="item${it.cost < 0 ? ' neg' : ''}" style="--c:${(CATS[it.cat] || CATS.passive).c}"><span>${(CATS[it.cat] || CATS.passive).ic}</span><div><div>${esc(it.label)}</div>${it.detail ? `<div class="dt">${esc(it.detail)}</div>` : ''}</div><span class="co tnum">${it.cost > 0 ? '−' : '+'}${Math.abs(it.cost)}</span></div>`).join('') : '';
   // цена каждой способности рядом с её редактором
   const ab = b ? b.items.filter(it => it.cat === 'ability' && it.label !== 'Наценка за число способностей') : [];
@@ -226,6 +232,21 @@ function renderPrice(){
   document.querySelectorAll('[data-tprice]').forEach(el => { const it = tl[+el.dataset.tprice]; el.textContent = it ? it.cost + ' оч.' : ''; });
   const rl = b ? b.items.filter(it => it.label === 'Правило') : [];   // «когда → что»: цена каждого правила
   document.querySelectorAll('[data-rprice]').forEach(el => { const it = rl[+el.dataset.rprice]; el.textContent = it ? (it.cost < 0 ? '+' + (-it.cost) + ' оч. назад' : it.cost + ' оч.') : ''; });
+}
+// оружие словами: что выбрано и сколько это в среднем за ход (П-2); необычное для D&D — предупреждение, а не запрет
+function weaponSummary(){
+  const el = document.querySelector('[data-wpnsum]'), wr = document.querySelector('[data-wpnwarn]'); if (!el) return;
+  const w = S.weapon || {}, st = S.stats || [], md = i => Math.floor(((st[i] || 10) - 10) / 2);
+  if (!w.armed){ el.innerHTML = `<b>Без оружия</b>: удар кулаком к${w.fistS || 2}, атак за действие ${w.att || 1}.`; wr.textContent = ''; return; }
+  const n = +w.n || 1, s = +w.s || 6, att = +w.att || 1, mod = w.ammo ? md(1) : w.finesse ? Math.max(md(0), md(1)) : md(0);
+  const avg = att * Math.max(1, n * (s + 1) / 2 + mod), dt = CAT && CAT.dtypes ? CAT.dtypes[w.type] || '' : '';
+  el.innerHTML = `<b>${n}к${s}${mod ? (mod > 0 ? ' + ' : ' − ') + Math.abs(mod) : ''}</b> ${esc(dt)}, атак за действие ${att}, ${+w.range > 5 ? 'дальность ' + w.range + ' фт' : 'ближний бой'} —
+    <b>≈ ${Math.round(avg)} урона за ход</b>, если все атаки попали <span class="small">(${w.ammo ? 'ЛОВ' : w.finesse ? 'большее из СИЛ и ЛОВ' : 'СИЛ'})</span>`;
+  const odd = [];
+  if (s >= 20) odd.push(`грань к${s} — у оружия D&D самая большая к12`);
+  if (n >= 4) odd.push(`${n} кубиков — обычно 1–2`);
+  if (att >= 4) odd.push(`${att} атак за действие — у героев D&D до 4 на 20-м уровне`);
+  wr.textContent = odd.length ? '⚠ Необычно: ' + odd.join('; ') + '. Можно, но это сильно — цена учтёт.' : '';
 }
 $('btnExport').onclick = () => {
   const blob = new Blob([JSON.stringify(S, null, 2)], {type:'application/json'}), a = document.createElement('a');

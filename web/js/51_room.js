@@ -74,7 +74,7 @@ function roomLobby(v){
   const host = v.host, mine = v.members.find(m => m.me);
   const nT = Math.max(2, ...v.members.map(m => m.team + 2));
   const teamSel = (m) => `<select data-rmteam="${m.i}" ${m.me || (host && m.bot != null) ? '' : 'disabled'}>${[...Array(Math.min(64, nT)).keys()].map(t => `<option value="${t}" ${t === m.team ? 'selected' : ''}>команда ${t + 1}</option>`).join('')}</select>`;
-  let h = `<div class="row" style="margin:10px 0"><span>Код комнаты: <b style="font-size:24px;letter-spacing:3px">${esc(v.code)}</b></span><span class="small">${v.status === 'fight' ? 'идёт бой' : (v.status === 'end' ? 'бой окончен' : 'ждём игроков')}</span>${v.err ? `<span class="err">${esc(v.err)}</span>` : ''}</div>`;
+  let h = `<div class="row" style="margin:10px 0"><span>Код комнаты: <b style="font-size:24px;letter-spacing:3px">${esc(v.code)}</b></span><button id="rmCopy" title="Скопировать код">Скопировать</button><span class="small">друзья вводят его здесь же: «Код» → «Войти»</span><span class="small">${v.status === 'fight' ? 'идёт бой' : (v.status === 'end' ? 'бой окончен' : 'ждём игроков')}</span>${v.err ? `<span class="err">${esc(v.err)}</span>` : ''}</div>`;
   h += `<table class="small" style="width:100%"><tr><th style="text-align:left">Кто</th><th>Команда</th><th>Готов</th><th></th></tr>` + v.members.map(m => `<tr><td><span class="chip" style="background:${teamCol(m.team)}">${m.team + 1}</span> ${esc(m.name)}${m.me ? ' (вы)' : ''}${m.bot != null ? ` · бот, бюджет ${m.bot}` : ''}</td><td>${teamSel(m)}</td><td style="text-align:center">${m.ready ? '✔' : '—'}</td><td>${host && !m.me ? `<button data-rmkick="${m.i}" class="danger">✕</button>` : ''}</td></tr>`).join('') + `</table>`;
   h += `<div class="row" style="margin-top:10px"><button id="rmMine" class="primary">Взять моего персонажа («${esc(S.name || '')}»)</button>${mine && mine.ready ? '<span class="small">персонаж выбран ✔</span>' : '<span class="small">персонаж не выбран</span>'}</div>`;
   if (host) h += `<div class="row" style="margin-top:10px"><b>Хозяин:</b> бот — бюджет <input type="number" id="rmBotB" value="${(lastPrice && lastPrice.ok && S.budget) || 500}" style="width:80px"> в команду <input type="number" id="rmBotT" value="2" min="1" max="64" style="width:50px"><button id="rmBot">+ бот</button>
@@ -87,6 +87,7 @@ function roomLobby(v){
   if (ROOM.lobbyHtml !== h){   // перерисовать, только если что-то изменилось (иначе стирается ввод)
     const fo = document.activeElement && document.activeElement.id, val = fo && $(fo) ? $(fo).value : null;
     ROOM.lobbyHtml = h; $('rmBox').innerHTML = h;
+    if ($('rmCopy')) $('rmCopy').onclick = () => (navigator.clipboard ? navigator.clipboard.writeText(v.code) : Promise.reject()).then(() => toast('Код скопирован: ' + v.code), () => toast('Код: ' + v.code));
     if (fo && $(fo) && val != null){ $(fo).value = val; $(fo).focus(); }
   }
   $('rmJoin').style.display = 'none';
