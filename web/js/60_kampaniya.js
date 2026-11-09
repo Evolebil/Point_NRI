@@ -1,9 +1,11 @@
 // ====================================================================================================================
-// Кампания (исследование и социалка, ТЗ docs/TZ_issledovanie_socialka.md): панель мастера и экран игрока.
+// Кампания (исследование и социалка; ТЗ docs/TZ_kampaniya_v2.md §6): экран входа и вкладки внутри кампании.
 // Вкладку и её раздел создаёт этот файл (play.html не меняется). Правила — build/kampaniya, журнал — web/kampaniya.py.
-// Мастер видит всё и решает по каждому черновику: принять, перебросить, править итог, отменить. Игрок предлагает.
+// Кампания = комната с кодом (Р25): мастер создаёт и даёт код или ссылку (/?k=КОД), игроки входят. Мастер решает по каждому
+// черновику: принять, перебросить, править итог, отменить; игрок предлагает.
 // ====================================================================================================================
-const KMP = {id: '', v: null, timer: 0, speaker: '', region: null, mapBase: null, draft: [], mode: ''};   // draft — маршрут, который прокладывают щелчками; mode — 'route' | 'pos'   // speaker — герой, который говорит в разговоре
+// sub — вкладка внутри кампании; draft — маршрут, который прокладывают щелчками; mode — 'route' | 'pos'; speaker — кто говорит
+const KMP = {id: '', v: null, timer: 0, sub: 'map', speaker: '', region: null, mapBase: null, draft: [], mode: '', justCreated: false};
 const KMP_TERR = ['Пашни и сёла', 'Лес', 'Холмы и плато', 'Горы', 'Болото', 'Река и переправа', 'Город'];
 const KMP_ROLES = ['без занятия', 'проводник', 'дозорный', 'добытчик', 'картограф', 'следопыт', 'помощь'];
 const KMP_TRAV = ['пеший', 'всадник', 'гонец', 'армия', 'обоз'];
@@ -11,8 +13,21 @@ const KMP_LIFE = ['нищий', 'жалкий', 'бедный', 'скромны�
 const kmpMoney = cp => { cp = Math.round(+cp || 0); if (!cp) return '0 мм'; const s = cp < 0 ? '−' : ''; cp = Math.abs(cp);
   return s + [[Math.floor(cp / 100), 'зм'], [Math.floor(cp / 10) % 10, 'см'], [cp % 10, 'мм']].filter(x => x[0]).map(x => x[0] + ' ' + x[1]).join(' '); };
 const kmpOpt = (arr, sel) => arr.map(x => `<option${x === sel ? ' selected' : ''}>${esc(x)}</option>`).join('');
-const kmpName = () => (typeof playerName === 'function' && playerName(false)) || $('rmName').value || S.name || '';
+const kmpName = () => playerName(false);
 const kmpChecks = () => (typeof CAT !== 'undefined' && CAT && CAT.skills ? CAT.skills.map(k => k.name) : []).concat(STAT_N);
+// подсказки к терминам (КР-07): значок «?» с одной фразой
+const KMP_HELP = {
+  'зерно': 'Число, от которого зависят все случайности кампании: то же зерно и те же решения — те же броски.',
+  'СЛ': 'Сложность проверки: к20 + модификатор должно быть не меньше СЛ.',
+  'пассивная Внимательность': '10 + модификатор Внимательности: замечает ли герой засаду, не бросая кубик.',
+  'истощение': '1 — помеха на проверки, 2 — скорость вдвое, 3 — помеха на атаки и спасброски, 4 — максимум ХП вдвое, 5 — скорость 0, 6 — смерть.',
+  'кости хитов': 'На коротком отдыхе герой тратит их: каждая лечит к8 + ТЕЛ. Долгий отдых возвращает половину.',
+  'темп': 'Медленный ×0,75 (можно идти скрытно), обычный ×1, быстрый ×1,25 (−5 к пассивной Внимательности, нельзя добывать еду).',
+  'отношение': 'Дружелюбный, безразличный, враждебный; внутри ступени — сдвиг от −2 до +2 (поправка к проверкам).',
+  'роли': 'Проводник ведёт (навигация), дозорный замечает засады, добытчик ищет еду, картограф +2 проводнику, помощь — преимущество.',
+  'черновик': 'Движок бросил кости и посчитал, но ещё ничего не изменил: мастер принимает, перебрасывает, правит или отменяет.',
+};
+const kq = t => `<span title="${esc(KMP_HELP[t] || t)}" style="cursor:help;border:1px solid currentColor;border-radius:50%;padding:0 5px;font-size:11px;opacity:.7;margin-left:3px">?</span>`;
 
 // вкладка: кнопка и раздел; showTab (00_common.js) знает вкладки 1–6 — седьмую включаем сами
 (function kmpMount(){
@@ -21,38 +36,61 @@ const kmpChecks = () => (typeof CAT !== 'undefined' && CAT && CAT.skills ? CAT.s
   $('tab6').after(b);
   const s = document.createElement('section');
   s.className = 'scene'; s.id = 's7';
-  s.innerHTML = `<div class="card" style="max-width:1100px;margin:0 auto"><h3>Кампания</h3>
-    <div class="hint">Исследование и социалка. Мастер — тот, кто создал кампанию: он ведёт путь, встречи, разговоры и сделки; движок
-    бросает кости и считает, мастер принимает, перебрасывает или правит. Игроки добавляют своего героя и предлагают проверки и сделки.</div>
-    <div class="row"><span class="small">Имя: <b id="kmpWho"></b> (вкладка «Комната»)</span>
-      <select id="kmpSel"></select><button id="kmpOpen">Открыть</button>
-      <label>Новая: <input id="kmpTitle" placeholder="название" style="width:170px"></label>
-      <label>зерно <input id="kmpSeed" type="number" value="1" style="width:80px"></label><button class="primary" id="kmpNew">Создать</button></div>
-    <div id="kmpBox"></div></div>`;
+  s.innerHTML = `<div class="card" style="max-width:1100px;margin:0 auto"><div id="kmpHome"></div><div id="kmpBox"></div></div>`;
   $('s6').after(s);
   const orig = showTab;
   showTab = function(n){ orig(n <= 6 ? n : 0); $('s7').classList.toggle('on', n === 7); $('tab7').setAttribute('aria-selected', n === 7);
-    if (n === 7) kmpList(); };
+    if (n === 7) KMP.id ? kmpCall({cmd: 'kmp_open'}) : kmpHome(); };
   b.onclick = () => showTab(7);
-  $('kmpOpen').onclick = () => { KMP.id = $('kmpSel').value; kmpCall({cmd: 'kmp_open'}); };
-  $('kmpNew').onclick = async () => { const v = await kmpCall({cmd: 'kmp_create', title: $('kmpTitle').value || 'Кампания', seed: +$('kmpSeed').value || 1}); if (v.type === 'kmp') kmpList(); };
+  // ссылка с кодом кампании: /?k=КОД — сразу в неё
+  const k = new URLSearchParams(location.search).get('k');
+  if (k) setTimeout(() => { KMP.id = k.toUpperCase(); showTab(7); }, 300);
 })();
 
-async function kmpList(){
-  $('kmpWho').textContent = kmpName() || '— введите имя во вкладке «Комната»';
-  const v = await api({cmd: 'kmp_list', name: kmpName()});
-  if (v.type !== 'kmp_list') return;
-  $('kmpSel').innerHTML = v.list.map(c => `<option value="${esc(c.id)}"${c.id === KMP.id ? ' selected' : ''}>${esc(c.title)}${c.master ? ' (мастер)' : ''}</option>`).join('') || '<option value="">нет кампаний</option>';
+// ---- экран входа: мои кампании, новая, по коду ----
+async function kmpHome(){
+  KMP.id = ''; KMP.v = null; clearTimeout(KMP.timer);
+  $('kmpBox').innerHTML = '';
+  const who = kmpName();
+  let h = `<h3>Кампания</h3><div class="hint">Поход с мастером: путь по карте, встречи, разговоры с NPC, торговля, отдых. Мастер создаёт
+    кампанию и даёт игрокам код; движок бросает кости, мастер решает. (Бой на арене против бота или друзей — вкладки «Соперник» и «Комната».)</div>`;
+  if (!who){ $('kmpHome').innerHTML = h + `<div class="card" style="margin-top:10px">Сначала введите своё имя в строке над вкладками — под ним вы будете мастером или игроком.</div>`; return; }
+  const v = await api({cmd: 'kmp_list', name: who});
+  const list = v.type === 'kmp_list' ? v.list : [];
+  const ago = t => { const m = Math.round((Date.now() / 1000 - t) / 60); return m < 1 ? 'только что' : m < 60 ? m + ' мин назад' : m < 1440 ? Math.round(m / 60) + ' ч назад' : Math.round(m / 1440) + ' дн. назад'; };
+  h += `<div class="sec-h">Мои кампании</div>` + (list.length ? list.map(c => `<div class="card" style="margin:6px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px"><b>${esc(c.title)}</b> <span class="small">· код <b class="tnum">${esc(c.id)}</b></span><br>
+      <span class="small">${c.master ? 'вы мастер' : 'мастер: ' + esc(c.masterName)} · героев ${c.heroes} · игроков ${c.players} · изменена ${ago(c.t)}</span></div>
+      <button class="primary" data-open="${esc(c.id)}">Открыть</button></div>`).join('')
+    : `<div class="hint">Пока нет. Создайте кампанию ниже (вы станете мастером) или войдите по коду, который дал мастер.</div>`);
+  h += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px">
+    <div class="card" style="flex:1;min-width:260px"><h3>Новая кампания</h3><div class="hint">Вы будете мастером. После создания появится код для игроков.</div>
+      <div class="row"><label>Название <input id="kmpTitle" placeholder="например, Акт I — Каркассон" style="width:220px"></label>
+      <button class="primary" id="kmpNew">Создать</button></div></div>
+    <div class="card" style="flex:1;min-width:260px"><h3>Войти по коду</h3><div class="hint">Код из пяти знаков даёт мастер.</div>
+      <div class="row"><label>Код <input id="kmpCode" maxlength="5" style="width:90px;text-transform:uppercase"></label><button class="primary" id="kmpJoin">Войти</button></div></div></div>`;
+  $('kmpHome').innerHTML = h;
+  $('kmpHome').querySelectorAll('button[data-open]').forEach(b => b.onclick = () => { KMP.id = b.dataset.open; kmpCall({cmd: 'kmp_open'}); });
+  $('kmpNew').onclick = async () => { KMP.justCreated = true; const r = await kmpCall({cmd: 'kmp_create', title: $('kmpTitle').value.trim() || 'Кампания'}); if (r.type !== 'kmp') KMP.justCreated = false; };
+  const join = () => { const c = $('kmpCode').value.trim().toUpperCase(); if (c.length !== 5){ toast('код — пять знаков'); return; } KMP.id = c; kmpCall({cmd: 'kmp_open'}); };
+  $('kmpJoin').onclick = join; $('kmpCode').onkeydown = e => { if (e.key === 'Enter') join(); };
 }
+
 async function kmpCall(o){
   const v = await api(Object.assign({id: KMP.id, name: kmpName(), hero: KMP.speaker}, o));
-  if (v.type === 'error'){ toast(v.err); return v; }
+  if (v.type === 'error'){ toast(v.err); if (!KMP.v) KMP.id = ''; return v; }
   if (v.type === 'kmp' && !KMP.region && !KMP.noRegion){ const r = await api({cmd: 'kmp_region', id: v.id, name: kmpName()}); if (r.type === 'kmp_region') KMP.region = r.region; else KMP.noRegion = true; }
-  if (v.type === 'kmp'){ KMP.id = v.id; KMP.v = v; kmpRender(); clearTimeout(KMP.timer); KMP.timer = setTimeout(kmpPoll, 4000); }
+  if (v.type === 'kmp'){
+    const before = KMP.v ? KMP.v.drafts.length : 0;
+    KMP.id = v.id; KMP.v = v;
+    if (v.master && v.drafts.length > before && ['kmp_propose', 'kmp_say', 'kmp_reroll'].includes(o.cmd)) KMP.sub = 'dec';   // свой черновик — сразу к решению
+    if (v.master && KMP.sub === 'dec' && !v.drafts.length && o.cmd === 'kmp_accept') KMP.sub = KMP.back || 'map';
+    kmpRender(); clearTimeout(KMP.timer); KMP.timer = setTimeout(kmpPoll, 4000);
+  }
   return v;
 }
-async function kmpPoll(){   // свежий журнал и черновики игроков; пока вкладка открыта и мастер не правит форму
-  if (!KMP.id || !$('s7').classList.contains('on') || document.activeElement && $('kmpBox').contains(document.activeElement)){
+async function kmpPoll(){   // свежий журнал и черновики игроков; пока вкладка открыта и никто не правит поле
+  if (!KMP.id || !$('s7').classList.contains('on') || document.activeElement && $('kmpBox').contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){
     KMP.timer = setTimeout(kmpPoll, 4000); return; }
   const v = await api({cmd: 'kmp_open', id: KMP.id, name: kmpName(), hero: KMP.speaker});
   if (v.type === 'kmp' && JSON.stringify(v) !== JSON.stringify(KMP.v)){ KMP.v = v; kmpRender(); }
@@ -89,120 +127,145 @@ function kmpEvText(e){
   }
 }
 
+// ---- внутри кампании: шапка, вкладки Карта / Отряд / Разговор / Журнал / Решения ----
 function kmpRender(){
   const v = KMP.v, s = v.state, M = v.master;
   const heroes = s.heroes.map(h => h.name);
-  let h = `<div class="sec-h">${esc(v.title)} — ${M ? 'вы мастер' : 'вы игрок'}</div>
-    <div style="margin:4px 0"><b>День ${s.day}</b>, ${s.hour}:00 ·${esc(s.place || 'место не задано')} · пройдено ${s.km} км · ${esc(s.traveler)}, темп ${esc(s.pace)}
-    ${s.returnTrip ? '· <b>обратный путь</b>' : ''} · кошелёк отряда ${kmpMoney(s.purse)} · еда ${s.food} фунтов, вода ${s.water} галлонов · жизнь: ${esc(s.lifestyle)}</div>`;
-  if (v.errors && v.errors.length) h += `<div class="err small">Obsidian: ${v.errors.map(esc).join('<br>')}</div>`;
-  h += `<table class="small" style="width:100%;border-collapse:collapse"><tr><th align="left">Герой</th><th>Ур.</th><th>ХП</th><th>Кости хитов</th><th>Истощение</th><th>Голод, дней</th><th>Пасс. Внимат.</th><th>Кошелёк</th><th align="left">Вещи</th></tr>` +
-    s.heroes.map(x => `<tr${x.dead ? ' style="opacity:.5"' : ''}><td>${esc(x.name)}${x.dead ? ' ☠' : ''}</td><td align="center">${x.level}</td><td align="center">${x.hp}/${x.hpMax}</td><td align="center">${x.hd}/${x.hdMax}</td>
-      <td align="center">${x.exh}</td><td align="center">${x.daysNoFood}</td><td align="center">${x.passivePerception}</td><td align="center">${kmpMoney(x.purse)}</td>
-      <td>${Object.entries(x.inv).map(([k, n]) => esc(k) + ' ×' + n).join(', ')}</td></tr>`).join('') + '</table>';
-  h += `<div class="small" style="margin:6px 0">Груз отряда: ${Object.entries(s.inv).map(([k, n]) => esc(k) + ' ×' + n).join(', ') || '—'} · Сведения: ${s.facts.map(esc).join('; ') || '—'}
-    · NPC: ${Object.entries(s.npcs).map(([k, n]) => esc(k) + ' — ' + n.attitude + (n.shift ? ` (${n.shift > 0 ? '+' : ''}${n.shift})` : '')).join('; ') || '—'}
-    · Задания: ${Object.entries(s.quests).map(([k, q]) => esc(k) + ': за новые ' + kmpMoney(q.tier)).join('; ') || '—'}</div>`;
-
-  // карта региона (Б1, Б2): отряд, маршрут, прокладка щелчками
-  if (KMP.region){
-    h += `<div class="sec-h">Карта: ${esc(KMP.region.name)}</div>
-      <div class="row small"><button id="kmRoute"${KMP.mode === 'route' ? ' class="primary"' : ''}>✏ Прокладывать путь</button>
-      <button id="kmClear">Очистить</button><button id="kmSend"${KMP.draft.length ? '' : ' disabled'}>${M ? 'Задать маршрут' : 'Предложить маршрут'} (точек: ${KMP.draft.length})</button>
-      <label>город <input id="kmTown" list="kmTowns" style="width:140px"></label><datalist id="kmTowns">${KMP.region.towns.map(t => `<option value="${esc(t.name)}">`).join('')}</datalist>
-      <button id="kmTownAdd">+ в маршрут</button>${M ? `<button id="kmTownPos">Отряд — в город</button><button id="kmPos"${KMP.mode === 'pos' ? ' class="primary"' : ''}>📍 Поставить отряд щелчком</button>` : ''}
-      <span id="kmHover" class="hint"></span></div>
-      <canvas id="kMap" style="width:100%;max-width:820px;image-rendering:pixelated;cursor:crosshair;border-radius:8px;display:block"></canvas>
-      <div class="small">${KMP.region.terrains.slice(0, 7).map((t, i) => `<span style="display:inline-block;width:10px;height:10px;background:${KM_COL[i]};margin:0 3px 0 8px"></span>${esc(t)}`).join('')}
-      <span style="margin-left:8px">коричневое — римская дорога (×1), синее — река</span></div>`;
-  }
-
-  // разговор (Д3): реплики NPC, варианты (недоступные — серым), проверка у варианта, лавка
   if (!KMP.speaker || !heroes.includes(KMP.speaker)) KMP.speaker = heroes[0] || '';
-  const T = v.talk;
-  if (T){
-    h += `<div class="sec-h">Разговор: ${esc(T.npc)} — ${esc(T.attitude)}${T.langs.length ? ' · говорит: ' + T.langs.map(esc).join(', ') : ''}</div>
-      <div class="card" style="margin:6px 0">${T.lines.map(l => `<div>${esc(l)}</div>`).join('') || '<div class="hint">(узел без реплик)</div>'}
-      <div class="row"><label>Говорит <select id="kTalkHero">${kmpOpt(heroes, KMP.speaker)}</select></label>${M ? '<button id="kmpTalkEnd">Закончить разговор</button>' : ''}</div>
-      ${T.opts.map(o => `<div style="margin:3px 0"><button data-say="${o.i}"${o.ok ? '' : ' disabled title="' + esc(o.cond.join('; ')) + '"'}>${esc(o.text)}</button>
-        ${o.check ? `<span class="small"> 🎲 ${esc(o.check)}</span>` : ''}${o.ok ? '' : `<span class="small" style="opacity:.6"> нужно: ${esc(o.cond.join('; '))}</span>`}</div>`).join('')}
-      ${T.opts.length ? '' : '<div class="hint">Вариантов нет — мастер ведёт сам или заканчивает разговор.</div>'}
-      ${T.shop && T.shop.length ? '<div class="sec-h">Лавка</div>' + T.shop.map((x, i) => `<div class="row small">${esc(x['вещь'])} — ${esc(x['цена'] || '')}
-        <button data-shop="${i}">Купить</button></div>`).join('') : ''}</div>`;
-  }
+  $('kmpHome').innerHTML = '';
+  const link = location.origin + location.pathname + '?k=' + v.id;
+  let h = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button id="kmpBack" title="К списку кампаний">←</button>
+    <h3 style="margin:0">${esc(v.title)}</h3><span class="small">${M ? 'вы мастер' : 'мастер: ' + esc(v.masterName)}${v.players.length ? ' · игроки: ' + v.players.map(esc).join(', ') : ''}</span>
+    <span style="margin-left:auto" class="small">код <b class="tnum" style="font-size:20px;letter-spacing:2px">${esc(v.id)}</b></span>
+    <button id="kmpCopy" title="${esc(link)}">Скопировать ссылку для игроков</button></div>`;
+  if (KMP.justCreated){ KMP.justCreated = false;
+    h += `<div class="card" style="margin:8px 0;background:rgba(123,216,143,.12)">Кампания создана. Дайте игрокам код <b>${esc(v.id)}</b> или ссылку — они войдут
+      и добавят своих героев (вкладка «Отряд»). Дальше: поставьте отряд на карту и ведите путь (вкладка «Карта»).</div>`; }
+  h += `<div style="margin:6px 0" class="small"><b>День ${s.day}</b>, ${s.hour}:00 · ${esc(s.place || 'место не задано')} · пройдено ${s.km} км · еда ${s.food} фунтов, вода ${s.water} галлонов · кошелёк отряда ${kmpMoney(s.purse)}${s.returnTrip ? ' · <b>обратный путь</b>' : ''}</div>`;
+  const tabs = [['map', 'Карта'], ['party', 'Отряд'], ['talk', 'Разговор' + (v.talk ? ' ●' : '')], ['log', 'Журнал']].concat(M ? [['dec', 'Решения' + (v.drafts.length ? ` (${v.drafts.length})` : '')]] : []);
+  h += `<div class="tabs" style="justify-content:flex-start;margin:8px 0">${tabs.map(([k, n]) => `<button class="tab" data-sub="${k}" aria-selected="${KMP.sub === k}">${n}</button>`).join('')}</div>`;
+  if (M && v.drafts.length && KMP.sub !== 'dec')
+    h += `<div class="card small" style="margin:6px 0;background:rgba(232,180,60,.15)">Ждут решения: ${v.drafts.length} ${kq('черновик')} <button data-sub="dec">Открыть</button></div>`;
+  if (!M && v.drafts.length)
+    h += `<div class="card small" style="margin:6px 0">Ваши запросы ждут мастера: ${v.drafts.map(d => kmpEvTitle(d.ev)).map(esc).join(', ')}</div>`;
+  if (M && v.errors && v.errors.length) h += `<div class="err small">Obsidian: ${v.errors.map(esc).join('<br>')}</div>`;
+  h += {map: kmpTabMap, party: kmpTabParty, talk: kmpTabTalk, log: kmpTabLog, dec: kmpTabDec}[KMP.sub](v, s, M, heroes);
+  $('kmpBox').innerHTML = h;
+  kmpBind();
+}
+const kmpEvTitle = e => ({day: 'день пути', rest: 'отдых', buy: 'покупка', sell: 'продажа', check: 'проверка', contest: 'состязание', group: 'групповая проверка',
+  hero: 'герой ' + (e.name || ''), route: 'маршрут', dialog: 'реплика', turnin: 'сдача сведений', note: 'заметка'}[e.type] || e.type);
 
-  // черновики
-  if (v.drafts.length){
-    h += `<div class="sec-h">${M ? 'Ждут решения' : 'Ваши запросы ждут мастера'}</div>`;
-    for (const d of v.drafts){
-      const e = d.ev;
-      h += `<div class="card" style="margin:6px 0"><div><b>${esc(e.type)}</b> · от ${esc(d.who)}${e.attempt ? ` · переброс ${e.attempt}` : ''}${e.hidden ? ' · скрыто' : ''}</div>
-        ${(e.checks || []).map(kmpCheckLine).join('')}<div>${kmpEvText(e)}</div>` +
-        (M ? `<div class="row"><button class="primary" data-k="acc" data-d="${d.id}">Принять</button><button data-k="rr" data-d="${d.id}">Перебросить</button>
-          <button data-k="ed" data-d="${d.id}">Править итог</button><button data-k="cn" data-d="${d.id}">Отменить</button></div>
-          <textarea id="kmpEd${d.id}" style="display:none;width:100%;height:110px;font-family:monospace">${esc(JSON.stringify(e.res || {}, null, 1))}</textarea>` : '') + '</div>';
-    }
-  }
-
-  if (M && v.npcCards){
-    h += `<div class="sec-h">NPC из Obsidian</div><div class="row"><select id="kNpcSel">${v.npcCards.map(c => `<option value="${esc(c.name)}"${c.dialog ? '' : ' disabled'}>${esc(c.name)} — ${esc(c.attitude)}${c.dialog ? '' : ' (нет дерева)'}</option>`).join('') || '<option value="">нет карточек с «тип: npc»</option>'}</select>
-      <button id="kmpTalk">💬 Начать разговор</button><span class="small">${v.npcCards.length} карточек</span></div>`;
-  }
-
-  // игрок: свой герой и запросы
-  h += `<div class="sec-h">Запросы</div><div class="row">
-    <button id="kmpMine">➕ Мой герой (вкладка «Персонаж»)</button>
-    <label>Герой <select id="kChHero">${kmpOpt(heroes)}</select></label><label>проверка <select id="kChWhat">${kmpOpt(kmpChecks())}</select></label>
-    ${M ? `<label>СЛ <input id="kChDC" type="number" value="15" style="width:60px"></label><label><input type="checkbox" id="kChAdv"> преим.</label><label><input type="checkbox" id="kChDis"> помеха</label>
-      <label><input type="checkbox" id="kChHid"> скрыто</label>` : ''}<button id="kmpCheck">🎲 Проверка</button>
-    ${M ? '<button id="kmpGroup">Групповая</button>' : ''}</div>
-    <div class="row"><label>Сделка: <select id="kTrK"><option value="buy">купить</option><option value="sell">продать</option></select></label>
-    <label>кто <select id="kTrWho">${kmpOpt(['отряд'].concat(heroes))}</select></label><label>вещь <input id="kTrItem" style="width:130px"></label>
-    <label>шт. <input id="kTrQty" type="number" value="1" style="width:55px"></label><label>цена за шт. <input id="kTrPrice" placeholder="5 см" style="width:80px"></label>
-    <label>торговец <input id="kTrNpc" style="width:110px"></label><label><input type="checkbox" id="kTrH"> торг:</label>
-    <select id="kTrHero">${kmpOpt(heroes)}</select><select id="kTrSk">${kmpOpt(['Убеждение', 'Обман', 'Запугивание'])}</select>
-    <label>Проницательность торговца <input id="kTrVs" type="number" value="0" style="width:55px"></label><button id="kmpTrade">Сделка</button></div>`;
-
+function kmpTabMap(v, s, M, heroes){
+  if (!KMP.region) return `<div class="hint">Карты региона нет. ${M ? 'Укажите её в config/kampaniya.json («регион»).' : ''}</div>`;
+  let h = '';
   if (M){
-    h += `<div class="sec-h">Путь</div><div class="row">
-      <label>Местность дня <select id="kDayT">${s.pos && s.route.length && KMP.region ? '<option value="">по карте и маршруту</option>' : ''}${kmpOpt(KMP_TERR)}</select></label><label><input type="checkbox" id="kDayRoad"> по дороге</label>
+    h += `<div class="card" style="margin:6px 0"><div class="row"><button class="primary" id="kmpDay" style="font-size:16px">☀ Следующий день</button>
+      <span class="small">${s.pos && s.route.length ? 'отряд идёт по маршруту' : s.pos ? 'маршрута нет — проложите его на карте или задайте местность дня ниже' : 'отряд не на карте — «Отряд в город» или «Поставить щелчком»'}</span>
+      <button id="kmpShort">Короткий отдых</button><button id="kmpLong">Долгий отдых</button></div>
+      <details><summary class="small">Настройки дня: местность, часы, темп ${kq('темп')}, роли в пути ${kq('роли')}</summary>
+      <div class="row"><label>Местность дня <select id="kDayT">${s.pos && s.route.length ? '<option value="">по карте и маршруту</option>' : ''}${kmpOpt(KMP_TERR)}</select></label><label><input type="checkbox" id="kDayRoad"> по дороге</label>
       <label>часов <input id="kDayH" type="number" value="8" min="0" max="24" style="width:55px"></label>
       <label>темп <select id="kDayP">${kmpOpt(['медленный', 'обычный', 'быстрый'], s.pace)}</select></label><label><input type="checkbox" id="kDayHot"> жара</label></div>
-      <div class="row">${s.heroes.filter(x => !x.dead).map((x, i) => `<label>${esc(x.name)} <select data-role="${esc(x.name)}">${kmpOpt(KMP_ROLES)}</select>
-        <select data-help="${esc(x.name)}" title="кому помогает">${kmpOpt([''].concat(heroes.filter(n => n !== x.name)))}</select></label>`).join('')}
-      <button class="primary" id="kmpDay">☀ Следующий день</button></div>
-      <div class="row"><button id="kmpShort">Короткий отдых</button>${s.heroes.map(x => `<label>${esc(x.name)}: костей <input data-hd="${esc(x.name)}" type="number" min="0" max="${x.hd}" value="0" style="width:45px"></label>`).join('')}
-      <button id="kmpLong">Долгий отдых</button></div>
-      <div class="sec-h">Сведения и задания</div><div class="row">
+      <div class="row">${s.heroes.filter(x => !x.dead).map(x => `<label>${esc(x.name)} <select data-role="${esc(x.name)}">${kmpOpt(KMP_ROLES)}</select>
+        <select data-help="${esc(x.name)}" title="кому помогает">${kmpOpt([''].concat(heroes.filter(n => n !== x.name)))}</select></label>`).join('') || '<span class="hint">героев нет</span>'}</div>
+      <div class="row small">Короткий отдых — кости хитов ${kq('кости хитов')}: ${s.heroes.map(x => `<label>${esc(x.name)} <input data-hd="${esc(x.name)}" type="number" min="0" max="${x.hd}" value="0" style="width:45px"></label>`).join('')}</div></details></div>`;
+  }
+  h += `<div class="row small"><button id="kmRoute"${KMP.mode === 'route' ? ' class="primary"' : ''}>✏ Прокладывать путь щелчками</button>
+      <label>или город <input id="kmTown" list="kmTowns" style="width:140px"></label><datalist id="kmTowns">${KMP.region.towns.map(t => `<option value="${esc(t.name)}">`).join('')}</datalist>
+      <button id="kmTownAdd">+ в маршрут</button><button id="kmClear"${KMP.draft.length ? '' : ' disabled'}>Очистить</button>
+      <button id="kmSend" class="primary"${KMP.draft.length ? '' : ' disabled'}>${M ? 'Задать маршрут' : 'Предложить маршрут мастеру'} (точек: ${KMP.draft.length})</button>
+      ${M ? `<button id="kmTownPos">Отряд — в город</button><button id="kmPos"${KMP.mode === 'pos' ? ' class="primary"' : ''}>📍 Поставить отряд щелчком</button>` : ''}</div>
+    <div class="small" id="kmHover" style="min-height:1.3em">Наведите на карту: местность клетки. Клетка карты ≈ 3,9 × 3,9 км.</div>
+    <canvas id="kMap" style="width:100%;max-width:820px;image-rendering:pixelated;cursor:crosshair;border-radius:8px;display:block"></canvas>
+    <div class="small">${KMP.region.terrains.slice(0, 7).map((t, i) => `<span style="display:inline-block;width:10px;height:10px;background:${KM_COL[i]};margin:0 3px 0 8px"></span>${esc(t)}`).join('')}
+    <span style="margin-left:8px">коричневое — римская дорога (×1), синее — река; красная точка — отряд, жёлтое — маршрут</span></div>`;
+  return h;
+}
+
+function kmpTabParty(v, s, M, heroes){
+  let h = '';
+  if (!s.heroes.length) h += `<div class="card" style="margin:6px 0">Героев пока нет. Соберите героя во вкладке «Персонаж» и нажмите «➕ Мой герой» — ${M ? 'черновик придёт вам в «Решения»' : 'мастер примет его в отряд'}.</div>`;
+  else h += `<table class="small" style="width:100%;border-collapse:collapse"><tr><th align="left">Герой</th><th>Ур.</th><th>ХП</th><th>Кости хитов ${kq('кости хитов')}</th><th>Истощение ${kq('истощение')}</th><th>Голод, дней</th><th>Пасс. Внимат. ${kq('пассивная Внимательность')}</th><th>Кошелёк</th><th align="left">Вещи</th></tr>` +
+    s.heroes.map(x => `<tr${x.dead ? ' style="opacity:.5"' : ''}><td>${esc(x.name)}${x.dead ? ' ☠' : ''}</td><td align="center">${x.level}</td><td align="center">${x.hp}/${x.hpMax}</td><td align="center">${x.hd}/${x.hdMax}</td>
+      <td align="center">${x.exh}</td><td align="center">${x.daysNoFood}</td><td align="center">${x.passivePerception}</td><td align="center">${kmpMoney(x.purse)}</td>
+      <td>${Object.entries(x.inv).map(([k, n]) => esc(k) + ' ×' + n).join(', ') || '—'}</td></tr>`).join('') + '</table>';
+  h += `<div class="small" style="margin:6px 0">Путник: ${esc(s.traveler)} · жизнь: ${esc(s.lifestyle)} · груз отряда: ${Object.entries(s.inv).map(([k, n]) => esc(k) + ' ×' + n).join(', ') || '—'}<br>
+    Сведения: ${s.facts.map(esc).join('; ') || '—'}<br>NPC ${kq('отношение')}: ${Object.entries(s.npcs).map(([k, n]) => esc(k) + ' — ' + n.attitude + (n.shift ? ` (${n.shift > 0 ? '+' : ''}${n.shift})` : '')).join('; ') || '—'}
+    · Задания: ${Object.entries(s.quests).map(([k, q]) => esc(k) + ': за новые сведения ' + kmpMoney(q.tier)).join('; ') || '—'}</div>`;
+  h += `<div class="sec-h">Действия</div><div class="row"><button id="kmpMine">➕ Мой герой (из вкладки «Персонаж»)</button></div>`;
+  if (heroes.length) h += `<div class="row"><label>Проверка: герой <select id="kChHero">${kmpOpt(heroes)}</select></label><label>навык <select id="kChWhat">${kmpOpt(kmpChecks())}</select></label>
+    ${M ? `<label>СЛ ${kq('СЛ')} <input id="kChDC" type="number" value="15" style="width:60px"></label><label><input type="checkbox" id="kChAdv"> преимущество</label><label><input type="checkbox" id="kChDis"> помеха</label>
+      <label><input type="checkbox" id="kChHid"> скрыто от игроков</label>` : ''}<button id="kmpCheck">🎲 Проверка</button>${M ? '<button id="kmpGroup">Групповая (весь отряд)</button>' : ''}</div>
+    <div class="row"><select id="kTrK"><option value="buy">Купить</option><option value="sell">Продать</option></select>
+    <label>кто <select id="kTrWho">${kmpOpt(['отряд'].concat(heroes))}</select></label><label>вещь <input id="kTrItem" style="width:130px"></label>
+    <label>шт. <input id="kTrQty" type="number" value="1" style="width:55px"></label><label>цена за шт. <input id="kTrPrice" placeholder="5 см" style="width:80px"></label>
+    <label>у кого <input id="kTrNpc" placeholder="торговец" style="width:110px"></label>
+    <details style="display:inline-block"><summary class="small">торговаться</summary><label><input type="checkbox" id="kTrH"> торг:</label>
+    <select id="kTrHero">${kmpOpt(heroes)}</select><select id="kTrSk">${kmpOpt(['Убеждение', 'Обман', 'Запугивание'])}</select>
+    <label>Проницательность торговца <input id="kTrVs" type="number" value="0" style="width:55px"></label></details><button id="kmpTrade">Сделка</button></div>`;
+  if (M) h += `<details style="margin-top:8px"><summary>Сведения и задания</summary><div class="row">
       <label>Факт <input id="kFact" style="width:200px"></label><button id="kmpLearn">Отряд узнал</button>
       <label>Задание <input id="kQ" value="${esc(Object.keys(s.quests)[0] || '')}" style="width:120px"></label>
-      <label>кто сдаёт <input id="kQParty" value="мы" style="width:120px"></label><button id="kmpTurn">Сдать факт</button>
-      <label>новое: за первые <input id="kQBase" value="1000 зм" style="width:80px"></label><label>шаг <input id="kQStep" value="0.9" style="width:50px"></label>
-      <label>подтверждение <input id="kQConf" value="0.5" style="width:50px"></label><button id="kmpQuest">Создать задание</button></div>
-      <div class="sec-h">Мастер напрямую</div><div class="row">
-      <label>кому <select id="kGmWho">${kmpOpt(['отряд'].concat(heroes))}</select></label><label>деньги ± <input id="kGmPurse" placeholder="10 зм" style="width:80px"></label>
+      <label>кто сдаёт <input id="kQParty" value="мы" style="width:120px"></label><button id="kmpTurn">Сдать факт</button></div>
+      <div class="row"><label>Новое задание: за первые сведения <input id="kQBase" value="1000 зм" style="width:80px"></label><label>каждые следующие × <input id="kQStep" value="0.9" style="width:50px"></label>
+      <label>подтверждение × <input id="kQConf" value="0.5" style="width:50px"></label><button id="kmpQuest">Создать задание</button></div></details>
+    <details><summary>Мастер напрямую: деньги, вещи, ХП, время, место</summary><div class="row">
+      <label>кому <select id="kGmWho">${kmpOpt(['отряд'].concat(heroes))}</select></label><label>деньги ± <input id="kGmPurse" placeholder="10 зм или -5 см" style="width:110px"></label>
       <label>вещь <input id="kGmItem" style="width:110px"></label><label>шт. ± <input id="kGmQty" type="number" value="1" style="width:55px"></label>
       <label>ХП = <input id="kGmHp" type="number" style="width:60px"></label><label>истощение = <input id="kGmExh" type="number" min="0" max="6" style="width:50px"></label>
       <label>часы + <input id="kGmHours" type="number" style="width:55px"></label><label>еда ± <input id="kGmFood" type="number" style="width:55px"></label>
       <label>вода ± <input id="kGmWater" type="number" style="width:55px"></label><label>место <input id="kGmPlace" style="width:120px"></label>
-      <label>заметка <input id="kGmText" style="width:200px"></label><button class="primary" id="kmpGm">Сделать</button></div>
-      <div class="row"><label>NPC <input id="kNpc" style="width:110px"></label><select id="kNpcT">${kmpOpt(['', 'дружелюбный', 'безразличный', 'враждебный'])}</select>
+      <label>заметка в журнал <input id="kGmText" style="width:200px"></label><button class="primary" id="kmpGm">Сделать</button></div></details>
+    <details><summary>NPC, фракции, поход</summary><div class="row"><label>NPC <input id="kNpc" style="width:110px"></label><select id="kNpcT">${kmpOpt(['', 'дружелюбный', 'безразличный', 'враждебный'])}</select>
       <label>сдвиг <input id="kNpcD" type="number" value="0" style="width:50px"></label><button id="kmpAtt">Отношение</button>
       <label>Фракция <input id="kRep" style="width:110px"></label><label>± <input id="kRepD" type="number" value="1" style="width:50px"></label><button id="kmpRep">Известность</button></div>
-      <div class="row"><label>Путник <select id="kSetT">${kmpOpt(KMP_TRAV, s.traveler)}</select></label><label>жизнь <select id="kSetL">${kmpOpt(KMP_LIFE, s.lifestyle)}</select></label>
-      <label><input type="checkbox" id="kSetR"${s.returnTrip ? ' checked' : ''}> обратный путь</label><button id="kmpSet">Применить</button>
-      <button id="kmpUndo">↶ Отменить последнее событие</button><button id="kmpMd">Журнал в markdown</button></div>`;
-  }
-  h += `<div class="sec-h">Журнал</div><div class="small" style="max-height:340px;overflow:auto">` +
-    v.journal.slice().reverse().map(e => e.hidden && !e.checks ? `<div>${e.n}. ${esc(e.text)}</div>` :
-      `<div style="margin:3px 0"><b>${e.n}.</b> ${kmpEvText(e)}${e.edit ? ' <i>(правка мастера)</i>' : ''}${(e.checks || []).map(kmpCheckLine).join('')}</div>`).join('') + '</div>';
-  $('kmpBox').innerHTML = h;
-  kmpBind();
+      <div class="row"><label>Путник <select id="kSetT">${kmpOpt(KMP_TRAV, s.traveler)}</select></label><label>уровень жизни <select id="kSetL">${kmpOpt(KMP_LIFE, s.lifestyle)}</select></label>
+      <label><input type="checkbox" id="kSetR"${s.returnTrip ? ' checked' : ''}> обратный путь (порог встреч −4, засады)</label><button id="kmpSet">Применить</button></div></details>`;
+  return h;
+}
+
+function kmpTabTalk(v, s, M, heroes){
+  let h = '';
+  if (M && v.npcCards) h += `<div class="row"><label>NPC из Obsidian <select id="kNpcSel">${v.npcCards.map(c => `<option value="${esc(c.name)}"${c.dialog ? '' : ' disabled'}>${esc(c.name)} — ${esc(c.attitude)}${c.dialog ? '' : ' (нет дерева)'}</option>`).join('') || '<option value="">нет карточек</option>'}</select></label>
+      <button id="kmpTalk">💬 Начать разговор</button>${v.npcCards.length ? '' : '<span class="hint">В хранилище нет заметок с «тип: npc». Примеры — docs/primery-kartochek.</span>'}</div>`;
+  const T = v.talk;
+  if (!T) return h + `<div class="card" style="margin:6px 0">Сейчас никто не разговаривает. ${M ? 'Выберите NPC и начните разговор.' : 'Разговор начинает мастер.'}</div>`;
+  if (!heroes.length) return h + `<div class="hint">В отряде нет героев — говорить некому.</div>`;
+  h += `<div class="card" style="margin:6px 0"><div class="small">${esc(T.npc)} — ${esc(T.attitude)} ${kq('отношение')}${T.langs.length ? ' · говорит: ' + T.langs.map(esc).join(', ') : ''}</div>
+    ${T.lines.map(l => `<div style="margin:4px 0">${esc(l)}</div>`).join('') || '<div class="hint">(реплики нет — мастер говорит своими словами)</div>'}
+    <div class="row"><label>Говорит <select id="kTalkHero">${kmpOpt(heroes, KMP.speaker)}</select></label>${M ? '<button id="kmpTalkEnd">Закончить разговор</button>' : ''}</div>
+    ${T.opts.map(o => `<div style="margin:3px 0"><button data-say="${o.i}"${o.ok ? '' : ' disabled'}>${esc(o.text)}</button>
+      ${o.check ? `<span class="small"> 🎲 ${esc(o.check)}</span>` : ''}${o.ok ? '' : `<span class="small" style="opacity:.6"> нужно: ${esc(o.cond.join('; '))}</span>`}</div>`).join('')}
+    ${T.opts.length ? '' : '<div class="hint">Вариантов нет — мастер ведёт сам или заканчивает разговор.</div>'}
+    ${T.shop && T.shop.length ? '<div class="sec-h">Лавка</div>' + T.shop.map((x, i) => `<div class="row small">${esc(x['вещь'])} — ${esc(x['цена'] || '')}
+      <button data-shop="${i}">Купить</button></div>`).join('') : ''}</div>`;
+  return h;
+}
+
+function kmpTabLog(v, s, M){
+  let h = M ? `<div class="row"><button id="kmpUndo">↶ Отменить последнее событие</button><button id="kmpMd">Скачать журнал (markdown)</button></div>` : '';
+  if (!v.journal.length) return h + '<div class="hint">Журнал пуст.</div>';
+  return h + `<div class="small" style="max-height:520px;overflow:auto">` + v.journal.slice().reverse().map(e => e.hidden && !e.checks ? `<div>${e.n}. ${esc(e.text)}</div>` :
+    `<div style="margin:4px 0"><b>${e.n}.</b> ${kmpEvText(e)}${e.edit ? ' <i>(правка мастера)</i>' : ''}${(e.checks || []).map(kmpCheckLine).join('')}</div>`).join('') + '</div>';
+}
+
+function kmpTabDec(v){
+  if (!v.drafts.length) return '<div class="hint">Решать нечего. Здесь появляются запросы игроков и ваши броски — до того, как попасть в журнал.</div>';
+  return v.drafts.map(d => { const e = d.ev;
+    return `<div class="card" style="margin:6px 0"><div><b>${esc(kmpEvTitle(e))}</b> · от ${esc(d.who)}${e.attempt ? ` · переброс ${e.attempt}` : ''}${e.hidden ? ' · скрыто от игроков' : ''}</div>
+      ${(e.checks || []).map(kmpCheckLine).join('')}<div>${kmpEvText(e)}</div>
+      <div class="row"><button class="primary" data-k="acc" data-d="${d.id}">Принять</button><button data-k="rr" data-d="${d.id}">Перебросить</button>
+      <button data-k="ed" data-d="${d.id}">Править итог</button><button data-k="cn" data-d="${d.id}">Отменить</button></div>
+      <textarea id="kmpEd${d.id}" style="display:none;width:100%;height:110px;font-family:monospace">${esc(JSON.stringify(e.res || {}, null, 1))}</textarea></div>`; }).join('');
 }
 
 function kmpBind(){
-  const val = id => $(id) ? $(id).value : '', on = id => $(id) && $(id).checked;
-  if (KMP.region) kmBind();
+  const val = id => $(id) ? $(id).value : '', on = id => $(id) && $(id).checked, click = (id, f) => { if ($(id)) $(id).onclick = f; };
+  $('kmpBox').querySelectorAll('[data-sub]').forEach(b => b.onclick = () => { if (b.dataset.sub === 'dec' && KMP.sub !== 'dec') KMP.back = KMP.sub; KMP.sub = b.dataset.sub; kmpRender(); });
+  click('kmpBack', kmpHome);
+  click('kmpCopy', () => { const t = $('kmpCopy').title; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Ссылка скопирована: ' + t), () => prompt('Ссылка для игроков:', t)); });
+  if (KMP.sub === 'map' && KMP.region) kmBind();
   $('kmpBox').querySelectorAll('button[data-d]').forEach(b => b.onclick = () => {
     const d = +b.dataset.d, k = b.dataset.k;
     if (k === 'ed'){ const t = $('kmpEd' + d); t.style.display = t.style.display === 'none' ? '' : 'none'; return; }
@@ -212,32 +275,33 @@ function kmpBind(){
     if (k === 'rr') kmpCall({cmd: 'kmp_reroll', draft: d});
     if (k === 'cn') kmpCall({cmd: 'kmp_cancel', draft: d});
   });
-  $('kmpMine').onclick = () => { if (!lastPrice || !lastPrice.ok){ toast('Персонаж не собран: проверьте вкладку «Персонаж»'); return; }
-    kmpPropose({type: 'hero', name: S.name || kmpName(), char: toChar()}); };
-  $('kmpCheck').onclick = () => kmpPropose({type: 'check', hero: val('kChHero'), what: val('kChWhat'), dc: +val('kChDC') || 10, adv: on('kChAdv'), dis: on('kChDis'), hidden: on('kChHid')});
-  $('kmpTrade').onclick = () => { const a = {type: val('kTrK'), who: val('kTrWho'), item: val('kTrItem'), qty: +val('kTrQty') || 1, price: val('kTrPrice'), npc: val('kTrNpc')};
-    if (!a.item){ toast('какая вещь?'); return; }
+  click('kmpMine', () => { if (!lastPrice || !lastPrice.ok){ toast('Персонаж не собран: проверьте вкладку «Персонаж»'); return; }
+    kmpPropose({type: 'hero', name: S.name || kmpName(), char: toChar()}); });
+  click('kmpCheck', () => kmpPropose({type: 'check', hero: val('kChHero'), what: val('kChWhat'), dc: +val('kChDC') || 10, adv: on('kChAdv'), dis: on('kChDis'), hidden: on('kChHid')}));
+  click('kmpTrade', () => { const a = {type: val('kTrK'), who: val('kTrWho'), item: val('kTrItem').trim(), qty: +val('kTrQty') || 1, price: val('kTrPrice'), npc: val('kTrNpc')};
+    if (!a.item){ toast('Какая вещь?'); return; }
+    if (!a.price){ toast('Цена за штуку: например «5 см» или «2 зм»'); return; }
     if (on('kTrH')) a.haggle = {hero: val('kTrHero'), what: val('kTrSk'), vs: a.npc || 'торговец', vsMod: +val('kTrVs') || 0};
-    kmpPropose(a); };
+    kmpPropose(a); });
   if ($('kTalkHero')) $('kTalkHero').onchange = () => { KMP.speaker = val('kTalkHero'); kmpCall({cmd: 'kmp_open'}); };
   $('kmpBox').querySelectorAll('button[data-say]').forEach(b => b.onclick = () => kmpCall({cmd: 'kmp_say', i: +b.dataset.say, hero: KMP.speaker}));
   $('kmpBox').querySelectorAll('button[data-shop]').forEach(b => b.onclick = () => { const x = KMP.v.talk.shop[+b.dataset.shop];
     kmpPropose({type: 'buy', who: 'отряд', item: x['вещь'], qty: 1, price: x['цена'] || '0 мм', npc: KMP.v.talk.npc}); });
   if (!KMP.v.master) return;
-  if ($('kmpTalk')) $('kmpTalk').onclick = () => val('kNpcSel') && kmpCall({cmd: 'kmp_talk', npc: val('kNpcSel')});
-  if ($('kmpTalkEnd')) $('kmpTalkEnd').onclick = () => kmpCall({cmd: 'kmp_talk_end'});
-  $('kmpGroup').onclick = () => kmpPropose({type: 'group', what: val('kChWhat'), dc: +val('kChDC') || 10});
-  $('kmpDay').onclick = () => { const roles = {};
+  click('kmpTalk', () => val('kNpcSel') && kmpCall({cmd: 'kmp_talk', npc: val('kNpcSel')}));
+  click('kmpTalkEnd', () => kmpCall({cmd: 'kmp_talk_end'}));
+  click('kmpGroup', () => kmpPropose({type: 'group', what: val('kChWhat'), dc: +val('kChDC') || 10}));
+  click('kmpDay', () => { const roles = {};
     $('kmpBox').querySelectorAll('select[data-role]').forEach(sel => { const n = sel.dataset.role, hp = $('kmpBox').querySelector(`select[data-help="${CSS.escape(n)}"]`);
       if (sel.value === 'помощь' && hp && hp.value) roles[n] = 'помощь:' + hp.value; else if (sel.value !== 'без занятия') roles[n] = sel.value; });
-    kmpPropose({type: 'day', ...(val('kDayT') ? {terrain: val('kDayT')} : {}), road: on('kDayRoad'), hours: +val('kDayH') || 8, pace: val('kDayP'), hot: on('kDayHot'), roles}); };
-  $('kmpShort').onclick = () => { const spend = {}; $('kmpBox').querySelectorAll('input[data-hd]').forEach(i => { if (+i.value) spend[i.dataset.hd] = +i.value; });
-    kmpPropose({type: 'rest', kind: 'короткий', spend}); };
-  $('kmpLong').onclick = () => kmpPropose({type: 'rest', kind: 'долгий'});
-  $('kmpLearn').onclick = () => val('kFact') && kmpDirect({type: 'learn', fact: val('kFact')});
-  $('kmpTurn').onclick = () => val('kFact') && kmpPropose({type: 'turnin', quest: val('kQ'), fact: val('kFact'), party: val('kQParty') || 'мы'});
-  $('kmpQuest').onclick = () => val('kQ') && kmpDirect({type: 'quest', id: val('kQ'), base: val('kQBase'), step: +val('kQStep') || 0.9, confirm: +val('kQConf') || 0.5});
-  $('kmpGm').onclick = () => { const a = {type: 'gm'}, who = val('kGmWho');
+    kmpPropose({type: 'day', ...(val('kDayT') ? {terrain: val('kDayT')} : {}), road: on('kDayRoad'), hours: +val('kDayH') || 8, pace: val('kDayP'), hot: on('kDayHot'), roles}); });
+  click('kmpShort', () => { const spend = {}; $('kmpBox').querySelectorAll('input[data-hd]').forEach(i => { if (+i.value) spend[i.dataset.hd] = +i.value; });
+    kmpPropose({type: 'rest', kind: 'короткий', spend}); });
+  click('kmpLong', () => kmpPropose({type: 'rest', kind: 'долгий'}));
+  click('kmpLearn', () => val('kFact') && kmpDirect({type: 'learn', fact: val('kFact')}));
+  click('kmpTurn', () => val('kFact') && kmpPropose({type: 'turnin', quest: val('kQ'), fact: val('kFact'), party: val('kQParty') || 'мы'}));
+  click('kmpQuest', () => val('kQ') && kmpDirect({type: 'quest', id: val('kQ'), base: val('kQBase'), step: +val('kQStep') || 0.9, confirm: +val('kQConf') || 0.5}));
+  click('kmpGm', () => { const a = {type: 'gm'}, who = val('kGmWho');
     if (who !== 'отряд') a.hero = who;
     if (val('kGmPurse')) a.purse = val('kGmPurse').trim().startsWith('-') ? -kmpParse(val('kGmPurse')) : val('kGmPurse');
     if (val('kGmItem')) a.item = val('kGmItem'), a.qty = +val('kGmQty') || 1;
@@ -248,15 +312,15 @@ function kmpBind(){
     if (+val('kGmWater')) a.water = +val('kGmWater');
     if (val('kGmPlace')) a.place = val('kGmPlace');
     if (val('kGmText')) a.text = val('kGmText');
-    if (Object.keys(a).length < 2 || (Object.keys(a).length === 2 && a.hero)){ toast('нечего делать: заполните поле'); return; }
-    kmpDirect(a); };
-  $('kmpAtt').onclick = () => val('kNpc') && kmpDirect(Object.assign({type: 'attitude', npc: val('kNpc'), delta: +val('kNpcD') || 0}, val('kNpcT') ? {tier: val('kNpcT')} : {}));
-  $('kmpRep').onclick = () => val('kRep') && kmpDirect({type: 'rep', faction: val('kRep'), delta: +val('kRepD') || 0});
-  $('kmpSet').onclick = () => kmpDirect({type: 'setup', traveler: val('kSetT'), lifestyle: val('kSetL'), returnTrip: on('kSetR')});
-  $('kmpUndo').onclick = () => confirm('Отменить последнее событие журнала?') && kmpCall({cmd: 'kmp_undo'});
-  $('kmpMd').onclick = async () => { const v = await api({cmd: 'kmp_export', id: KMP.id, name: kmpName()});
+    if (Object.keys(a).length < 2 || (Object.keys(a).length === 2 && a.hero)){ toast('Нечего делать: заполните хотя бы одно поле'); return; }
+    kmpDirect(a); });
+  click('kmpAtt', () => val('kNpc') && kmpDirect(Object.assign({type: 'attitude', npc: val('kNpc'), delta: +val('kNpcD') || 0}, val('kNpcT') ? {tier: val('kNpcT')} : {})));
+  click('kmpRep', () => val('kRep') && kmpDirect({type: 'rep', faction: val('kRep'), delta: +val('kRepD') || 0}));
+  click('kmpSet', () => kmpDirect({type: 'setup', traveler: val('kSetT'), lifestyle: val('kSetL'), returnTrip: on('kSetR')}));
+  click('kmpUndo', () => confirm('Отменить последнее событие журнала?') && kmpCall({cmd: 'kmp_undo'}));
+  click('kmpMd', async () => { const v = await api({cmd: 'kmp_export', id: KMP.id, name: kmpName()});
     if (v.type !== 'kmp_export'){ toast(v.err || 'ошибка'); return; }
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([v.md], {type: 'text/markdown'})); a.download = v.title + ' — журнал.md'; a.click(); };
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([v.md], {type: 'text/markdown'})); a.download = v.title + ' — журнал.md'; a.click(); });
 }
 // «10 зм 5 см» → медные (для вычитания денег мастером)
 function kmpParse(t){ let tot = 0; t.replace(/(\d+)\s*(зм|см|мм)?/g, (m, n, u) => { tot += +n * (u === 'зм' ? 100 : u === 'см' ? 10 : 1); }); return tot; }

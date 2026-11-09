@@ -11,6 +11,7 @@
 """
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -545,12 +546,20 @@ class Campaign:
         self.state = self._load()
 
     @staticmethod
-    def create(cid, name, seed, master, root=STATE, vault=None):
+    def create(cid, name, seed, master, root=STATE, vault=None, master_name=None):
         d = os.path.join(root, cid)
         os.makedirs(d, exist_ok=False)
         with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
-            json.dump({"имя": name, "seed": seed, "мастер": master}, f, ensure_ascii=False)
+            json.dump({"имя": name, "seed": seed, "мастер": master, "мастер_имя": master_name or master, "игроки": {}}, f, ensure_ascii=False)
         return Campaign(cid, vault, root)
+
+    def join(self, key, shown):
+        """Игрок вошёл по коду (Р25): кампания попадает в его «Мои кампании»."""
+        if key == self.meta.get("мастер") or key in self.meta.setdefault("игроки", {}):
+            return
+        self.meta["игроки"][key] = shown
+        with open(os.path.join(self.dir, "meta.json"), "w", encoding="utf-8") as f:
+            json.dump(self.meta, f, ensure_ascii=False)
 
     def _content(self):
         data, cards, errors = self.vault.get()
@@ -733,28 +742,43 @@ def kmp_cmd(msg, sid=""):
         return {"type": "error", "err": "введите имя"}
     with CAMPS_LOCK:
         try:
-            if cmd == "kmp_list":
+            if cmd == "kmp_list":   # «Мои кампании»: где я мастер или вошёл по коду
                 out = []
                 if os.path.isdir(STATE):
-                    for cid in sorted(os.listdir(STATE)):
+                    for cid in os.listdir(STATE):
                         try:
                             with open(os.path.join(STATE, cid, "meta.json"), encoding="utf-8") as f:
                                 m = json.load(f)
-                            out.append({"id": cid, "title": m.get("имя", cid), "master": m.get("мастер") == name})
                         except (OSError, ValueError):
-                            pass
+                            continue
+                        if m.get("мастер") != name and name not in m.get("игроки", {}):
+                            continue
+                        jp = os.path.join(STATE, cid, "journal.jsonl")
+                        heroes = 0
+                        if os.path.exists(jp):
+                            with open(jp, encoding="utf-8") as f:
+                                heroes = sum(1 for ln in f if '"type": "hero"' in ln)
+                        out.append({"id": cid, "title": m.get("имя", cid), "master": m.get("мастер") == name,
+                                    "masterName": m.get("мастер_имя", m.get("мастер", "")), "players": len(m.get("игроки", {})),
+                                    "heroes": heroes, "t": int(os.path.getmtime(jp if os.path.exists(jp) else os.path.join(STATE, cid, "meta.json")))})
+                out.sort(key=lambda x: -x["t"])
                 return {"type": "kmp_list", "list": out}
-            if cmd == "kmp_create":
+            if cmd == "kmp_create":   # код кампании — как у комнаты: 5 знаков, без похожих букв и цифр
                 title = str(msg.get("title") or "Кампания")[:80]
-                cid = re.sub(r"[^0-9A-Za-z]", "", str(msg.get("cid") or ""))[:16] or "k" + str(int(time.time()))
                 os.makedirs(STATE, exist_ok=True)
+                cid = ""
+                while not cid or os.path.exists(os.path.join(STATE, cid)):
+                    cid = "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(5))
                 if VAULT is None:
                     VAULT = Vault()
-                CAMPS[cid] = Campaign.create(cid, title, int(msg.get("seed") or 1), name, vault=VAULT)
+                CAMPS[cid] = Campaign.create(cid, title, int(msg.get("seed") or random.randint(1, 99999)), name, vault=VAULT,
+                                             master_name=str(msg.get("name"))[:40])
                 c, cmd = CAMPS[cid], "kmp_open"
             else:
-                c = _camp(msg.get("id"))
+                c = _camp(str(msg.get("id", "")).strip().upper() if len(str(msg.get("id", "")).strip()) == 5 else msg.get("id"))
             master = c.meta.get("мастер") == name
+            if not master:
+                c.join(name, str(msg.get("name"))[:40])   # кто знает код — участник (как в комнате)
             if cmd in MASTER_ONLY and not master:
                 return {"type": "error", "err": "это может только мастер"}
             r = {}
@@ -800,6 +824,7 @@ def kmp_cmd(msg, sid=""):
             tk = c.talk()
             v["talk"] = tk.view(c.state, c.hero(str(msg.get("hero", ""))))
             v.update({"type": "kmp", "id": c.cid, "title": c.meta.get("имя", c.cid), "master": master,
+                      "masterName": c.meta.get("мастер_имя", c.meta.get("мастер", "")), "players": list(c.meta.get("игроки", {}).values()),
                       "drafts": [_draft_view(d) for d in sorted(c.drafts.items())
                                  if master or _key(d[1]["who"]) == name]})
             if master:

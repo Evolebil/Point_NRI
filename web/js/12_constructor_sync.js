@@ -153,9 +153,9 @@ function save(){
   // копия на сервере под именем игрока: адрес туннеля меняется — браузер «забывает», сервер помнит
   clearTimeout(save.t); save.t = setTimeout(() => { const n = playerName(false); if (n) api({cmd:'player_save', name:n, s:S}); }, 1500);
 }
-function playerName(ask){
+function playerName(ask){   // имя — из строки «Вы: …» под меню (05_name.js); не задано и нужно — подсветить её
   let n = ''; try { n = localStorage.getItem('dnd_rmname') || ''; } catch (e) {}
-  if (!n && ask){ n = (prompt('Ваше имя — под ним сохраняется персонаж и место в комнате (если ссылка сменится, войдите с тем же именем):') || '').trim(); if (n) try { localStorage.setItem('dnd_rmname', n); } catch (e) {} }
+  if (!n && ask && $('nameIn')) $('nameIn').focus();
   return n;
 }
 
