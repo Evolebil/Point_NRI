@@ -501,6 +501,10 @@ static int trainMain(int argc, char** argv) {
     Coef C = coefNow();
     Hyper hp;
     if (const char* e = std::getenv("DND_LR")) hp.lr = std::atof(e);
+    // дисконт за решение и сглаживание GAE (свежий взгляд 10 ноября): за бой ~100 решений на сторону, при γ 0.99 исход
+    // боя ранним решениям почти не виден, а риск удара — сразу; DND_GAMMA=0.998 и DND_LAMBDA=0.97 — исход виден
+    if (const char* e = std::getenv("DND_GAMMA")) hp.gamma = std::atof(e);
+    if (const char* e = std::getenv("DND_LAMBDA")) hp.lambda = std::atof(e);
     if (const char* e = std::getenv("DND_ENT")) hp.ent = std::atof(e);
     if (const char* e = std::getenv("DND_ROUNDPEN")) hp.roundPen = std::atof(e);
     if (const char* e = std::getenv("DND_TRADE_D")) hp.tradeD = std::atof(e);
@@ -519,8 +523,8 @@ static int trainMain(int argc, char** argv) {
     // DND_PATIENCE проверок подряд (по умолчанию 6 = 300 итераций) — обучение заканчивается
     const char* pe = std::getenv("DND_PATIENCE");
     const int patience = pe ? std::max(1, std::atoi(pe)) : 6;
-    std::printf("обучение: энтропия %.3f, скорость %.0e, штраф %.4f за раунд (удваивается каждые 10 раундов), обмен уроном: нанесённый ×%.2f, полученный ×%.2f, соперники: сама %.0f%%, пул %.0f%%, бот %.0f%%; до %d итераций, остановка после %d проверок без роста\n",
-                hp.ent, hp.lr, hp.roundPen, hp.tradeD, hp.tradeT, 100 * mixSelf, 100 * mixPool, 100 * (1 - mixSelf - mixPool), iters, patience);
+    std::printf("обучение: γ %.3f, λ %.2f, энтропия %.3f, скорость %.0e, штраф %.4f за раунд (удваивается каждые 10 раундов), обмен уроном: нанесённый ×%.2f, полученный ×%.2f, соперники: сама %.0f%%, пул %.0f%%, бот %.0f%%; до %d итераций, остановка после %d проверок без роста\n",
+                hp.gamma, hp.lambda, hp.ent, hp.lr, hp.roundPen, hp.tradeD, hp.tradeT, 100 * mixSelf, 100 * mixPool, 100 * (1 - mixSelf - mixPool), iters, patience);
     std::vector<PNet> pool;   // прошлые версии сети — соперники
     for (int k = 0; k < 8; k++) {
         PNet p;
