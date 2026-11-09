@@ -47,6 +47,7 @@ static std::string mapToJson(const World& w) {
 struct CustomMap {
     bool on = false;
     int aw = 0, ah = 0, theme = 0;
+    bool parts = false;   // карта из генератора (участок по местности): несвязные карманы можно, бой — в самой большой части
     std::vector<std::string> wall, climb, diff, dark, water, pit, height, tree, haz, ladder, deck, door, strong;
     int start[2][2] = {{-1, -1}, {-1, -1}};
     bool hasStarts() const { return start[0][0] >= 0 && start[1][0] >= 0; }
@@ -68,6 +69,7 @@ static bool parseCustomMap(const Json& j, CustomMap& m, std::string& err) {
     m.aw = j["aw"].num(0);
     m.ah = j["ah"].num(0);
     m.theme = j["theme"].num(0) ? 1 : 0;
+    m.parts = j["parts"].flag(false);
     if (m.aw < 5 || m.ah < 5 || m.aw > W || m.ah > W) { err = "размер карты от 5×5 до " + std::to_string(W) + "×" + std::to_string(W) + " клеток"; return false; }
     readLayer(j["wall"], m.wall, m.aw, m.ah);
     readLayer(j["climb"], m.climb, m.aw, m.ah);
@@ -111,6 +113,11 @@ static bool parseCustomMap(const Json& j, CustomMap& m, std::string& err) {
                 if (sx < 0 && !tw.tree[y][x]) { sx = x; sy = y; }
             }
     if (freeN < 4 || sx < 0) { err = "на карте меньше четырёх свободных клеток"; return false; }
+    if (m.parts) {   // как арены из мира: обрезанные окном дома и замкнутые уступы — карманы; бой идёт в основной части
+        if (markMain(tw) < std::max(4, freeN / 5) || startCellsN(tw) < 2) { err = "на участке мало связного места для боя"; return false; }
+        m.on = true;
+        return true;
+    }
     std::vector<std::array<int, 3>> st{{sx, sy, 0}};
     seen[id(sx, sy, 0)] = 1;
     int reach = 0;

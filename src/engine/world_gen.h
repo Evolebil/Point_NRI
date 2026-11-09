@@ -6,7 +6,9 @@
 // участок мира (cutArena). Подключается из движка (arena_map.h) перед genMap.
 // ============================================================================
 #pragma once
+#include <cctype>
 #include <cmath>
+#include <string>
 
 namespace wg {
 
@@ -79,6 +81,14 @@ struct Plan {
     static constexpr int BK = 64;               // сетка отрезков: клетка BK×BK → номера отрезков рядом
     int bn = 0;
     std::vector<std::vector<int>> rivB, roadB, townB;
+    // участок по заданной местности (кампания, задача Б-1): высота — уровень клетки региона с переходом к соседям,
+    // биом и влажность — из описания; выключено — мир из шума как раньше
+    struct Region {
+        bool on = false;
+        int level = 0, nb[4] = {0, 0, 0, 0};   // уровень клетки и соседей: север, восток, юг, запад
+        int biome = B_FOREST;
+        double moist = 0.5;
+    } reg;
 };
 
 // ---- поле без рек и поселений: высота (0..1), температура, влажность ----
@@ -90,6 +100,20 @@ inline double rawHeight(uint64_t s, int x, int y) {
     return std::clamp(h, 0.0, 1.0);
 }
 inline int levelOf(double h) { return std::clamp((int)std::floor(std::pow(h, 1.35) * 10.0), 0, 9); }
+// высота участка по заданной местности: в центре — уровень клетки, к краю — плавно к середине между своим уровнем и
+// уровнем соседа (тогда соседние участки сходятся на общей границе) и мелкая волна шума
+inline int regionLevel(const Plan& p, int x, int y) {
+    const Plan::Region& r = p.reg;
+    const double S = std::max(1, p.size - 1), u = x / S, v = y / S;   // 0..1 с запада на восток и с севера на юг
+    const double d[4] = {v, 1 - u, 1 - v, u};                           // расстояние до краёв: С, В, Ю, З
+    double h = r.level;
+    for (int k = 0; k < 4; k++) {
+        const double wgt = std::max(0.0, 1.0 - 2.0 * d[k]);   // 1 на краю, 0 в середине
+        h += wgt * wgt * (r.nb[k] - r.level) * 0.5;
+    }
+    h += 0.45 * fbm(p.seed ^ 0x5245, x / 40.0, y / 40.0, 3);
+    return std::clamp((int)std::lround(h), 0, 9);
+}
 inline double rawTemp(uint64_t s, int x, int y, int level) { return 0.6 + 1.1 * fbm(s ^ 0x54, x / 320.0, y / 320.0, 3) - 0.03 * level; }
 inline double rawMoist(uint64_t s, int x, int y) { return 0.5 + 1.1 * fbm(s ^ 0x4D, x / 260.0, y / 260.0, 3); }
 inline int biomeOf(double t, double m) {
@@ -292,7 +316,7 @@ inline void fillLevelCache(const Plan& p, int x0, int y0, int w, int h) {
 }
 // уровень земли с поселениями: внутри — ровная площадка, на кольце 12 клеток — плавно к окружающему рельефу
 inline int groundLevelRaw(const Plan& p, int x, int y) {
-    int lv = levelOf(rawHeight(p.seed, x, y));
+    int lv = p.reg.on ? regionLevel(p, x, y) : levelOf(rawHeight(p.seed, x, y));
     double d;
     const Settle* t = townAt(p, x, y, &d);
     if (t && d < 12) {
@@ -301,7 +325,7 @@ inline int groundLevelRaw(const Plan& p, int x, int y) {
         lv = (int)std::lround(t->level * (1 - k) + lv * k);
     }
     // уступы со скальным краем: на холмах контур второго шума поднимает землю сразу на 2 уровня (обрыв)
-    if (lv >= 3 && !t) {
+    if (lv >= 3 && !t && !p.reg.on) {   // на участке по заданной местности перепады задаёт описание
         const double c = fbm(p.seed ^ 0x43, x / 70.0, y / 70.0, 3);
         if (c > 0.28) lv = std::min(9, lv + 2);
     }
@@ -314,7 +338,12 @@ inline bool townCell(const Plan& p, const Settle& t, int x, int y, Cell& c) {
     const double d = std::hypot(x - t.x, y - t.y);
     const uint64_t s = p.seed ^ (uint64_t)(t.x * 7919 + t.y);
     const int lv = t.level;
-    if (t.kind == 0 && d > t.r) return false;   // деревня без стены — до своего радиуса
+    if (t.kind == 0 && !p.reg.on && d > t.r) return false;   // деревня без стены — до своего радиуса
+    if (t.kind == 0 && p.reg.on) {   // участок по местности: квартал деревни целиком (по его середине), без обрезков домов
+        const int B = 18, lx = x - t.x + 10000 * B, ly = y - t.y + 10000 * B;
+        const double cx = (lx / B) * B + B / 2.0 - 10000 * B, cy = (ly / B) * B + B / 2.0 - 10000 * B;
+        if (std::hypot(cx, cy) > t.r) return false;
+    }
     c.town = true;
     if (t.kind != 0) {   // городская стена (кольцо толщиной 2) с башнями и воротами
         const double rw = t.r + 1;
@@ -397,8 +426,8 @@ inline Cell worldCell(const Plan& p, int x, int y) {
     rd = nearSeg(p, p.rivers, p.rivB, x, y, &rw);
     int roadW = 0;
     const double roadD = nearSeg(p, p.roads, p.roadB, x, y, &roadW);
-    const double t = rawTemp(s, x, y, lv), m = std::clamp(rawMoist(s, x, y) + (rd < 40 ? 0.15 * (1 - rd / 40) : 0), -1.0, 2.0);
-    c.biome = (unsigned char)biomeOf(t, m);
+    const double t = rawTemp(s, x, y, lv), m = p.reg.on ? p.reg.moist : std::clamp(rawMoist(s, x, y) + (rd < 40 ? 0.15 * (1 - rd / 40) : 0), -1.0, 2.0);
+    c.biome = (unsigned char)(p.reg.on ? p.reg.biome : biomeOf(t, m));
     const bool road = roadD <= roadW / 2.0;
     // обрыв: соседняя клетка на 2+ уровня ниже — на краю иногда лестница (на дороге — всегда: ступени)
     bool cliffEdge = false;
@@ -409,7 +438,7 @@ inline Cell worldCell(const Plan& p, int x, int y) {
     if (cliffEdge && (road || hash01(s, x, y, 97) < 0.06)) c.ladder = true;
     double td;
     const Settle* town = townAt(p, x, y, &td);
-    if (town && td <= 3 && townCell(p, *town, x, y, c)) return c;
+    if (town && td <= (p.reg.on ? 13 : 3) && townCell(p, *town, x, y, c)) return c;   // участок: кварталы деревни целиком
     if (rd <= rw / 2.0 && !road) {   // река: ручей (труднопроходимо); дорога через реку — мост
         c.water = c.diff = true;
         return c;
@@ -452,4 +481,116 @@ inline Cell worldCell(const Plan& p, int x, int y) {
     return c;
 }
 
+// ---- участок по заданной местности (кампания, задача Б-1) ----
+// Описание клетки региона (1000 × 1000 фт = 200 × 200 клеток сцены): местность или биом, уровень высоты и уровни
+// четырёх соседей, дорога (через какие края проходит), река, поселение, зерно. Тот же вход — тот же участок.
+struct RegionDesc {
+    std::string terrain;          // «Лес», «Горы», «Болото», … — если биом не задан числом
+    int biome = -1;               // номер биома (Biome), −1 — по названию местности
+    int level = 2, nb[4] = {2, 2, 2, 2};   // уровни: клетка; соседи — север, восток, юг, запад
+    std::string road;             // края, через которые идёт дорога: буквы N, E, S, W (одна — сквозь участок)
+    bool river = false;
+    std::string settle;           // вид поселения: хутор, деревня, село, город, крепость (замок), большой город, великий город
+    int pop = 0;                  // жителей (размер поселения; 0 — по виду)
+    std::string seed = "1";
+};
+inline uint64_t seedOfText(const std::string& t) {   // FNV-1a: зерно клетки из строки
+    uint64_t h = 1469598103934665603ULL;
+    for (unsigned char ch : t) h = (h ^ ch) * 1099511628211ULL;
+    return mixh(h, 0x52454731) | 1;
+}
+inline int biomeOfTerrain(const std::string& t) {
+    struct T { const char* key; int b; };
+    static const T TAB[] = {{"тундр", B_TUNDRA}, {"тайг", B_TAIGA}, {"ледн", B_GLACIER}, {"снег", B_GLACIER}, {"степ", B_STEPPE}, {"равн", B_STEPPE},
+                            {"луг", B_STEPPE}, {"пашн", B_STEPPE}, {"пол", B_STEPPE}, {"холм", B_STEPPE}, {"гор", B_STEPPE}, {"лес", B_FOREST},
+                            {"болот", B_SWAMP}, {"топ", B_SWAMP}, {"пустын", B_DESERT}, {"саванн", B_SAVANNA}, {"джунгл", B_JUNGLE}};
+    std::string low;
+    for (size_t i = 0; i < t.size(); i++) low += t[i];
+    // строчные русские буквы: «Л» (D0 9B) → «л» (D0 BB) и т. п.; латиница — tolower
+    std::string q;
+    for (size_t i = 0; i < low.size(); i++) {
+        unsigned char c = (unsigned char)low[i];
+        if (c == 0xD0 && i + 1 < low.size()) {
+            unsigned char d = (unsigned char)low[i + 1];
+            if (d >= 0x90 && d <= 0x9F) { q += (char)0xD0; q += (char)(d + 0x20); i++; continue; }
+            if (d >= 0xA0 && d <= 0xAF) { q += (char)0xD1; q += (char)(d - 0x20); i++; continue; }
+            if (d == 0x81) { q += (char)0xD1; q += (char)0x91; i++; continue; }
+        }
+        q += (char)std::tolower(c);
+    }
+    for (const T& e : TAB)
+        if (q.find(e.key) != std::string::npos) return e.b;
+    return B_FOREST;
+}
+inline void buildRegionPlan(Plan& p, const RegionDesc& d, int S = 200) {
+    p = Plan();
+    p.seed = seedOfText(d.seed);
+    p.size = S;
+    p.bn = S / Plan::BK + 1;
+    p.reg.on = true;
+    p.reg.level = std::clamp(d.level, 0, 9);
+    for (int k = 0; k < 4; k++) p.reg.nb[k] = std::clamp(d.nb[k], 0, 9);
+    p.reg.biome = d.biome >= 0 && d.biome < B_N ? d.biome : biomeOfTerrain(d.terrain);
+    static const double MOIST[B_N] = {0.35, 0.55, 0.45, 0.30, 0.50, 0.85, 0.15, 0.30, 0.80};   // как в среднем у биома
+    p.reg.moist = MOIST[p.reg.biome];
+    const int c = S / 2;
+    const uint64_t s = p.seed;
+    // поселение в середине участка
+    if (!d.settle.empty() || d.pop > 0) {
+        const std::string& k = d.settle;
+        // радиус по числу жителей (без числа — обычное для вида): деревня на 200 — ~25 клеток, город на 3000 — ~52
+        auto has = [&](const char* w) { return k.find(w) != std::string::npos; };
+        int kind = 0, pop = d.pop;
+        double r0 = 10, k1 = 1.1;
+        if (has("хутор")) { r0 = 6; k1 = 0.8; if (!pop) pop = 15; }
+        else if (has("крепост") || has("замок")) { kind = 2; r0 = 22; k1 = 0.6; if (!pop) pop = 300; }
+        else if (has("велик") || has("столиц")) { kind = 3; r0 = c; k1 = 0; }
+        else if (has("больш")) { kind = 3; r0 = 40; k1 = 0.4; if (!pop) pop = 20000; }
+        else if (has("город")) { kind = 1; r0 = 25; k1 = 0.5; if (!pop) pop = 3000; }
+        else if (!pop) pop = 200;   // деревня, село и всё прочее
+        const int r = std::clamp((int)std::lround(r0 + k1 * std::sqrt((double)pop)), 5, c - 6);
+        p.towns.push_back({c, c, r, kind, p.reg.level});
+    }
+    // дорога: от каждого названного края к середине (одна буква — насквозь, к противоположному краю)
+    auto edgePt = [&](char e, int& x, int& y) {
+        switch (e) {
+            case 'N': case 'n': x = c; y = 0; return true;
+            case 'S': case 's': x = c; y = S - 1; return true;
+            case 'E': case 'e': x = S - 1; y = c; return true;
+            case 'W': case 'w': x = 0; y = c; return true;
+        }
+        return false;
+    };
+    std::string ends;
+    for (char e : d.road)
+        if (std::string("NESWnesw").find(e) != std::string::npos) ends += (char)std::toupper((unsigned char)e);
+    if (ends.size() == 1) ends += ends[0] == 'N' ? 'S' : ends[0] == 'S' ? 'N' : ends[0] == 'E' ? 'W' : 'E';
+    for (size_t i = 0; i < ends.size(); i++) {
+        int x, y;
+        if (!edgePt(ends[i], x, y)) continue;
+        const int mx = (x + c) / 2 + (int)((hash01(s, (int)i, 1, 41) - 0.5) * S * 0.15), my = (y + c) / 2 + (int)((hash01(s, (int)i, 2, 41) - 0.5) * S * 0.15);
+        p.roads.push_back({x, y, mx, my, 3});
+        p.roads.push_back({mx, my, c, c, 3});
+    }
+    // река: поперёк участка, в стороне от середины; поперёк дороги, если она есть
+    if (d.river) {
+        const bool ns = !ends.empty() ? (ends[0] == 'E' || ends[0] == 'W') : hash01(s, 3, 3, 43) < 0.5;   // течёт с севера на юг
+        const int away = p.towns.empty() ? 0 : p.towns[0].r + 14;   // в стороне от поселения (и от его кварталов)
+        const int off = (int)((hash01(s, 4, 4, 43) < 0.5 ? -1 : 1) * std::min(S / 2 - 8.0, std::max((double)away, S * (0.22 + 0.1 * hash01(s, 5, 5, 43)))));
+        const int sway = away ? 0 : 1;   // у поселения река прямее, чтобы не задеть кварталы
+        const int a = c + off, b = c + off + sway * (int)((hash01(s, 6, 6, 43) - 0.5) * S * 0.3);
+        const int m1 = (a + b) / 2 + sway * (int)((hash01(s, 7, 7, 43) - 0.5) * S * 0.2);
+        if (ns) { p.rivers.push_back({a, 0, m1, c, 3}); p.rivers.push_back({m1, c, b, S - 1, 3}); }
+        else { p.rivers.push_back({0, a, c, m1, 3}); p.rivers.push_back({c, m1, S - 1, b, 3}); }
+    }
+    indexSegs(p, p.rivers, p.rivB);
+    indexSegs(p, p.roads, p.roadB);
+    p.townB.assign((size_t)p.bn * p.bn, {});
+    for (size_t i = 0; i < p.towns.size(); i++) {
+        const Settle& t = p.towns[i];
+        const int pad = t.r + 12;
+        for (int by = std::max(0, (t.y - pad) / Plan::BK); by <= std::min(p.bn - 1, (t.y + pad) / Plan::BK); by++)
+            for (int bx = std::max(0, (t.x - pad) / Plan::BK); bx <= std::min(p.bn - 1, (t.x + pad) / Plan::BK); bx++) p.townB[(size_t)by * p.bn + bx].push_back((int)i);
+    }
+}
 }   // namespace wg

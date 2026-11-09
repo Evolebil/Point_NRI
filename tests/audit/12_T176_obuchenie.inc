@@ -96,3 +96,46 @@
           worst < 1e-4 && worstAbs < 1e-9,
           fmt("проверено параметров %d, наибольшая относительная ошибка %.2e (градиенты от 1e-5, порог 1e-4), абсолютная у мелких %.1e (порог 1e-9)", checked, worst, worstAbs));
     }
+    // T210: участок по заданной местности (кампания, задача Б-1): тот же вход — тот же участок; края по высоте сходятся
+    // к середине между клеткой и соседом; поселение — только когда задано; карта годится для боя
+    if (TB()) {
+        wg::RegionDesc d;
+        d.terrain = "Лес";
+        d.level = 3;
+        d.nb[0] = 3; d.nb[1] = 7; d.nb[2] = 1; d.nb[3] = 3;   // север, восток, юг, запад
+        d.road = "NE";
+        d.river = true;
+        d.settle = "деревня";
+        d.pop = 300;
+        d.seed = "x12y40";
+        static World a, b, e;
+        regionArena(a, d, 200, 200);
+        const std::string ja = mapToJson(a);
+        regionArena(b, d, 200, 200);
+        const bool same = ja == mapToJson(b);
+        auto edgeAvg = [&](int k) {   // средний уровень на краю: север, восток, юг, запад
+            double s = 0;
+            for (int i = 0; i < 200; i++) s += k == 0 ? a.height[0][i] : k == 1 ? a.height[i][199] : k == 2 ? a.height[199][i] : a.height[i][0];
+            return s / 200;
+        };
+        bool edges = true;
+        for (int k = 0; k < 4; k++) edges = edges && std::fabs(edgeAvg(k) - (d.level + d.nb[k]) / 2.0) <= 1.0;
+        int townA = 0, townE = 0;
+        for (int y = 80; y < 120; y++)
+            for (int x = 80; x < 120; x++) townA += a.wall[y][x] || a.door[y][x];
+        wg::RegionDesc d2 = d;
+        d2.settle.clear();
+        d2.pop = 0;
+        regionArena(e, d2, 200, 200);
+        for (int y = 80; y < 120; y++)
+            for (int x = 80; x < 120; x++) townE += e.wall[y][x] || e.door[y][x];
+        CustomMap cm;
+        std::string err;
+        const std::string js = "{\"parts\":1," + ja.substr(1);
+        const bool usable = parseCustomMap(parseJson(js), cm, err);
+        T("T210", "§кампания Б-1: участок по заданной местности — тот же вход даёт тот же участок, края сходятся к соседям, поселение только по описанию, карта годится для боя",
+          same && edges && townA > 0 && townE == 0 && usable,
+          fmt("повтор %d; края С %.1f В %.1f Ю %.1f З %.1f (ожидалось %.1f %.1f %.1f %.1f); постройки в середине с поселением %d, без %d; для боя %d %s", same, edgeAvg(0), edgeAvg(1), edgeAvg(2), edgeAvg(3),
+              (d.level + d.nb[0]) / 2.0, (d.level + d.nb[1]) / 2.0, (d.level + d.nb[2]) / 2.0, (d.level + d.nb[3]) / 2.0, townA, townE, usable, err.c_str()));
+    }
+

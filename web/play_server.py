@@ -490,7 +490,7 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         out = s["eng"].talk({k: v for k, v in msg.items() if k != "cmd"})
                         s["in_game"] = out.get("type") == "turn"
-            elif cmd in ("catalog", "price", "preview", "genmap", "checkmap", "worldmap"):
+            elif cmd in ("catalog", "price", "preview", "genmap", "checkmap", "worldmap", "regionmap"):
                 with QUERY.lock:
                     out = QUERY.talk(msg)
             else:

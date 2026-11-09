@@ -7,6 +7,22 @@
 // Арена: прямоугольник от 5×5 до 100×100 клеток (по 5 фт), тема (дикая местность или город) и особенности: стены, лазалки (укрытия), труднопроходимая
 // местность, тьма, ручей (труднопроходим), ущелье с мостом, возвышенности. Всё за пределами прямоугольника — стена. Выход за арену — побег (поражение).
 #include "world_gen.h"
+// клетка мира → клетка арены (участок мира и участок по заданной местности)
+inline void putWorldCell(World& w, int x, int y, const wg::Cell& c) {
+    w.wall[y][x] = c.wall;
+    w.climb[y][x] = c.climb && !c.wall;
+    w.water[y][x] = c.water;
+    w.diff[y][x] = c.diff || c.water;
+    w.dark[y][x] = c.dark;
+    w.pit[y][x] = c.pit && !c.wall;
+    w.height[y][x] = c.height;
+    w.tree[y][x] = c.tree && !c.wall && !c.pit && !c.water;
+    w.haz[y][x] = c.wall || c.pit ? 0 : c.haz;
+    w.ladder[y][x] = c.ladder && !c.wall && !c.pit;
+    w.deck[y][x] = !c.wall && c.deck > c.height ? c.deck : 0;
+    w.door[y][x] = c.wall ? 0 : c.door;
+    w.strong[y][x] = c.strong && c.wall;
+}
 struct MapStyle {
     int fixedW = 0, fixedH = 0, theme = -1;   // заданный размер участка и тема (−1 — как получится), для тестов и редактора
     unsigned long long worldSeed = 0;         // мир по зерну (игра; 0 — обучение: новый мир каждые 500 боёв)
@@ -130,19 +146,7 @@ void genMap(World& w) {
                     continue;
                 }
                 const wg::Cell c = wg::worldCell(P, x0 + x, y0 + y);
-                w.wall[y][x] = c.wall;
-                w.climb[y][x] = c.climb && !c.wall;
-                w.water[y][x] = c.water;
-                w.diff[y][x] = c.diff || c.water;
-                w.dark[y][x] = c.dark;
-                w.pit[y][x] = c.pit && !c.wall;
-                w.height[y][x] = c.height;
-                w.tree[y][x] = c.tree && !c.wall && !c.pit && !c.water;
-                w.haz[y][x] = c.wall || c.pit ? 0 : c.haz;
-                w.ladder[y][x] = c.ladder && !c.wall && !c.pit;
-                w.deck[y][x] = !c.wall && c.deck > c.height ? c.deck : 0;
-                w.door[y][x] = c.wall ? 0 : c.door;
-                w.strong[y][x] = c.strong && c.wall;
+                putWorldCell(w, x, y, c);
                 townN += c.town;
             }
         w.wseed = ws;
@@ -159,4 +163,32 @@ void genMap(World& w) {
             break;
         }
     }
+}
+// Участок по заданной местности (кампания, задача Б-1): клетка региона 200 × 200 клеток сцены, из неё — окно aw × ah
+// по центру (меньший участок — середина той же клетки). Тот же вход — тот же участок; миры и арены обучения не меняются
+void regionArena(World& w, const wg::RegionDesc& d, int aw, int ah) {
+    static thread_local wg::Plan P;
+    wg::buildRegionPlan(P, d, 200);
+    w.aw = std::clamp(aw, 5, std::min(W, P.size));
+    w.ah = std::clamp(ah, 5, std::min(W, P.size));
+    const int x0 = (P.size - w.aw) / 2, y0 = (P.size - w.ah) / 2;
+    wg::fillLevelCache(P, x0, y0, w.aw, w.ah);
+    int townN = 0;
+    for (int y = 0; y < W; y++)
+        for (int x = 0; x < W; x++) {
+            if (x >= w.aw || y >= w.ah) {   // за пределами участка — стена (край арены)
+                putWorldCell(w, x, y, wg::Cell{});
+                w.wall[y][x] = true;
+                continue;
+            }
+            const wg::Cell c = wg::worldCell(P, x0 + x, y0 + y);
+            putWorldCell(w, x, y, c);
+            townN += c.town;
+        }
+    wg::lvlCache().p = nullptr;   // кэш уровней — этого участка; следующий участок его перезаполнит
+    w.wseed = 0;
+    w.wsize = 0;
+    w.wx = w.wy = 0;
+    w.theme = townN * 4 >= w.aw * w.ah ? 1 : 0;
+    markMain(w);
 }

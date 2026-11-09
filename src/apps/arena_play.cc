@@ -97,6 +97,25 @@ int main() {
             genMap(gw);
             g_style = MapStyle();
             emitLine("{\"type\":\"map\",\"map\":" + mapToJson(gw) + "}");
+        } else if (c == "regionmap") {   // участок по заданной местности (кампания, задача Б-1): карта в формате редактора
+            const auto& q = cmd["cell"];
+            wg::RegionDesc d;
+            d.terrain = q["terrain"].str("");
+            d.biome = q.has("biome") ? q["biome"].num(-1) : -1;
+            d.level = q["level"].num(2);
+            for (int k = 0; k < 4; k++) d.nb[k] = d.level;
+            if (q.has("nb"))
+                for (int k = 0; k < 4 && k < (int)q["nb"].size(); k++) d.nb[k] = q["nb"][k].num(d.level);
+            d.road = q["road"].str("");
+            d.river = q["river"].flag(false);
+            if (q.has("settle")) {
+                d.settle = q["settle"]["kind"].str("");
+                d.pop = q["settle"]["pop"].num(0);
+            }
+            d.seed = q["seed"].str("1");
+            static World rw;
+            regionArena(rw, d, cmd["w"].num(200), cmd["h"].num(200));
+            emitLine("{\"type\":\"map\",\"map\":{\"parts\":1," + mapToJson(rw).substr(1) + "}");
         } else if (c == "checkmap") {
             CustomMap m;
             std::string err;
