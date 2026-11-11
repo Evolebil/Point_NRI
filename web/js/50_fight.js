@@ -70,7 +70,7 @@ function drawCards(i){
     el.innerHTML = `<h4><span class="chip ${SIDE[k]}">${k === me ? 'вы' : 'враг'}</span>${esc(b.title)}${f.hp <= 0 ? ' ☠' : ''}</h4>
       ${k !== me && G.enemyBrain ? `<div class="small">🧠 играет: ${esc(G.enemyBrain)}</div>` : ''}
       <div class="hpbar"><i style="width:${pct}%"></i></div>
-      <div class="small"><b class="tnum">${Math.max(0, f.hp)}</b> / ${f.maxHp} ХП${f.temp ? ` · +${f.temp} врем.` : ''} · КД <b>${f.ac}</b> · скорость <b>${f.spd}</b>${b.minion ? ` · приспешников ${mins}` : ''}</div>
+      <div class="small"><b class="tnum">${Math.max(0, f.hp)}</b> / ${f.maxHp} ХП${infoIcon('ХП')}${f.temp ? ` · +${f.temp} врем.` : ''} · КД${infoIcon('КД')} <b>${f.ac}</b> · скорость <b>${ftToText(f.spd)}</b>${infoIcon('фт')}${b.minion ? ` · приспешников ${mins}` : ''}</div>
       <div style="margin-top:6px">${conds || '<span class="small">без состояний</span>'}</div>${k !== me ? seenHTML() : ''}`;
   });
 }

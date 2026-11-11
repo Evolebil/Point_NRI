@@ -3,13 +3,14 @@ const REQ = () => G.req;
 function myPos(){ const f = FR[curIdx].f[G.req ? G.req.me : G.me]; return f; }   // ходящий: свой герой или свой миньон
 function renderTurn(){
   const q = G.req, el = $('turn'); if (!q) return;
+  const meNow = FR[curIdx] && FR[curIdx].f && FR[curIdx].f[q.me];
   const atkOk = q.weapon.armed && (q.actionFree || q.weapon.atkLeft > 0);
   if (G.mode === 'attack' && !atkOk) G.mode = 'move';
   if (G.mode.startsWith('attack:')){ const a = (q.alts || []).find(x => x.k === +G.mode.slice(7)); if (!a || !(a.left > 0 || q.actionFree)) G.mode = 'move'; }
   if (G.mode.startsWith('spell:')){ const a = q.abils[+G.mode.slice(6)]; if (!a || !a.avail) G.mode = 'move'; }
   const mv = q.speed0 ? Math.min(100, 100 * q.speedLeft / Math.max(q.speed0, q.speedLeft)) : 0;
   const tt = +$('turnTime').value;
-  let h = `<div class="tbar"><b>${q.me === G.me ? 'Ваш ход' : 'Ход вашего приспешника'} · раунд ${q.round}</b>${tt ? `<span class="timer" id="timer">⏱ ${tt} с</span>` : ''}<span>Движение: <b class="tnum">${q.speedLeft}</b> фт</span><div class="mv"><i style="width:${mv}%"></i></div>
+  let h = `<div class="tbar"><b>${q.me === G.me ? 'Ваш ход' : 'Ход вашего приспешника'} · раунд${infoIcon('Раунд')} ${q.round}</b>${tt ? `<span class="timer" id="timer">⏱ ${tt} с</span>` : ''}<span>Движение: <b class="tnum">${ftToText(q.speedLeft)}</b>${infoIcon('фт')}</span>${meNow ? `<span>ХП ${meNow.hp}/${meNow.maxHp}${infoIcon('ХП')} · КД ${meNow.ac}${infoIcon('КД')}</span>` : ''}<div class="mv"><i style="width:${mv}%"></i></div>
     <span><span class="dot ${q.actionFree ? 'free' : ''}"></span>действие</span><span><span class="dot ${q.bonusFree ? 'free b' : ''}"></span>бонусное</span>
     <button class="primary endb" data-c="end" title="Клавиша E или Enter">⏭ Завершить ход</button><button class="danger" data-leave="1" title="Выйти из боя">🚪</button></div>`;
   // порядок ходов (инициатива из первого кадра боя); живые, текущий ходящий выделен
@@ -21,15 +22,16 @@ function renderTurn(){
   if (rec.length) h += `<div class="recap"><b>Пока вы ждали</b>${rec.slice(-5).join('')}</div>`;
   h += `<div class="acts">`;
   h += `<button data-m="move" class="sp ${G.mode === 'move' ? 'sel' : ''}" title="Клавиша M; клик по клетке — идти, по врагу в досягаемости — удар"><span>🦶 Идти</span><small>клик по полю</small></button>`;
-  const wTag = !q.weapon.armed ? 'безоружны' : (q.weapon.atkLeft > 0 ? `ещё атак: ${q.weapon.atkLeft} (можно идти и сменить цель)` : `${q.weapon.attacks > 1 ? q.weapon.attacks + ' атаки по одной' : '1 атака'}, ${q.weapon.range} фт`);
-  h += `<button data-m="attack" class="sp ${G.mode === 'attack' ? 'sel' : ''}" ${atkOk ? '' : 'disabled'} title="Клавиша A; затем клик по врагу"><span>⚔ Оружие</span><small>${esc(wTag)}</small></button>`;
+  const wTag = !q.weapon.armed ? 'безоружны' : (q.weapon.atkLeft > 0 ? `ещё атак: ${q.weapon.atkLeft} (можно идти и сменить цель)` : `${q.weapon.attacks > 1 ? q.weapon.attacks + ' атаки по одной' : '1 атака'}, ${ftToText(q.weapon.range)}`);
+  const attackWhy = !q.weapon.armed ? 'Недоступно: у персонажа нет оружия.' : (!q.actionFree && q.weapon.atkLeft <= 0 ? 'Недоступно: действие уже потрачено.' : (q.enemies.every(en => en.dist > q.weapon.range) ? `Пока нет цели в радиусе ${q.weapon.range} фт. Подойдите ближе.` : 'Клавиша A; затем выберите подсвеченную цель.'));
+  h += `<button data-m="attack" class="sp ${G.mode === 'attack' ? 'sel' : ''}" ${atkOk ? '' : 'disabled'} title="${attackWhy}"><span>⚔ Оружие</span><small>${esc(wTag)}</small></button>`;
   // сколько атак по выбранной цели сразу: из доступных в этом действии (остальные — потом, по другим целям)
   const atkMax = G.mode === 'attack' ? (q.weapon.atkLeft > 0 ? q.weapon.atkLeft : q.weapon.attacks)
     : (G.mode.startsWith('attack:') ? (a => a ? (a.left > 0 ? a.left : a.att) : 1)((q.alts || []).find(x => x.k === +G.mode.slice(7))) : 1);
   if (atkMax > 1){ G.atkN = Math.min(Math.max(1, G.atkN || 1), atkMax); h += `<label class="small" title="Сколько атак по цели одним щелчком">атак по цели <input type="number" id="atkN" min="1" max="${atkMax}" value="${G.atkN}" style="width:56px"> из ${atkMax}</label>`; }
   q.abils.forEach(a => {
     const sp = a.title ? a : BOSS[G.me].abil[a.k];
-    const tag = [a.react ? 'реакция, сама' : (a.bonus ? 'бонус' : 'действие'), a.self ? (a.tele ? 'прыжок ' + a.tele + ' фт' : 'на себя') : (a.ground ? 'по клетке, ' : '') + a.range + ' фт' + (a.radius ? ', радиус ' + a.radius : '') + (a.wallLen ? ', барьер ' + a.wallLen + ' кл.' : ''), a.uses >= 0 ? a.uses + ' ост.' : ''].filter(Boolean).join(' · ');
+    const tag = [a.react ? 'реакция, сама' : (a.bonus ? 'бонус' : 'действие'), a.self ? (a.tele ? 'прыжок ' + a.tele + ' фт' : 'на себя') : (a.ground ? 'по клетке, ' : '') + a.range + ' фт' + (a.radius ? ', радиус ' + a.radius : '') + (a.wallLen ? ', барьер ' + a.wallLen + ' кл.' : ''), a.uses >= 0 ? 'осталось ' + a.uses : ''].filter(Boolean).join(' · ');
     h += `<button class="sp ${G.mode === 'spell:' + a.k ? 'sel' : ''}" data-spell="${a.k}" ${a.avail ? '' : 'disabled'} title="${esc(a.why || ((S.abilities[a.k] || {})._desc ? S.abilities[a.k]._desc + ' — ' : '') + (sp.desc || ''))} (клавиша ${a.k + 1})"><span>✨ ${esc(sp.title)}</span><small>${esc(tag)}</small></button>`;
   });
   if (q.alts && q.alts.length){
@@ -44,7 +46,7 @@ function renderTurn(){
     <button data-c="dash" ${q.actionFree ? '' : 'disabled'} title="Действие: движения вдвое больше">💨 Рывок</button>
     <button data-c="dodge" ${q.actionFree ? '' : 'disabled'} title="Действие: атаки по вам с помехой до вашего хода">🛡 Уклонение</button>
     <button data-c="disengage" ${q.actionFree ? '' : 'disabled'} title="Действие: уход без провоцированных атак">🏃 Отход</button>
-    <button data-c="help" ${q.actionFree && q.enemies.some(en => en.dist <= 5) ? '' : 'disabled'} title="Враг вплотную: первая атака вашего союзника по нему — с преимуществом">🤝 Помощь</button>
+    <button data-c="help" ${q.actionFree && q.enemies.some(en => en.dist <= 5) ? '' : 'disabled'} title="${q.actionFree ? 'Недоступно: подойдите к врагу на 5 фт.' : 'Недоступно: действие уже потрачено.'} Помощь даёт союзнику преимущество на первую атаку по врагу рядом.">🤝 Помощь</button>
     <button data-c="ready" ${q.actionFree && (q.weapon.armed || q.abils.some(a => a.avail && !a.react)) ? '' : 'disabled'} title="Действием подготовить: что сделать реакцией и при каком условии (выбор рядом)">⏳ Подготовка</button>
     <select id="readyK" title="Что подготовить">${q.weapon.armed ? `<option value="-1">удар оружием</option>` : ''}${q.abils.filter(a => !a.react).map(a => `<option value="${a.k}" ${+G.readyK === a.k ? 'selected' : ''}>${esc(a.title)}</option>`).join('')}</select>
     <select id="readyT" title="При каком условии"><option value="1" ${G.readyT != 2 ? 'selected' : ''}>когда враг войдёт в досягаемость</option><option value="2" ${G.readyT == 2 ? 'selected' : ''}>когда враг применит способность</option></select>
@@ -55,6 +57,19 @@ function renderTurn(){
     ${q.fly ? `<button data-alt="1" ${q.fly.can && q.fly.alt < q.fly.max && q.speedLeft >= 10 ? '' : 'disabled'} title="10 фт движения за уровень; уход вверх из досягаемости ближника провоцирует атаку">🪽 Выше</button><button data-alt="-1" ${q.fly.alt > 0 && q.speedLeft >= 10 ? '' : 'disabled'} title="10 фт движения за уровень">⬇ Ниже</button><span class="tag" title="Высота полёта над землёй">${q.fly.alt ? 'в воздухе ' + q.fly.alt * 10 + ' фт' : 'на земле'}</span>` : ''}</div>
     <div class="msg" id="tmsg"></div><div class="hint">${modeHint()}</div>`;
   el.innerHTML = h;
+  const actionHelp = {
+    move:'Переместиться на клетку в пределах оставшейся скорости', attack:'Атаковать выбранную цель оружием персонажа',
+    dash:'Удвоить скорость на этот ход', dodge:'Атаки по вам идут с помехой до начала вашего следующего хода',
+    disengage:'Переместиться, не давая врагу атаки при уходе', help:'Помочь союзнику: его следующая атака по цели идёт с преимуществом',
+    ready:'Подготовить действие, которое сработает в ответ на событие', toward:'Переместиться к ближайшему врагу',
+    end:'Закончить ваш ход (клавиша E или Enter)', leave:'Прервать бой и вернуться к настройкам'
+  };
+  el.querySelectorAll('button[data-m],button[data-c],button[data-leave]').forEach(b => {
+    const key = b.dataset.m || b.dataset.c || 'leave', explanation = actionHelp[key];
+    if (!explanation) return;
+    if (!b.title) b.title = explanation;
+    b.setAttribute('aria-label', `${b.textContent.trim()}: ${b.title}`);
+  });
   if (Math.abs(el.offsetHeight - lastTurnH) > 40 && viewActive()) fitPlay();
 }
 // ---- таймер хода (реальное время): по истечении ход заканчивается сам ----

@@ -10,11 +10,14 @@
 Путь к хранилищу — config/kampaniya.json (ДАН-01). Проверка: python3 web/kampaniya.py check
 """
 import json
+import gzip
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -706,26 +709,51 @@ class Campaign:
         return errors
 
     # ---- мир кампании (ТЗ v2 §3): «акт1» — сетка Акта I из config «регион»; иначе — мир генератора из state/kampaniya/miry ----
-    def region(self):
-        """Сетка Акта I (web/data/region_*.json из config «регион») или None."""
+    def region_path(self):
+        """Путь к региональной карте, при необходимости распакованной из gzip в кэш состояния."""
         rp = self.vault.cfg.get("регион")
         if not rp:
             return None
-        p = rp if os.path.isabs(rp) else os.path.join(ROOT, rp)
-        if getattr(self, "_region_path", None) != p:
+        source = rp if os.path.isabs(rp) else os.path.join(ROOT, rp)
+        if not os.path.isfile(source):
+            return None
+        if not source.endswith(".gz"):
+            return source
+        cache_dir = os.path.join(STATE, "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        target = os.path.join(cache_dir, os.path.basename(source[:-3]))
+        if not os.path.isfile(target) or os.path.getmtime(target) < os.path.getmtime(source):
+            fd, tmp = tempfile.mkstemp(prefix="region-", suffix=".tmp", dir=cache_dir)
+            os.close(fd)
+            try:
+                with gzip.open(source, "rb") as src, open(tmp, "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1024 * 1024)
+                os.replace(tmp, target)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+        return target
+
+    def region(self):
+        """Сетка Акта I (web/data/region_*.json из config «регион») или None."""
+        p = self.region_path()
+        if not p:
+            return None
+        stamp = os.path.getmtime(p)
+        if getattr(self, "_region_stamp", None) != stamp:
             try:
                 with open(p, encoding="utf-8") as f:
                     self._region = json.load(f)
             except (OSError, ValueError):
                 self._region = None
-            self._region_path = p
+            self._region_stamp = stamp
         return self._region
 
     def world_msg(self, wid, use):
         """Команда движку для мира wid ("акт1" или id мира генератора)."""
         if wid == "акт1":
-            reg = self.region()
-            return None if reg is None else {"cmd": "world", "id": "акт1", "kind": "act", "data": reg, "use": use, "edits": load_edits("акт1")}
+            path = self.region_path()
+            return None if path is None else {"cmd": "world_file", "id": "акт1", "kind": "act", "path": path, "use": use, "edits": load_edits("акт1")}
         w = load_world(wid)
         if w is None:
             return None
@@ -741,7 +769,7 @@ class Campaign:
             return {"err": "нет такого мира"}
         r = self.eng.talk(m)
         if r.get("type") != "world":
-            return {"err": r.get("err")}
+            return {"err": r.get("err") or "движок кампании не загрузил мир; перезапустите игровой сервер после сборки"}
         self.meta["мир"] = wid
         with open(os.path.join(self.dir, "meta.json"), "w", encoding="utf-8") as f:
             json.dump(self.meta, f, ensure_ascii=False)
@@ -764,7 +792,7 @@ class Campaign:
     def _load(self):
         self._content()
         self.tiles, self.info = {}, None
-        wid = self.meta.get("мир") or ("акт1" if self.region() else None)
+        wid = self.meta.get("мир") or ("акт1" if self.region_path() else None)
         m = self.world_msg(wid, True) if wid else None
         if m:
             r = self.eng.talk(m)
@@ -894,7 +922,7 @@ class Campaign:
 # ---------------------------------------------------------------- команды сервера (play_server.py: cmd «kmp_*»)
 
 CAMPS, CAMPS_LOCK, VAULT = {}, threading.Lock(), None
-MASTER_ONLY = {"kmp_edit", "kmp_edit_undo", "kmp_hmap", "kmp_world_use", "kmp_world_preview", "kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export", "kmp_talk", "kmp_talk_end"}
+MASTER_ONLY = {"kmp_edit", "kmp_edit_undo", "kmp_hmap", "kmp_world_use", "kmp_world_preview", "kmp_accept", "kmp_reroll", "kmp_cancel", "kmp_direct", "kmp_undo", "kmp_export", "kmp_talk", "kmp_talk_end", "kmp_delete"}
 
 
 def _key(name):
@@ -964,9 +992,33 @@ def kmp_cmd(msg, sid=""):
             if not master:
                 c.join(name, str(msg.get("name"))[:40])   # кто знает код — участник (как в комнате)
             if cmd in MASTER_ONLY and not master:
-                return {"type": "error", "err": "это может только мастер"}
+                return {"type": "error", "err": "Удалить кампанию может только мастер." if cmd == "kmp_delete" else "это может только мастер"}
+            if cmd == "kmp_delete":
+                trash = os.path.join(STATE, "trash")
+                os.makedirs(trash, exist_ok=True)
+                dest = os.path.join(trash, f"{c.cid}-{int(time.time() * 1000000)}")
+                os.replace(c.dir, dest)
+                CAMPS.pop(c.cid, None)
+                try:
+                    c.eng.p.kill()
+                    c.eng.p.wait(timeout=2)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+                return {"type": "kmp_deleted", "id": c.cid}
             r = {}
             fog = not master or bool(msg.get("asPlayer"))   # туман (Р28): игрок видит только открытое; мастер — по желанию «как игроки»
+            if cmd == "kmp_city":   # подробный план только для поселения, которое есть в видимом слое мира
+                wid = c.meta.get("мир")
+                if not wid:
+                    return {"type": "error", "err": "мира нет"}
+                vis = c.eng.talk({"cmd": "worldinfo", "id": wid, "fog": fog})
+                towns = (vis.get("info") or {}).get("towns") or []
+                name = str(msg.get("town") or "")[:100]
+                x, y = float(msg.get("x", -1)), float(msg.get("y", -1))
+                if not any(len(t) >= 4 and t[0] == name and abs(float(t[1]) - x) < .02 and abs(float(t[2]) - y) < .02 for t in towns):
+                    return {"type": "error", "err": "поселение не видно или отсутствует на карте"}
+                r = c.eng.talk({"cmd": "city", "id": wid, "town": name, "x": x, "y": y})
+                return r if r.get("type") == "city" else {"type": "error", "err": r.get("err") or "не удалось построить план города"}
             if cmd == "kmp_worldinfo":   # мир кампании: размер, уровни обзора, поселения, надписи
                 if not c.info:
                     return {"type": "error", "err": "мира нет"}

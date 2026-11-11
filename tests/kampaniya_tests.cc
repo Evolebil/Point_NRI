@@ -3,6 +3,7 @@
 #include "engine.h"
 #include "char_spec.h"
 #include "kmp_events.h"
+#include "kmp_city.h"
 #include <chrono>
 #include <fstream>
 #include <sstream>
@@ -345,6 +346,37 @@ int main() {
         while (!a.route.empty() && days < 10) run(a, c2, "{\"type\":\"day\"}"), days++;
         T("T237", R.ok() && A->at(px, py, 0).terr == kmp::TERR_TOWN && days >= 3 && days <= 5 && std::hypot(a.x - ox, a.y - oy) < 0.1 && A->w > 700 && A->w < 850,
           "Акт I как мир (" + std::to_string((int)A->w) + " км): Париж — Орлеан за " + std::to_string(days) + " дня");
+        const Json info = parseJson(kmp::worldInfoJson(*A));
+        const Json tile = parseJson(kmp::tileJson(*A, 0, 0, 0));
+        T("T250", A->cellKm() > 3.0 && A->cellKm() < 4.5 && A->zMax() == 0 &&
+                      std::abs(info["cellKm"].dbl() - A->cellKm()) < 1e-5 &&
+                      std::abs(tile["cellKm"].dbl() - A->cellKm()) < 1e-4,
+          "Акт I: шаг=" + std::to_string(A->cellKm()) + " км, zMax=" + std::to_string(A->zMax()) +
+              ", metadata=" + std::to_string(info["cellKm"].dbl()) + ", tile=" + std::to_string(tile["cellKm"].dbl()));
+    }
+    // T251 слой биомов передаётся отдельным кодированным полем; старые карты без слоя остаются совместимыми
+    {
+        kmp::ActWorld A;
+        A.R.w = 3, A.R.h = 2, A.R.lon0 = -1, A.R.lat0 = 46, A.R.dlon = 0.1431, A.R.dlat = 0.1;
+        A.R.terr = "000000", A.R.biome = "012345", A.R.realm = "ABCDEF";
+        A.R.cover = "123456", A.R.relief = "310240", A.R.people = "ABCDEF";
+        A.realmLayer = true, A.peopleLayer = true;
+        A.build({});
+        const Json tile = parseJson(kmp::tileJson(A, 0, 0, 0));
+        const std::string b = tile["biome"].str();
+        const std::string r = tile["realm"].str();
+        const std::string cv = tile["cover"].str(), rf = tile["relief"].str(), pp = tile["people"].str();
+        const Json info = parseJson(kmp::worldInfoJson(A));
+        kmp::EditedWorld edited;
+        edited.build(std::make_shared<kmp::ActWorld>(A), {});
+        const Json editedInfo = parseJson(kmp::worldInfoJson(edited));
+        const double x = A.cellKm() * 0.5, y = A.cellKm() * 0.5;
+        const bool cell = A.at(x, y, 0).biome == 0 && A.at(x + A.cellKm(), y + A.cellKm(), 0).biome == 4;
+        T("T251", cell && b.substr(0, 3) == "012" && b.substr(256, 3) == "345" && r.substr(0, 3) == "ABC" && r.substr(256, 3) == "DEF" &&
+                      cv.substr(0, 3) == "123" && cv.substr(256, 3) == "456" && rf.substr(0, 3) == "310" && rf.substr(256, 3) == "240" &&
+                      pp.substr(0, 3) == "ABC" && pp.substr(256, 3) == "DEF" && info["peopleLayer"].flag() &&
+                      editedInfo["peopleLayer"].flag() && editedInfo["realmLayer"].flag(),
+          "карта и мир с правками сохраняют отдельные слои биомов, покрова, рельефа, рас и государств");
     }
     // T238 мир по параметрам: тот же вход — те же клетки и куски; порядок запросов не важен; доля воды ≈ заданной
     {
@@ -354,7 +386,9 @@ int main() {
         int water = 0, n = 0;
         for (int j = 0; j < 60; j++)
             for (int i = 0; i < 60; i++) water += g1->at((i + 0.5) * 5, (j + 0.5) * 5, 0).terr == kmp::TERR_WATER, n++;
-        T("T238", t1 == t2 && t1a == t2a && t1 != kmp::tileJson(*g3, 1, 1, 1) && std::abs(water / (double)n - 0.4) < 0.08 && !g1->towns.empty() && !g1->roads.segs.empty(),
+        const kmp::WCell overlay = g1->at(g1->towns[0].x, g1->towns[0].y, 0);
+        T("T238", t1 == t2 && t1a == t2a && t1 != kmp::tileJson(*g3, 1, 1, 1) && std::abs(water / (double)n - 0.4) < 0.08 && !g1->towns.empty() && !g1->roads.segs.empty() &&
+                      g1->realmLayer && g1->peopleLayer && overlay.realm > 0 && overlay.people > 0,
           "мир по параметрам детерминирован; воды " + std::to_string(water * 100 / n) + "% при заданных 40%");
     }
     // T239 масштаб: клетка 1000 фт; мир 5000 км помещается в куски на уровне zMax; поселение стоит на суше, к нему ведёт дорога
@@ -527,6 +561,28 @@ int main() {
         run(a, c2, "{\"type\":\"fog\",\"op\":\"всё\"}");
         const bool open = kmp::fogVisible(a.fog, 190, 190) && terrOf(kmp::tileJson(*G, 0, 0, 0, vis)).find(':') == std::string::npos;
         T("T249", tl.find(':') != std::string::npos && info.size() < all.size() && open, "туман: скрытые клетки и поселения игроку не уходят; «открыть всё»");
+    }
+    // T252: детерминированная геометрия городов, свободные от улиц дома, замкнутая стена и общественные здания.
+    {
+        const int pops[] = {50, 500, 2500, 8000, 60000};
+        bool ok = true, varied = false;
+        for (int pop : pops) for (uint64_t seed = 1; seed <= 20; ++seed) {
+            auto a = kmp::CityPlan::generate(seed, pop * 17, pop, seed % 2, seed % 3 == 0);
+            auto b = kmp::CityPlan::generate(seed, pop * 17, pop, seed % 2, seed % 3 == 0);
+            ok &= kmp::cityPlanJson(a) == kmp::cityPlanJson(b) && a.walls.size() == (pop >= 1000 ? 8u : 0u);
+            int gates = 0; bool market = false, citadel = false, temple = false;
+            for (const auto& q : a.buildings) gates += q.kind == "gate", market |= q.kind == "market", citadel |= q.kind == "citadel", temple |= q.kind == "temple";
+            ok &= gates == (pop >= 1000 ? 4 : 0) && market && (pop < 5000 || (citadel && temple));
+            for (size_t i = 0; i < a.buildings.size(); ++i) if (a.buildings[i].kind == "house") {
+                const auto& h = a.buildings[i];
+                for (const auto& r : a.roads) ok &= !(h.x < r.x + r.w + 2 && h.x + h.w + 2 > r.x && h.y < r.y + r.h + 2 && h.y + h.h + 2 > r.y);
+                for (const auto& r : a.walls) ok &= !(h.x < r.x + r.w + 2 && h.x + h.w + 2 > r.x && h.y < r.y + r.h + 2 && h.y + h.h + 2 > r.y);
+                for (size_t j = i + 1; j < a.buildings.size(); ++j) if (a.buildings[j].kind == "house") { const auto& bld = a.buildings[j];
+                    ok &= !(h.x < bld.x + bld.w + 2 && h.x + h.w + 2 > bld.x && h.y < bld.y + bld.h + 2 && h.y + h.h + 2 > bld.y); }
+            }
+            if (seed == 1) varied |= kmp::cityPlanJson(a) != kmp::cityPlanJson(kmp::CityPlan::generate(2, pop * 17, pop, seed % 2, seed % 3 == 0));
+        }
+        T("T252", ok && varied, "город: 20 зёрен × 5 рангов, повторяемость, свободные дома, стена, ворота, рынок, цитадель и храм");
     }
 
     std::printf("\nкампания: %d прошло, %d не прошло\n", g_pass, g_fail);

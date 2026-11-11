@@ -145,8 +145,11 @@ inline int terrainIdx(const std::string& n) {
 struct Region {
     int w = 0, h = 0;
     double lon0 = 0, lat0 = 0, dlon = 1, dlat = 1;   // lat0 — северный край, строка 0 — север
-    std::string terr, road, river;
-    bool ok() const { return w > 0 && h > 0 && (int)terr.size() == w * h; }
+    std::string terr, road, river, biome, realm, cover, relief, people;
+    bool ok() const { return w > 0 && h > 0 && (int)terr.size() == w * h &&
+                             (biome.empty() || biome.size() == terr.size()) && (realm.empty() || realm.size() == terr.size()) &&
+                             (cover.empty() || cover.size() == terr.size()) && (relief.empty() || relief.size() == terr.size()) &&
+                             (people.empty() || people.size() == terr.size()); }
     int cell(double lon, double lat) const {
         const int i = (int)std::floor((lon - lon0) / dlon), j = (int)std::floor((lat0 - lat) / dlat);
         return i >= 0 && i < w && j >= 0 && j < h ? j * w + i : -1;
@@ -154,6 +157,11 @@ struct Region {
     int terrAt(int c) const { return c < 0 ? 7 : terr[c] - '0'; }
     bool roadAt(int c) const { return c >= 0 && road.size() == terr.size() && road[c] == '1'; }
     bool riverAt(int c) const { return c >= 0 && river.size() == terr.size() && river[c] == '1'; }
+    int biomeAt(int c) const { return c >= 0 && biome.size() == terr.size() ? biome[c] - '0' : -1; }
+    int realmAt(int c) const { return c >= 0 && realm.size() == terr.size() ? (unsigned char)realm[c] : 0; }
+    int coverAt(int c) const { return c >= 0 && cover.size() == terr.size() ? cover[c] - '0' : -1; }
+    int reliefAt(int c) const { return c >= 0 && relief.size() == terr.size() ? relief[c] - '0' : -1; }
+    int peopleAt(int c) const { return c >= 0 && people.size() == terr.size() ? (unsigned char)people[c] : 0; }
 };
 const int TERR_FIELDS = 0, TERR_FOREST = 1, TERR_HILLS = 2, TERR_MOUNT = 3, TERR_SWAMP = 4, TERR_RIVER = 5, TERR_TOWN = 6, TERR_WATER = 7,
           TERR_DESERT = 8, TERR_SNOW = 9, TERR_N = 10;

@@ -1,7 +1,8 @@
 // ====================================================================================================================
 // 1. Конструктор персонажа
 // ====================================================================================================================
-const DEFAULT_CHAR = {v:21, name:'Рыцарь', budget:500, ctype:9, stats:[16,10,14,8,10,8], acV:4, main:0, prof:2, size:2, armor:{kind:0, shield:false, stealthDis:false, prof:true},
+const DEFAULT_BUDGET = 500;
+const DEFAULT_CHAR = {v:21, name:'Рыцарь', budget:DEFAULT_BUDGET, ctype:9, stats:[16,10,14,8,10,8], acV:4, main:0, prof:2, size:2, armor:{kind:0, shield:false, stealthDis:false, prof:true},
   weapon:{armed:true, n:1, s:8, range:5, att:2, reach:5, type:11, finesse:false, ammo:false, prof:true},
   abilities:[{_kind:'save', saveStat:1, range:5, radius:10, dmgN:2, dmgS:6, dtype:1, cond:1, condRounds:1, recharge:5}],
   passives:{speed:30, saveProf:[2], rules:[], res:[], imm:[], vuln:[], immCond:[], slots:[0,0,0,0,0,0,0,0,0,0], aura:{n:0,s:6,type:3,rad:0,cond:0,rounds:1}, rider:{n:0,s:6,type:3,cond:0,rounds:1}}};

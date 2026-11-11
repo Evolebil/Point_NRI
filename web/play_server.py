@@ -513,7 +513,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             log("api", cmd, "ошибка:", repr(e))
             out = {"type": "error", "err": "ошибка движка (подробности — в журнале сервера)"}
-        self._send(200, json.dumps(out, ensure_ascii=False))
+        status = 403 if cmd == "kmp_delete" and out.get("err") == "Удалить кампанию может только мастер." else 200
+        self._send(status, json.dumps(out, ensure_ascii=False))
 
 
 if __name__ == "__main__":

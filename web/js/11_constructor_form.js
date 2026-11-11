@@ -5,9 +5,10 @@ function groupsHTML(base, obj, groups, rer){
   for (const g of groups){
     const key = base + '|' + g.id;
     GREG[key] = {g, obj, rer};
+    const gi = ({base:'feature',area:'map',targets:'character',cond:'feature',move:'move',dot:'damage',more:'damage',ground:'map',special:'magic',heal:'magic',buff:'magic',timing:'stats',cost:'price',dmg:'damage'})[g.id] || 'feature';
     if (g.always || (g.has && g.has(obj)) || OPEN.has(key))
-      h += `<div class="eff"><div class="eff-h">${esc(g.n)}${g.always ? '' : `<button class="x" data-gdel="${key}" title="Убрать">✕</button>`}</div>${g.html}</div>`;
-    else add += `<button class="add" data-gadd="${key}">+ ${esc(g.n)}</button>`;
+      h += `<div class="eff"><div class="eff-h">${uiIcon(gi)}${esc(g.n)}${g.always ? '' : `<button class="x" data-gdel="${key}" title="Убрать">✕</button>`}</div>${g.html}</div>`;
+    else add += `<button class="add" data-gadd="${key}">${uiIcon(gi)} + ${esc(g.n)}</button>`;
   }
   return h + (add ? `<div class="adds">${add}</div>` : '');
 }
@@ -15,14 +16,14 @@ const any = (a, ks) => ks.some(k => +a[k] > 0 || a[k] === true);
 const zero = (a, ks) => ks.forEach(k => { if (typeof a[k] === 'boolean') a[k] = false; else if (a[k] != null) a[k] = 0; });
 const G2 = s => `<div class="grid2">${s}</div>`;
 function abilGroups(a, k, P, dt, cd){
-  const SAVE = `<label>Спасбросок цели ${selIn(P('saveStat'), STAT_N.map((n, j) => [j, n]))}</label>`;
+  const SAVE = `<label>Спасбросок ${infoIcon('Спасбросок')} цели ${selIn(P('saveStat'), STAT_N.map((n, j) => [j, n]))}</label>`;
   const COND = {id:'cond', n:'Состояние', has:a => +a.cond > 0, init:a => { a.cond = 1; a.condRounds = 1; }, clear:a => zero(a, ['cond']),
     html:G2(`<label>Состояние ${selIn(P('cond'), cd)}</label><label>раундов ${numIn(P('condRounds'), 1, LIM.rounds)}</label>${+a.cond === CAT.conds.indexOf('схвачен') ? `${chkIn(P('grabRestr'), 'Схваченный опутан')}${chkIn(P('grabDot'), 'Урон каждый ход, пока держит')}${a.grabDot ? `<label>кубиков ${numIn(P('dotN'), 0, LIM.dice)}</label><label>грань ${selIn(P('dotS'), DIE_OPTS())}</label>` : ''}` : ''}`)};
   const TIMING = {id:'timing', n:'Как применяется', always:true,
     html:G2(`${chkIn(P('bonus'), 'Бонусное действие')}${chkIn(P('inAttack'), 'Вместо одной атаки действия «Атака» (дракон: страх, затем когти)')}${k === 'self' ? chkIn(P('preCast'), 'Действует с начала боя (наложено заранее)') : ''}<label>Реакция (срабатывает сама) ${selIn(P('react'), [[0,'нет — обычное действие'],[1,'когда меня атакуют'],[2,'когда мне нанесли урон'],[3,'когда враг вошёл в зону'],[4,'когда враг применил способность в зоне']])}</label>`)};
   const COST = {id:'cost', n:'Ограничения (дешевле)', has:a => any(a, ['uses', 'recharge', 'slotLvl', 'conc', 'noRepeat', 'immSave']), init:a => { a.uses = 1; }, clear:a => zero(a, ['uses', 'recharge', 'slotLvl', 'conc', 'noRepeat', 'immSave']),
-    html:G2(`<label>Применений за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'))}</label><label>Перезарядка ${selIn(P('recharge'), [[0,'нет'],[6,'6'],[5,'5–6'],[4,'4–6']])}</label>
-      <label>Ячейка заклинания, ур. (0 — нет) ${numIn(P('slotLvl'), 0, 9)}</label>${chkIn(P('conc'), 'Концентрация')}${chkIn(P('noRepeat'), 'Не два раунда подряд')}${chkIn(P('rechAfter'), 'Кончились применения — перезарядка возвращает все')}${k === 'save' ? chkIn(P('immSave'), 'После успешного спасброска цель к ней невосприимчива') : ''}`)};
+    html:G2(`<label>Применений за бой (пусто — без ограничения) ${usesIn(P('uses'))}</label><label>Перезарядка ${selIn(P('recharge'), [[0,'нет'],[6,'6'],[5,'5–6'],[4,'4–6']])}</label>
+      <label>Уровень ячейки заклинания (0 — нет) ${numIn(P('slotLvl'), 0, 9)}</label>${chkIn(P('conc'), 'Концентрация')}${chkIn(P('noRepeat'), 'Не два раунда подряд')}${chkIn(P('rechAfter'), 'Кончились применения — перезарядка возвращает все')}${k === 'save' ? chkIn(P('immSave'), 'После успешного спасброска цель к ней невосприимчива') : ''}`)};
   if (k === 'self') return [
     {id:'ally', n:'И на союзника', has:a => !!a.ally, init:a => { a.ally = true; a.range = a.range || 30; }, clear:a => { a.ally = false; },
       html:G2(`${chkIn(P('ally'), 'И на союзника (лечение, хиты, баффы, невидимость)')}<label>дальность до союзника, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label>`)},
@@ -41,8 +42,8 @@ function abilGroups(a, k, P, dt, cd){
     {id:'flyr', n:'Полёт на время', has:a => +a.flyRounds > 0, init:a => { a.flyRounds = 10; }, clear:a => zero(a, ['flyRounds']), html:G2(`<label>раундов ${numIn(P('flyRounds'), 0, LIM.rounds)}</label>`)},
     {id:'xturn', n:'Остановка времени (ходы подряд)', has:a => +a.extraTurns > 0, init:a => { a.extraTurns = 2; }, clear:a => zero(a, ['extraTurns']), html:G2(`<label>ещё ходов подряд ${numIn(P('extraTurns'), 0, 10)}</label>`)},
     {id:'grow', n:'Увеличение', has:a => +a.growRounds > 0, init:a => { a.growRounds = 10; }, clear:a => zero(a, ['growRounds']), html:G2(`<label>раундов ${numIn(P('growRounds'), 0, LIM.rounds)}</label><span class="small">размер +1 (если хватает места) и +1к4 к урону оружия</span>`)},
-    {id:'light', n:'Свет', has:a => +a.lightR > 0, init:a => { a.lightR = 20; a.buffRounds = a.buffRounds || 10; }, clear:a => zero(a, ['lightR']), html:G2(`<label>радиус, фт ${numIn(P('lightR'), 0, LIM.ft, 10)}</label><span class="small">ночью без тёмного зрения неосвещённое видно лишь на 30 фт</span>`)},
-    {id:'dark', n:'Тьма вокруг', has:a => +a.darkR > 0, init:a => { a.darkR = 10; }, clear:a => zero(a, ['darkR']), html:G2(`<label>радиус, фт ${numIn(P('darkR'), 0, LIM.ft, 10)}</label>`)},
+    {id:'light', n:'Свет', has:a => +a.lightR > 0, init:a => { a.lightR = 20; a.buffRounds = a.buffRounds || 10; }, clear:a => zero(a, ['lightR']), html:G2(`<label>радиус ${infoIcon('Радиус')}, фт ${numIn(P('lightR'), 0, LIM.ft, 10)}</label><span class="small">ночью без тёмного зрения ${infoIcon('Тёмное зрение')} неосвещённое видно лишь на 30 фт</span>`)},
+    {id:'dark', n:'Тьма вокруг', has:a => +a.darkR > 0, init:a => { a.darkR = 10; }, clear:a => zero(a, ['darkR']), html:G2(`<label>радиус ${infoIcon('Радиус')}, фт ${numIn(P('darkR'), 0, LIM.ft, 10)}</label>`)},
     {id:'invis', n:'Невидимость', has:a => +a.invisN > 0, init:a => { a.invisN = 1; }, clear:a => zero(a, ['invisN']), html:G2(`<label>раундов ${numIn(P('invisN'), 0, LIM.rounds)}</label>`)},
     {id:'hide', n:'Укрытие (скрытность)', has:a => !!a.hide, init:a => { a.hide = true; }, clear:a => { a.hide = false; }, html:G2(chkIn(P('hide'), 'Укрытие (скрытность)'))},
     TIMING, COST];
@@ -86,12 +87,12 @@ function abilGroups(a, k, P, dt, cd){
         ${a.ground ? `<label>Барьер: клеток в линии (0 — нет) ${numIn(P('wallLen'), 0, 100)}</label><label>раундов барьера ${numIn(P('wallRounds'), 0, LIM.rounds)}</label>` : ''}`)},
     TIMING, COST];
 }
-const KIND_OPTS = [['attack','Атака (бросок попадания)'],['save','Спасбросок цели'],['auto','Без броска (всегда попадает)'],['self','На себя'],['onhit','При попадании оружием (приём)'],['cmd','Приказ союзнику атаковать'],['guard','Реакция за союзника'],['counter','Контрзаклинание'],['summon','Призыв приспешников'],['form','Превращение (облик)']];
+const KIND_OPTS = [['attack','Атака (бросок попадания)'],['save','Спасбросок цели'],['auto','Без броска атаки'],['self','На себя'],['onhit','При попадании оружием (приём)'],['cmd','Приказ союзнику атаковать'],['guard','Реакция за союзника'],['counter','Контрзаклинание'],['summon','Призыв приспешников'],['form','Превращение (облик)']];
 function abilityHTML(a, i){
   const k = a._kind || 'attack';
   const dt = DT_OPTS(), cd = CAT.conds.map((n, j) => [j, n + (CAT.condPrice && CAT.condPrice[j] != null ? ` · ${Math.round(CAT.condPrice[j])} оч. (1 раунд)` : '')]).filter(x => x[0] > 0);
   const P = f => `abilities.${i}.${f}`;
-  let h = `<div class="abil" data-ab="${i}"><div class="top"><b>${i + 1}.</b>
+  let h = `<div class="abil" data-ab="${i}"><div class="top">${uiIcon(k === 'summon' ? 'character' : k === 'self' ? 'shield' : 'magic')}<b>${i + 1}.</b>
     <input type="text" data-p="${P('name')}" data-t="str" placeholder="Название" style="width:170px">
     ${selIn(P('_kind'), KIND_OPTS, 'str')}
     <span class="price" data-abprice="${i}"></span><button data-del="${i}" class="danger" title="Удалить">✕</button></div>
@@ -102,7 +103,7 @@ function abilityHTML(a, i){
   if (k === 'cmd'){
     h += `<div class="hint" style="margin:6px 0">Союзник (приспешник) в пределах дальности бьёт оружием своей реакцией — по ближайшему врагу в досягаемости.</div>
       <div class="grid2"><label>Дальность до союзника, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label>${chkIn(P('bonus'), 'Бонусным действием')}
-      <label>Применений за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'))}</label></div></div>`;
+      <label>Применений за бой (пусто — без ограничения) ${usesIn(P('uses'))}</label></div></div>`;
     return h;
   }
   if (k === 'summon'){
@@ -110,7 +111,7 @@ function abilityHTML(a, i){
     h += `<div class="hint" style="margin:6px 0">Приспешники появляются рядом и ходят сразу после вас — вы управляете ими сами. Цена: шаблон × копии × применения. Свой шаблон — соберите персонажа и нажмите «В библиотеку».</div>`;
     keys.forEach((g, n) => { h += `<div class="grid2"><label>Группа ${n + 1}: кто ${selIn(P('groups.' + g + '.m'), MINI_OPTS(), 'str')}</label><label>Копий ${numIn(P('groups.' + g + '.n'), 1, 20)}</label>${keys.length > 1 ? `<button data-sgdel="${i}:${g}" class="danger">✕ группу</button>` : ''}</div>`; });
     h += `<div class="grid2">${keys.length < 4 ? `<button data-sgadd="${i}">+ ещё группа (другие приспешники)</button>` : ''}<button data-minisave="1" title="Текущий персонаж (без его призывов) — в библиотеку приспешников и обликов">📥 Текущего персонажа — в библиотеку</button></div>
-      <div class="grid2"><label>Применений за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'))}</label>${chkIn(P('bonus'), 'Бонусным действием')}${chkIn(P('conc'), 'Концентрация (дешевле; исчезают с ней)')}</div></div>`;
+      <div class="grid2"><label>Применений за бой (пусто — без ограничения) ${usesIn(P('uses'))}</label>${chkIn(P('bonus'), 'Бонусным действием')}${chkIn(P('conc'), 'Концентрация (дешевле; исчезают с ней)')}</div></div>`;
     return h;
   }
   if (k === 'form'){
@@ -120,15 +121,15 @@ function abilityHTML(a, i){
   }
   if (k === 'counter'){
     h += `<div class="hint" style="margin:6px 0">Срабатывает сама, реакцией: когда враг применяет способность в пределах дальности, она гаснет (плата за неё всё равно списана).</div>
-      <div class="grid2"><label>Дальность, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label><label>Применений за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'))}</label>
-      <label>Ячейка заклинания, ур. (0 — нет) ${numIn(P('slotLvl'), 0, 9)}</label></div></div>`;
+      <div class="grid2"><label>Дальность, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label><label>Применений за бой (пусто — без ограничения) ${usesIn(P('uses'))}</label>
+      <label>Уровень ячейки заклинания (0 — нет) ${numIn(P('slotLvl'), 0, 9)}</label></div></div>`;
     return h;
   }
   if (k === 'guard'){
     h += `<div class="hint" style="margin:6px 0">Срабатывает сама, реакцией: когда враг атакует союзника рядом с вами. Помеха — как стиль «Защита», удар — как черта «Страж».</div>
       <div class="grid2">${chkIn(P('protect'), 'Помеха этой атаке')}${chkIn(P('strike'), 'Удар оружием по атакующему')}
       <label>Союзник не дальше, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label>
-      <label>Применений за бой (пусто — ∞, без ограничения) ${usesIn(P('uses'))}</label></div></div>`;
+      <label>Применений за бой (пусто — без ограничения) ${usesIn(P('uses'))}</label></div></div>`;
     return h;
   }
   if (k === 'offhand'){
@@ -140,17 +141,18 @@ function abilityHTML(a, i){
 }
 // доп. урон другого типа (модификация при сборке, v21 №10): до двух строк
 function moreHTML(P, dt){
-  // сколько угодно доп. типов урона (8 ноября): заполненные + одна пустая строка
+  // Показываем только уже созданные строки; новую пользователь добавляет явно.
   const filled = Object.keys(PATHS(S, P('more').replace(/^S\./, '')) || {}).filter(k => { const m = PATHS(S, P('more.' + k)); return m && +m.n > 0; }).length;
-  const rows = Math.min(Math.max(2, filled + 1), dt.length);
-  return `<div class="grid2" style="margin-top:6px">${Array.from({length: rows}, (_, j) => j).map(j => `<label>Доп. урон ${j + 1}: кубиков ${numIn(P('more.' + j + '.n'), 0, LIM.dice)}</label>
-    <label>грань ${selIn(P('more.' + j + '.s'), DIE_OPTS())}</label><label>тип (другой) ${selIn(P('more.' + j + '.type'), dt).replace('<select ', '<select data-dt="1" ')}</label>`).join('')}</div>`;
+  const rows = Math.min(filled, dt.length);
+  return `<div class="more-damage">${Array.from({length: rows}, (_, j) => `<div class="more-damage-row"><b class="more-damage-title">${uiIcon('damage')} Дополнительный урон ${j + 1}</b><label>Кубиков ${numIn(P('more.' + j + '.n'), 0, LIM.dice)}</label>
+    <label>Грань ${selIn(P('more.' + j + '.s'), DIE_OPTS())}</label><label>Тип урона ${selIn(P('more.' + j + '.type'), dt).replace('<select ', '<select data-dt="1" ')}</label></div>`).join('')}
+    ${rows < dt.length ? `<button class="add" type="button" data-moreadd="${P('more')}">${uiIcon('plus')} Добавить ещё тип урона</button>` : ''}</div>`;
 }
 
 // шаги конструктора: показан один; в подписи — цена шага (по категориям покупок) или сколько выбрано
 const STEPS = [
-  {n:'Основа'}, {n:'Характеристики и КД', cats:['stat', 'ac']}, {n:'Владения'}, {n:'Оружие', cats:['weapon']},
-  {n:'Способности', cats:['ability', 'minions']}, {n:'Защита', adv:true}, {n:'Движение и чувства', adv:true}, {n:'Особенности', adv:true}];
+  {n:'Основа', icon:'character'}, {n:'Характеристики и КД', icon:'stats', cats:['stat', 'ac']}, {n:'Владения', icon:'skill'}, {n:'Оружие', icon:'weapon', cats:['weapon']},
+  {n:'Способности', icon:'magic', cats:['ability', 'minions']}, {n:'Защита', icon:'shield', adv:true}, {n:'Движение и чувства', label:'Скорость и чувства', icon:'move', adv:true}, {n:'Особенности', label:'Черты и особые свойства', icon:'feature', adv:true}];
 let STEP = 0, SIMPLE = false, WPN_OPEN = false;   // WPN_OPEN — раскрыта ли ручная настройка оружия
 try { SIMPLE = localStorage.getItem('dnd_simple') === '1'; } catch (e) {}
 // простой режим прячет шаги для опытных (adv); купленное на них остаётся и считается в цене
@@ -204,10 +206,10 @@ function renderSteps(){
   if (!stepVis(STEP)) STEP = Math.max(0, stepPrev(STEP));
   const bad = stepIssue();
   bar.innerHTML = STEPS.map((s, i) => { if (!stepVis(i)) return ''; const note = stepNote(i), mark = i === bad ? '⚠' : /^пусто|^—$/.test(note) ? '·' : '✓';
-    return `<button class="step-b${i === STEP ? ' on' : ''}" data-step="${i}"${i === bad ? ' style="outline:2px solid var(--bad)"' : ''} title="${i === bad ? 'Здесь ошибка — откройте шаг' : ''}"><span>${mark} ${i + 1} · ${esc(s.n)}</span><small>${esc(note)}</small></button>`; }).join('');
+    return `<button class="step-b${i === STEP ? ' on' : ''}" data-step="${i}"${i === bad ? ' style="outline:2px solid var(--bad)"' : ''} title="${i === bad ? 'Здесь ошибка — откройте шаг' : ''}">${uiIcon(s.icon)}<span>${mark} ${i + 1} · ${esc(s.label || s.n)}</span><small>${esc(note)}</small></button>`; }).join('');
   document.querySelectorAll('[data-cnt]').forEach(el => { el.textContent = ((S.passives || {})[el.dataset.cnt] || []).length; });
   const fe = $('formErr');
-  if (fe) fe.innerHTML = lastPrice && !lastPrice.ok ? `<div class="err" style="margin:6px 0">Персонаж пока не готов: ${esc(lastPrice.err || '')}${bad >= 0 ? ` <button data-step="${bad}">Открыть шаг «${esc(STEPS[bad].n)}»</button>` : ''}</div>` : '';
+  if (fe) fe.innerHTML = lastPrice && !lastPrice.ok ? `<div class="err" style="margin:6px 0">Персонаж пока не готов: ${esc(lastPrice.err || '')}${bad >= 0 ? ` <button data-step="${bad}">Открыть шаг «${esc(STEPS[bad].label || STEPS[bad].n)}»</button>` : ''}</div>` : '';
   document.querySelectorAll('#form .stepbox').forEach(el => el.classList.toggle('on', +el.dataset.box === STEP));
 }
 function goStep(i){
@@ -219,7 +221,7 @@ function goStep(i){
 }
 function stepNav(i){
   const a = stepPrev(i), b = stepNext(i);
-  return `<div class="stepnav">${a >= 0 ? `<button data-step="${a}">← ${esc(STEPS[a].n)}</button>` : '<span></span>'}${b >= 0 ? `<button class="primary" data-step="${b}">${esc(STEPS[b].n)} →</button>` : '<button class="primary" data-tab2>К сопернику →</button>'}</div>`;
+  return `<div class="stepnav">${a >= 0 ? `<button data-step="${a}">← ${esc(STEPS[a].label || STEPS[a].n)}</button>` : '<span></span>'}${b >= 0 ? `<button class="primary" data-step="${b}">${esc(STEPS[b].label || STEPS[b].n)} →</button>` : '<button class="primary" data-tab2>К сопернику →</button>'}</div>`;
 }
 function presetSel(kind, list){
   return `<select data-presetsel="${kind}"><option value="">+ из заготовки…</option>${list.map((p, i) => `<option value="${i}">${esc(p.n)}</option>`).join('')}</select>`;
@@ -233,11 +235,11 @@ function buildForm(){
   S.passives = S.passives || {};
   const p = S.passives, PP = f => 'passives.' + f;
   const box = (i, inner) => `<div class="stepbox" data-box="${i}">${inner}${stepNav(i)}</div>`;
-  let h = `<div id="formErr"></div><div class="steps" id="stepBar"></div>`;
+  let h = `<div id="formErr"></div><div class="steps" id="stepBar"></div><div class="hint" style="background:rgba(255,255,255,.06);padding:10px;margin:8px 0">Здесь собирается боец для арены за очки, а не персонаж по классам и уровням D&amp;D 5e. Очки тратятся на характеристики, оружие и способности. Неизрасходованные очки превращаются в ХП: 2 очка = 1 ХП.</div>`;
   // 0 · основа
   h += box(0, `<div class="card"><h3>Основа</h3>
     <div class="row"><label><input type="checkbox" id="simpleMode"${SIMPLE ? ' checked' : ''}> Простой режим</label><span class="small">только основные шаги; защита, движение и особенности — в полном режиме (купленное там остаётся)</span></div>
-    <div class="row">${presetSel('char', CHAR_PRESETS).replace('+ из заготовки…', 'Готовый персонаж…')}<span class="small">заменит всего персонажа, бюджет останется вашим</span></div>
+    <div class="row">${presetSel('char', CHAR_PRESETS).replace('+ из заготовки…', 'Выбрать готового персонажа…')}<span class="small">Выбранный герой заменит текущего. Количество доступных очков не изменится.</span></div>
     <div class="row"><label>Имя <input type="text" data-p="name" data-t="str" style="width:200px"></label>
     <label>Бюджет (очки) ${numIn('budget', CAT.minBudget || 20, CAT.maxBudget || 100000, 1, 90)}</label>
     <label>Размер ${selIn('size', [[0,'крошечный'],[1,'маленький'],[2,'средний'],[3,'большой'],[4,'огромный'],[5,'громадный']])}</label>
@@ -250,10 +252,10 @@ function buildForm(){
     <table class="small tnum" style="border-collapse:collapse;margin:4px 0"><tr><th style="text-align:left;padding-right:8px">значение</th>${STAT_TABLE.map(v => `<td style="padding:0 6px">${v}</td>`).join('')}</tr>
       <tr><th style="text-align:left;padding-right:8px;cursor:help" title="Формула: значение × (значение + 1) / 2 − 55">цена, оч. ?</th>${STAT_TABLE.map(v => { const c = v * (v + 1) / 2 - 55;
         return `<td style="padding:0 6px;color:${c < 0 ? 'var(--good)' : 'inherit'}">${c > 0 ? c : c < 0 ? '+' + (-c) : '0'}</td>`; }).join('')}</tr></table>
-    <div class="hint"><b>Главная характеристика</b> — любая из шести, отметьте кружок «главная» справа. От неё бросок атаки способностей и СЛ спасбросков против них (8 + мастерство + её модификатор). Оружие бьёт своей: СИЛ, фехтовальное и боеприпасы — ЛОВ.</div>`;
+    <div class="hint"><b>Главная характеристика</b> — любая из шести, отметьте кружок «главная» справа. От неё бросок атаки способностей и СЛ ${infoIcon('СЛ')} спасбросков ${infoIcon('Спасбросок')} против них (8 + мастерство + её модификатор). Оружие бьёт своей: СИЛ, фехтовальное и боеприпасы — ЛОВ.</div>`;
   STAT_N.forEach((n, i) => {
     st += `<div class="statrow"><span class="nm" title="${STAT_FULL[i]}" style="cursor:help">${n}</span><input type="range" min="1" max="${LIM.stat}" data-p="stats.${i}" data-t="int">${numIn('stats.' + i, 1, LIM.stat, 1, 56)}<span class="tnum small" data-statcost="${i}"></span>
-      <label class="small" title="От главной характеристики — бросок атаки способностей и СЛ спасбросков против них"><input type="radio" name="main" data-main="${i}"> главная</label></div>`;
+      <label class="small" title="От главной характеристики — бросок атаки способностей и СЛ ${infoIcon('СЛ')} спасбросков ${infoIcon('Спасбросок')} против них"><input type="radio" name="main" data-main="${i}"> главная</label></div>`;
   });
   st += `<div class="statrow"><span class="nm" title="Класс доспеха: чтобы попасть, атака должна набрать не меньше" style="cursor:help">КД</span><input type="range" min="0" max="${LIM.ac}" data-p="acV" data-t="int">${numIn('acV', 0, LIM.ac, 1, 56)}<span class="tnum small" data-accost></span><span class="small" data-acval></span></div>
     <div class="hint">КД = 10 + купленные единицы + ЛОВ (по доспеху) + щит. Средний доспех пропускает ЛОВ не больше +2, тяжёлый — не пропускает вовсе; за срезанную ЛОВ очки возвращаются.</div>
@@ -286,7 +288,7 @@ function buildForm(){
       <label>Дальность, фт (5 — ближнее) ${numIn('weapon.range', 5, LIM.ft, 5)}</label><label>Досягаемость ближнего, фт ${numIn('weapon.reach', 5, LIM.ft, 5)}</label>
       ${chkIn('weapon.prof', 'Владею этим оружием', 'без владения: −' + U.noWProf + ' оч. × мастерство/2')}</div>
       <div class="sec-h">Свойства</div>
-      <div class="grid2">${chkIn('weapon.finesse', 'Фехтовальное (СИЛ или ЛОВ)', '+3 оч.')}${chkIn('weapon.silver', 'Посеребрённое: пробивает сопротивление немагическому')}${chkIn('weapon.ammo', 'Боеприпасное (по ЛОВ)')}
+      <div class="grid2">${chkIn('weapon.finesse', 'Фехтовальное (СИЛ или ЛОВ)', '+3 оч.')}${chkIn('weapon.silver', 'Посеребрённое: пробивает сопротивление немагическому')}${chkIn('weapon.ammo', 'Боеприпас (по ЛОВ)')}
       ${chkIn('weapon.light', 'Лёгкое (можно бить второй рукой)')}${chkIn('weapon.offhand', 'Атака второй рукой: бонусным действием, после атаки оружием (своим оружием)')}${chkIn('weapon.twfMod', 'Стиль двумя оружиями: модификатор и к урону второй руки')}<span class="price" data-ohprice></span>${chkIn('weapon.twoHanded', 'Двуручное (без щита и второй руки)')}${chkIn('weapon.heavy', 'Тяжёлое (маленьким — помеха)')}
       <label>Универсальное: грань двумя руками ${selIn('weapon.versatile', [[0,'нет'], ...DIE_OPTS()])}</label>
       <label>Дальняя дистанция, фт (0 — нет) ${numIn('weapon.long', 0, LIM.ft, 5)}</label></div>
@@ -300,7 +302,7 @@ function buildForm(){
       <input type="text" data-p="${W('name')}" data-t="str" placeholder="Название (лук, кинжал…)" style="width:170px"><span class="price" data-altprice="${i}"></span><button data-altdel="${i}" class="danger" title="Удалить">✕</button></div>
       <div class="grid2"><label>Кубиков ${numIn(W('n'), 1, LIM.dice)}</label><label>грань ${selIn(W('s'), DIE_OPTS())}</label><label>Тип урона ${dtSel(W('type'))}</label>
       <label>Атак за действие ${numIn(W('att'), 1, LIM.count)}</label><label>Дальность, фт (5 — ближнее) ${numIn(W('range'), 5, LIM.ft, 5)}</label><label>Досягаемость ближнего, фт ${numIn(W('reach'), 5, LIM.ft, 5)}</label>
-      ${chkIn(W('finesse'), 'Фехтовальное')}${chkIn(W('ammo'), 'Боеприпасное (по ЛОВ)')}${chkIn(W('multi'), 'Бьёт в том же действии «Атака» (мультиатака: укус + когти), а не вместо основного')}</div></div>`; }).join('')}
+      ${chkIn(W('finesse'), 'Фехтовальное')}${chkIn(W('ammo'), 'Боеприпас (по ЛОВ)')}${chkIn(W('multi'), 'Бьёт в том же действии «Атака» (мультиатака: укус + когти), а не вместо основного')}</div></div>`; }).join('')}
     <button data-altadd="1">+ Запасное оружие</button></div>`);
   // 4 · способности
   h += box(4, `<div class="card"><h3>Способности</h3><div class="hint">Заклинания и приёмы. Цена = эффекты × (100% + надбавки − скидки), но не меньше 20% от эффектов. Надбавки — дальность, область, бонусное действие, «без броска»; скидки — ограничения, перезарядка, концентрация, ячейка. В каждой способности видны только выбранные эффекты, остальные — кнопками «+».</div>
@@ -308,7 +310,7 @@ function buildForm(){
     <div id="abilList"></div></div>`);
   // 5 · защита
   const immCondChips = chipsFor('passives.immCond', CAT.conds.slice(1).map(String)).replace(/data-i="(\d+)"/g, (m, g) => `data-i="${+g + 1}"`);
-  h += box(5, `<div class="card"><h3>Защита</h3><div class="hint">Цена резиста и иммунитета зависит от того, как часто встречается этот тип урона.</div>
+  h += box(5, `<div class="card"><h3>Защита</h3><div class="hint">Цена резиста ${infoIcon('Резист')} и иммунитета зависит от того, как часто встречается этот тип урона.</div>
     <div id="defGroups">${groupsHTML('def', p, [
       {id:'res', n:'Резист (урон вдвое меньше)', has:o => (o.res || []).length > 0, clear:o => { o.res = []; }, html:chipsFor('passives.res', CAT.dtypes, '', dtOrder(), dtPrices('resist5'))},
       {id:'imm', n:'Иммунитет к урону', has:o => (o.imm || []).length > 0, clear:o => { o.imm = []; }, html:chipsFor('passives.imm', CAT.dtypes, '', dtOrder(), dtPrices('imm5'))},
@@ -322,15 +324,15 @@ function buildForm(){
         html:G2(`<label>Парирование: +КД против ближней атаки ${numIn(PP('parry'), 0, LIM.count)}</label>${chkIn(PP('uncanny'), 'Невероятное уклонение', pc('uncanny'))}${chkIn(PP('riposte'), 'Контратака', pc('riposte'))}`)},
     ], buildForm)}</div></div>`);
   // 6 · движение и чувства
-  h += box(6, `<div class="card"><h3>Движение и чувства</h3>
+  h += box(6, `<div class="card"><h3>Скорость и чувства</h3>
     <div class="grid2"><label>Скорость, фт (покупается вся, шаг 5) ${numIn(PP('speed'), 0, LIM.ft, 5)}</label></div>
     <div class="sec-h">Движение</div>
     <div class="grid2">${chkIn(PP('fly'), 'Полёт', pc('fly'))}${chkIn(PP('immPush'), 'Неподвижность (иммунитет к толчку)', pc('immPush'))}${chkIn(PP('disengB'), 'Отход бонусным действием', pc('disengB'))}${chkIn(PP('ignDiff'), 'Лёгкая поступь', pc('ignDiff'))}${chkIn(PP('climbS'), 'Скорость лазания', pc('climbS'))}${chkIn(PP('swimS'), 'Скорость плавания', pc('swimS'))}${chkIn(PP('burrowS'), 'Скорость копания', pc('burrowS'))}${chkIn(PP('evasion'), 'Увёртливость', pc('evasion'))}${chkIn(PP('sunSens'), 'Солнечная чувствительность (возврат)', pc('sunSens'))}</div>
-    <div class="row"><label>Свет вокруг себя, фт (0 — нет) ${numIn(PP('lightR'), 0, LIM.ft, 10)}</label><span class="small">ночью без тёмного зрения неосвещённое видно лишь на 30 фт</span></div>
+    <div class="row"><label>Свет вокруг себя ${infoIcon('Радиус')}, фт (0 — нет) ${numIn(PP('lightR'), 0, LIM.ft, 10)}</label><span class="small">ночью без тёмного зрения ${infoIcon('Тёмное зрение')} неосвещённое видно лишь на 30 фт</span></div>
     <div class="sec-h">Чувства</div>
-    <div class="grid2"><label>Тёмное зрение ${selIn(PP('dv'), [[0,'нет'],[30,'30 фт'],[60,'60 фт'],[120,'120 фт']])}</label><label>Слепое зрение ${selIn(PP('blindsight'), [[0,'нет'],[10,'10 фт'],[30,'30 фт'],[60,'60 фт']])}</label><label>Истинное зрение ${selIn(PP('truesight'), [[0,'нет'],[10,'10 фт'],[30,'30 фт'],[60,'60 фт'],[120,'120 фт']])}</label><label title="В начале раунда — обвал (уровень×2к10, ЛОВ — половина) или трясина вокруг врага, по очереди">Действия логова ${selIn(PP('lair'), [[0,'нет'],[1,'1: 2к10 · ' + U.lair + ' оч.'],[2,'2: 4к10 · ' + 2 * U.lair + ' оч.'],[3,'3: 6к10 · ' + 3 * U.lair + ' оч.']])}</label></div></div>`);
+    <div class="grid2"><label>Тёмное зрение ${infoIcon('Тёмное зрение')}${selIn(PP('dv'), [[0,'нет'],[30,'30 фт'],[60,'60 фт'],[120,'120 фт']])}</label><label>Слепое зрение ${selIn(PP('blindsight'), [[0,'нет'],[10,'10 фт'],[30,'30 фт'],[60,'60 фт']])}</label><label>Истинное зрение ${infoIcon('Истинное зрение')}${selIn(PP('truesight'), [[0,'нет'],[10,'10 фт'],[30,'30 фт'],[60,'60 фт'],[120,'120 фт']])}</label><label title="В начале раунда — обвал (уровень×2к10, ЛОВ — половина) или трясина вокруг врага, по очереди">Действия логова ${selIn(PP('lair'), [[0,'нет'],[1,'1: 2к10 · ' + U.lair + ' оч.'],[2,'2: 4к10 · ' + 2 * U.lair + ' оч.'],[3,'3: 6к10 · ' + 3 * U.lair + ' оч.']])}</label></div></div>`);
   // 7 · особенности
-  h += box(7, `<div class="card"><h3>Особенности</h3>
+  h += box(7, `<div class="card"><h3>Черты и особые свойства</h3>
     <div class="sec-h">«Когда → что»</div>
     <div class="hint">Условие и эффект: цена правила = цена эффекта × доля времени, когда условие выполняется. Противник — цель вашей атаки или тот, кто атакует вас.</div>
     <div class="row"><button data-rpreset="blank" class="primary">+ Своё правило</button>${presetSel('rule', RULE_PRESETS)}</div>
@@ -347,7 +349,7 @@ function buildForm(){
       {id:'slots', n:'Ячейки заклинаний', has:o => (o.slots || []).some(x => +x > 0), clear:o => { o.slots = [0,0,0,0,0,0,0,0,0,0]; },
         html:`<div class="small">Нужны способностям с «ячейкой».</div>` + G2([1,2,3,4,5,6,7,8,9].map(L => `<label>${L} ур. × ${numIn(PP('slots.' + L), 0, LIM.count, 1, 56)}</label>`).join(''))},
       {id:'aura', n:'Аура (на врагов рядом)', has:o => +(o.aura || {}).rad > 0, init:o => { o.aura = Object.assign({s:6, type:3, cond:0, rounds:1}, o.aura, {rad:10}); if (!(+o.aura.n > 0) && !(+o.aura.cond > 0)) o.aura.n = 1; }, clear:o => { (o.aura = o.aura || {}).rad = 0; },
-        html:G2(`<label>Радиус, фт ${numIn(PP('aura.rad'), 0, LIM.ft, 5)}</label><label>кубиков ${numIn(PP('aura.n'), 0, LIM.dice)}</label><label>грань ${selIn(PP('aura.s'), DIE_OPTS())}</label>
+        html:G2(`<label>Радиус ${infoIcon('Радиус')}, фт ${numIn(PP('aura.rad'), 0, LIM.ft, 5)}</label><label>кубиков ${numIn(PP('aura.n'), 0, LIM.dice)}</label><label>грань ${selIn(PP('aura.s'), DIE_OPTS())}</label>
           <label>тип ${dtSel(PP('aura.type'))}</label><label>состояние ${selIn(PP('aura.cond'), [[0,'нет'], ...cd])}</label><label>раундов ${numIn(PP('aura.rounds'), 1, LIM.rounds)}</label>`)},
       {id:'rider', n:'Довесок к удару оружием (раз в ход)', has:o => +(o.rider || {}).n > 0 || +(o.rider || {}).cond > 0, init:o => { o.rider = Object.assign({s:6, type:3, cond:0, rounds:1}, o.rider, {n:1}); }, clear:o => { o.rider = Object.assign(o.rider || {}, {n:0, cond:0}); },
         html:G2(`<label>кубиков ${numIn(PP('rider.n'), 0, LIM.dice)}</label><label>грань ${selIn(PP('rider.s'), DIE_OPTS())}</label><label>тип ${dtSel(PP('rider.type'))}</label>

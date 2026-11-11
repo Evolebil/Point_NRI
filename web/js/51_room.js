@@ -75,13 +75,13 @@ function roomLobby(v){
   const nT = Math.max(2, ...v.members.map(m => m.team + 2));
   const teamSel = (m) => `<select data-rmteam="${m.i}" ${m.me || (host && m.bot != null) ? '' : 'disabled'}>${[...Array(Math.min(64, nT)).keys()].map(t => `<option value="${t}" ${t === m.team ? 'selected' : ''}>команда ${t + 1}</option>`).join('')}</select>`;
   let h = `<div class="row" style="margin:10px 0"><span>Код комнаты: <b style="font-size:24px;letter-spacing:3px">${esc(v.code)}</b></span><button id="rmCopy" title="Скопировать код">Скопировать</button><span class="small">друзья вводят его здесь же: «Код» → «Войти»</span><span class="small">${v.status === 'fight' ? 'идёт бой' : (v.status === 'end' ? 'бой окончен' : 'ждём игроков')}</span>${v.err ? `<span class="err">${esc(v.err)}</span>` : ''}</div>`;
-  h += `<table class="small" style="width:100%"><tr><th style="text-align:left">Кто</th><th>Команда</th><th>Готов</th><th></th></tr>` + v.members.map(m => `<tr><td><span class="chip" style="background:${teamCol(m.team)}">${m.team + 1}</span> ${esc(m.name)}${m.me ? ' (вы)' : ''}${m.bot != null ? ` · бот, бюджет ${m.bot}` : ''}</td><td>${teamSel(m)}</td><td style="text-align:center">${m.ready ? '✔' : '—'}</td><td>${host && !m.me ? `<button data-rmkick="${m.i}" class="danger">✕</button>` : ''}</td></tr>`).join('') + `</table>`;
+  h += `<table class="small" style="width:100%"><tr><th style="text-align:left">Кто</th><th>Команда</th><th>Готов</th><th></th></tr>` + v.members.map(m => `<tr><td><span class="chip" style="background:${teamCol(m.team)}">${m.team + 1}</span> ${esc(m.name)}${m.me ? ' (вы)' : ''}${m.bot != null ? ` · бот ${infoIcon('Боты')}, бюджет ${m.bot}` : ''}</td><td>${teamSel(m)}</td><td style="text-align:center">${m.ready ? '✔' : '—'}</td><td>${host && !m.me ? `<button data-rmkick="${m.i}" class="danger">✕</button>` : ''}</td></tr>`).join('') + `</table>`;
   h += `<div class="row" style="margin-top:10px"><button id="rmMine" class="primary">Взять моего персонажа («${esc(S.name || '')}»)</button>${mine && mine.ready ? '<span class="small">персонаж выбран ✔</span>' : '<span class="small">персонаж не выбран</span>'}</div>`;
   if (host) h += `<div class="row" style="margin-top:10px"><b>Хозяин:</b> бот — бюджет <input type="number" id="rmBotB" value="${(lastPrice && lastPrice.ok && S.budget) || 500}" style="width:80px"> в команду <input type="number" id="rmBotT" value="2" min="1" max="64" style="width:50px"><button id="rmBot">+ бот</button>
     <label>Предел раундов ${'<select id="rmRounds"><option value="10">10</option><option value="20">20</option><option value="50" selected>50</option><option value="0">без предела (500)</option></select>'}</label>
     <button class="primary" id="rmStart" ${v.status === 'fight' ? 'disabled' : ''}>⚔ Начать бой</button></div>
     <div class="small">Карта — как во вкладке «Соперник» (своя карта или участок мира); по умолчанию — случайный участок мира.</div>`;
-  else h += `<div class="small" style="margin-top:10px">Бой начинает хозяин комнаты.</div>`;
+  else h += `<div class="small" style="margin-top:10px">Бой начинает хозяин комнаты ${infoIcon('Хозяин комнаты')}.</div>`;
   h += `<div class="row" style="margin-top:12px"><button id="rmLeave" class="danger">🚪 Выйти из комнаты</button>${v.status === 'fight' && !G.room ? `<button id="rmBack">⚔ Вернуться в бой</button>` : ''}</div>`;
   if (v.status === 'fight' && !G.room) h += `<div class="small">Бой уже идёт — дождитесь следующего.</div>`;
   if (ROOM.lobbyHtml !== h){   // перерисовать, только если что-то изменилось (иначе стирается ввод)
@@ -117,7 +117,7 @@ $('rmBox').addEventListener('change', async e => {
 const toast = (t, ms = 3500) => { const e = $('toast'); e.textContent = t; e.classList.toggle('on', !!t); clearTimeout(toast.t); if (t) toast.t = setTimeout(() => e.classList.remove('on'), ms); };
 
 async function startGame(){
-  if (!lastPrice || !lastPrice.ok){ showTab(1); return; }
+  if (!lastPrice || !lastPrice.ok){ showTab(1); return false; }
   $('oppErr').innerHTML = '';
   $('btnFight').disabled = true;
   const msg = {cmd:'start', char: toChar(), seed: +$('seed').value, opp: oppCfg(), side: +$('side').value};
@@ -125,7 +125,7 @@ async function startGame(){
   if (mname === '__world') msg.world = {seed: $('wSeed').value.trim() || '1', size: +$('wSize').value, x: WPICK ? WPICK[0] : -1, y: WPICK ? WPICK[1] : -1, w: +$('wW').value, h: +$('wH').value};
   const r = await api(msg);
   $('btnFight').disabled = false;
-  if (r.type === 'error'){ $('oppErr').innerHTML = `<div class="err">${esc(r.err)}</div>`; return; }
+  if (r.type === 'error'){ $('oppErr').innerHTML = `<div class="err">${esc(r.err)}</div>`; return false; }
   // новая игра
   G.active = false; G.over = false; G.busy = false; G.mode = 'move'; G.logged = 0; G.shown = null; G.pending = null; G.req = null; G.wNames = null; $('log').innerHTML = ''; $('result').classList.remove('on');
   const ini = r.init;
@@ -136,6 +136,7 @@ async function startGame(){
   G.seen = {melee:false, ranged:false, abil:{}}; G.sentAt = 1;
   showTab(3); fitPlay(); camReset(); setCamMode(cam.mode); seek(0);
   receive(r, 1);
+  return true;
 }
 // порция ответа движка: кадры добавляются, потом (когда рисовальщик всё показал) — ход игрока или итог
 function receive(r, skip = 0){

@@ -15,6 +15,20 @@ build/audit_tests: tests/audit_tests.cc $(wildcard tests/audit/*.inc) $(DEPS)
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ $<
 
+# модульные тесты на C++ (отдельные функции и классы): make unit
+build/unit_tests: tests/unit_tests.cc $(DEPS) $(wildcard src/kampaniya/*)
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) $(INC) -Isrc/kampaniya -o $@ $<
+unit: build/unit_tests
+	./build/unit_tests
+
+# стресс-тесты устойчивости: make stress
+build/stress_tests: tests/stress_tests.cc $(DEPS) $(wildcard src/kampaniya/*)
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) -g $(INC) -Isrc/kampaniya -o $@ $<
+stress: build/stress_tests
+	./build/stress_tests
+
 # кампания (исследование и социалка): свои заголовки в src/kampaniya — их правка боевые программы не пересобирает
 KDEPS := $(wildcard src/kampaniya/*)
 build/kampaniya: src/apps/kampaniya.cc $(DEPS) $(KDEPS)
@@ -34,4 +48,4 @@ test: build/audit_tests
 clean:
 	rm -rf build
 
-.PHONY: all test clean test_kampaniya kampaniya kampaniya_tests $(APPS) audit_tests
+.PHONY: all test unit stress clean test_kampaniya kampaniya kampaniya_tests $(APPS) audit_tests

@@ -11,6 +11,7 @@
 #pragma once
 #include <algorithm>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <queue>
 #include "kmp_core.h"
@@ -23,7 +24,11 @@ const int TILE = 256;            // кусок: 256 × 256 клеток
 struct WCell {
     int terr = TERR_FIELDS;      // индекс terrains(); 7 — вода
     int level = 0;               // высота 0–9 (по 10 фт, как у сцены)
-    int biome = 4;               // биом как в world_gen: 0 тундра … 8 джунгли
+    int biome = 4;               // код биома источника карты (0–9)
+    int realm = 0;                // ASCII-код государства на слое границ; 0 — нет данных
+    int cover = -1;               // растительный покров, отдельный от terrain
+    int relief = -1;              // формы рельефа, отдельные от покрова
+    int people = 0;               // ASCII-код народа, 0 — нет данных
     bool road = false, river = false;
     int town = -1;               // индекс поселения
 };
@@ -36,17 +41,21 @@ struct Town {
 struct Label {                   // надпись на карте: область, урочище («Солонь: булливаги»)
     std::string text;
     double x = 0, y = 0;
+    std::string kind = "place";
 };
 struct World {
     std::string name;
     double w = 0, h = 0;         // км
     std::vector<Town> towns;
     std::vector<Label> labels;
+    bool realmLayer = false;
+    bool peopleLayer = false;
     virtual ~World() {}
     virtual WCell at(double x, double y, double tol) const = 0;   // tol — полклетки обзора: мелкое видно и издали
+    virtual double cellKm() const { return CELL_KM; }             // физический размер базовой клетки источника мира
     virtual bool snapRoad(double& x, double& y, double maxd) const { (void)x, (void)y, (void)maxd; return false; }   // точку — на ось дороги
-    int cellsW() const { return (int)std::ceil(w / CELL_KM); }
-    int cellsH() const { return (int)std::ceil(h / CELL_KM); }
+    int cellsW() const { return (int)std::ceil(w / cellKm()); }
+    int cellsH() const { return (int)std::ceil(h / cellKm()); }
     int zMax() const {   // уровень, на котором весь мир помещается в один-два куска
         int z = 0;
         while (std::max(cellsW(), cellsH()) > (TILE << z)) z++;
@@ -76,6 +85,10 @@ inline double fbm2(uint64_t s, double x, double y, int oct) {
 inline int biomeOfTM(double t, double m) {   // как world_gen: холод/умеренно/жара × сухо/средне/сыро
     const int ti = t < 0.36 ? 0 : (t > 0.64 ? 2 : 1), mi = m < 0.36 ? 0 : (m > 0.64 ? 2 : 1);
     return ti * 3 + mi;
+}
+inline int mapBiomeCode(int climate, int level) {   // единая палитра карты: тундра, тайга, умеренный, средиземный, степь, пустыня, горы, болота, древний лес, пустоши
+    static const int code[9] = {0, 1, 0, 4, 2, 7, 5, 3, 8};
+    return level >= 6 ? 6 : code[std::clamp(climate, 0, 8)];
 }
 inline const char* biomeName(int b) {
     static const char* N[9] = {"тундра", "тайга", "ледник", "степь", "лес и поля", "болото", "пустыня", "саванна", "джунгли"};
@@ -165,6 +178,8 @@ struct GenParams {
 
 struct GenWorld : World {
     GenParams p;
+    struct OverlayZone { double x = 0, y = 0; int id = 0; std::string name; };
+    std::vector<OverlayZone> realmZones, peopleZones;
     int P = 0;              // сторона плана, клеток
     double pk = 1;          // км на клетку плана
     double seaH = 0, topH = 1;
@@ -206,6 +221,8 @@ struct GenWorld : World {
     double moist(double x, double y) const { return 0.5 + 0.22 * p.humid + 0.35 * fbm2(p.seed ^ 0x3D, x / (p.sizeKm * 0.22), y / (p.sizeKm * 0.22), 4); }
 
     void build() {
+        towns.clear(), labels.clear(), realmZones.clear(), peopleZones.clear();
+        realmLayer = peopleLayer = true;
         if (!p.hmap.empty()) {   // мир по карте высот: стороны — по картинке, не больше 5000 км
             p.kmpp = std::clamp(p.kmpp, 0.05, 5000.0 / std::max(p.hw, p.hh));
             w = p.hw * p.kmpp, h = p.hh * p.kmpp, p.sizeKm = std::max(w, h);
@@ -313,6 +330,21 @@ struct GenWorld : World {
             else if (q < 0.5) t.kind = "городок", t.pop = 2000, t.r = 0.6;
             else t.kind = "село", t.pop = 500, t.r = 0.35;
         }
+        static const char* REALM_PREFIX[] = {"Королевство", "Княжество", "Марка", "Союз", "Дом", "Вольные земли", "Графство", "Султанат"};
+        for (size_t i = 0; i < towns.size() && realmZones.size() < 8; i++) {
+            if (towns[i].pop < 8000) continue;
+            const int n = (int)realmZones.size();
+            OverlayZone z{towns[i].x, towns[i].y, 'A' + n,
+                          std::string(REALM_PREFIX[n]) + " " + towns[i].name};
+            realmZones.push_back(z), labels.push_back({z.name, z.x, z.y, "realm"});
+        }
+        static const char* PEOPLES[] = {"люди", "эльфы", "дварфы", "полурослики", "орки", "гномы"};
+        for (size_t i = 0; i < realmZones.size() && peopleZones.size() < 6; i++) {
+            const int n = (int)peopleZones.size();
+            OverlayZone z{realmZones[i].x, realmZones[i].y, 'a' + n, PEOPLES[n]};
+            peopleZones.push_back(z), labels.push_back({z.name, z.x, z.y, "people"});
+        }
+        realmLayer = !realmZones.empty(), peopleLayer = !peopleZones.empty();
         townB.clear();
         buildTownIndex();
         // дороги: каждое поселение — к двум ближайшим; путь по плану, дешевле по уже проложенным дорогам
@@ -402,20 +434,30 @@ struct GenWorld : World {
         const double H = rawH(x, y, tol * 0.5);
         c.level = levelOf(H);
         const double t = temp(x, y, c.level), m = moist(x, y);
-        c.biome = biomeOfTM(t, m);
+        const int climate = biomeOfTM(t, m);
+        c.biome = mapBiomeCode(climate, c.level);
         if (H < seaH) { c.terr = TERR_WATER; return c; }
         c.road = roads.near(x, y, tol * 0.5);
         c.river = rivers.near(x, y, tol * 0.5);
+        auto zone = [&](const std::vector<OverlayZone>& zones) {
+            int best = 0; double d = std::numeric_limits<double>::infinity();
+            for (const auto& z : zones) { const double q = std::hypot(z.x - x, z.y - y); if (q < d) d = q, best = z.id; }
+            return best;
+        };
+        c.realm = zone(realmZones), c.people = zone(peopleZones);
         c.town = townAt(x, y, 0);   // поселение — своим радиусом; издали его видно значком из списка, а не закрашенной клеткой
         if (c.town >= 0) { c.terr = TERR_TOWN; return c; }
         if (c.level >= 6) c.terr = TERR_MOUNT;
-        else if (c.biome == 6) c.terr = TERR_DESERT;
-        else if (c.biome == 0 || c.biome == 2) c.terr = TERR_SNOW;
-        else if (c.biome == 5) c.terr = TERR_SWAMP;
+        else if (climate == 6) c.terr = TERR_DESERT;
+        else if (climate == 0 || climate == 2) c.terr = TERR_SNOW;
+        else if (climate == 5) c.terr = TERR_SWAMP;
         else if (c.level >= 4) c.terr = TERR_HILLS;
-        else if (c.biome == 1 || c.biome == 8) c.terr = TERR_FOREST;
-        else if (c.biome == 4) c.terr = fbm2(p.seed ^ 0xF0, x / 30.0, y / 30.0, 3) > 0.05 ? TERR_FOREST : TERR_FIELDS;
+        else if (climate == 1 || climate == 8) c.terr = TERR_FOREST;
+        else if (climate == 4) c.terr = fbm2(p.seed ^ 0xF0, x / 30.0, y / 30.0, 3) > 0.05 ? TERR_FOREST : TERR_FIELDS;
         else c.terr = TERR_FIELDS;
+        c.cover = c.terr == TERR_FOREST ? 3 : c.terr == TERR_SNOW ? 1 : c.terr == TERR_SWAMP ? 9 :
+                  c.terr == TERR_DESERT ? 7 : c.terr == TERR_HILLS ? 4 : 5;
+        c.relief = c.terr == TERR_MOUNT ? 3 : c.terr == TERR_HILLS ? 1 : 0;
         return c;
     }
 };
@@ -430,15 +472,44 @@ struct ActWorld : World {
         w = R.w * R.dlon * kx, h = R.h * R.dlat * ky;
         towns = tw;
     }
+    double cellKm() const override {
+        // Историческая карта хранит крупные ячейки в градусах; не растягиваем одну такую ячейку
+        // на десятки базовых клеток по 1000 футов, как это делается для процедурных миров.
+        const double x = std::abs(R.dlon * kx), y = std::abs(R.dlat * ky);
+        return x > 0 && y > 0 ? std::sqrt(x * y) : CELL_KM;
+    }
     void toKm(double lon, double lat, double& x, double& y) const { x = (lon - R.lon0) * kx, y = (R.lat0 - lat) * ky; }
     WCell at(double x, double y, double tol) const override {
-        (void)tol;
-        WCell c;
-        const int q = R.cell(R.lon0 + x / kx, R.lat0 - y / ky);
-        c.terr = R.terrAt(q);
-        c.road = R.roadAt(q), c.river = R.riverAt(q);
-        c.level = c.terr == TERR_WATER ? 0 : c.terr == TERR_MOUNT ? 7 : c.terr == TERR_HILLS ? 4 : 1;
-        c.biome = c.terr == TERR_SWAMP ? 5 : c.terr == TERR_FOREST ? 4 : 3;
+        auto sample = [&](double sx, double sy) {
+            WCell a;
+            const int q = R.cell(R.lon0 + sx / kx, R.lat0 - sy / ky);
+            a.terr = R.terrAt(q), a.road = R.roadAt(q), a.river = R.riverAt(q);
+            a.realm = R.realmAt(q), a.cover = R.coverAt(q), a.relief = R.reliefAt(q), a.people = R.peopleAt(q);
+            a.level = a.terr == TERR_WATER ? 0 : a.terr == TERR_MOUNT ? 7 : a.terr == TERR_HILLS ? 4 : 1;
+            a.biome = R.biomeAt(q);
+            if (a.biome < 0) a.biome = a.terr == TERR_MOUNT ? 6 : a.terr == TERR_SWAMP ? 7 : a.terr == TERR_FOREST ? 8 :
+                                       a.terr == TERR_DESERT ? 5 : a.terr == TERR_SNOW ? 0 : a.terr == TERR_HILLS ? 4 : 2;
+            return a;
+        };
+        WCell c = sample(x, y);
+        if (tol > cellKm() * 1.5) {
+            int roads = 0, rivers = 0;
+            std::map<int,int> realmVotes, peopleVotes, coverVotes, biomeVotes, reliefVotes;
+            const double d = tol * 0.32;
+            for (int iy = -1; iy <= 1; iy++) for (int ix = -1; ix <= 1; ix++) {
+                const WCell a = sample(x + ix * d, y + iy * d);
+                roads += a.road, rivers += a.river;
+                if (a.realm) realmVotes[a.realm]++;
+                if (a.people) peopleVotes[a.people]++;
+                if (a.cover >= 0) coverVotes[a.cover]++;
+                if (a.biome >= 0) biomeVotes[a.biome]++;
+                if (a.relief >= 0) reliefVotes[a.relief]++;
+            }
+            auto winner = [](const std::map<int,int>& votes, int fallback) { int best = fallback, n = 0; for (auto [v, count] : votes) if (count > n) best = v, n = count; return best; };
+            c.road = roads > 0, c.river = rivers > 0;
+            c.realm = winner(realmVotes, c.realm), c.people = winner(peopleVotes, c.people);
+            c.cover = winner(coverVotes, c.cover), c.biome = winner(biomeVotes, c.biome), c.relief = winner(reliefVotes, c.relief);
+        }
         if (c.terr == TERR_TOWN)
             for (size_t i = 0; i < towns.size(); i++)
                 if (std::hypot(towns[i].x - x, towns[i].y - y) < 6) { c.town = (int)i; break; }
@@ -626,24 +697,32 @@ inline std::string routeSumJson(const RouteSum& s) {
 // кусок обзора: 256 × 256 клеток уровня z, строки по клеткам: местность, высота, флаги (1 дорога, 2 река)
 typedef std::function<bool(double, double)> Vis;   // туман: видно ли место игрокам (пусто — видно всё)
 inline std::string tileJson(const World& W, int z, int tx, int ty, const Vis& vis = nullptr) {
-    const double ck = CELL_KM * (1 << z);
-    std::string t(TILE * TILE, '7'), l(TILE * TILE, '0'), f(TILE * TILE, '0');
+    const double ck = W.cellKm() * (1 << z);
+    std::string t(TILE * TILE, '7'), l(TILE * TILE, '0'), f(TILE * TILE, '0'), b(TILE * TILE, '0'), r(TILE * TILE, '0');
+    std::string cvr(TILE * TILE, '0'), rel(TILE * TILE, '0'), ppl(TILE * TILE, '0');
     for (int j = 0; j < TILE; j++)
         for (int i = 0; i < TILE; i++) {
             const double x = ((double)tx * TILE + i + 0.5) * ck, y = ((double)ty * TILE + j + 0.5) * ck;
             if (x > W.w || y > W.h) continue;
             const size_t k = (size_t)j * TILE + i;
-            if (vis && !vis(x, y)) { t[k] = ':', l[k] = '0', f[k] = '0'; continue; }   // ':' — скрыто туманом: игроку не уходит ничего
+            if (vis && !vis(x, y)) { t[k] = ':', l[k] = '0', f[k] = '0', b[k] = '0', r[k] = '0', cvr[k] = '0', rel[k] = '0', ppl[k] = '0'; continue; }   // ':' — скрыто туманом: игроку не уходит ничего
             const WCell c = W.at(x, y, ck);
             t[k] = (char)('0' + c.terr), l[k] = (char)('0' + c.level), f[k] = (char)('0' + (c.road ? 1 : 0) + (c.river ? 2 : 0));
+            b[k] = (char)('0' + std::clamp(c.biome, 0, 9));
+            r[k] = c.realm > 0 && c.realm < 128 ? (char)c.realm : '0';
+            cvr[k] = c.cover >= 0 && c.cover <= 9 ? (char)('0' + c.cover) : '0';
+            rel[k] = c.relief >= 0 && c.relief <= 9 ? (char)('0' + c.relief) : '0';
+            ppl[k] = c.people > 0 && c.people < 128 ? (char)c.people : '0';
         }
     char ckb[32];
     std::snprintf(ckb, sizeof ckb, "%.4f", ck);
     return "{\"z\":" + num(z) + ",\"tx\":" + num(tx) + ",\"ty\":" + num(ty) + ",\"cellKm\":" + ckb +
-           ",\"terr\":\"" + t + "\",\"level\":\"" + l + "\",\"flags\":\"" + f + "\"}";
+           ",\"terr\":\"" + t + "\",\"level\":\"" + l + "\",\"flags\":\"" + f + "\",\"biome\":\"" + b + "\",\"realm\":\"" + r + "\",\"cover\":\"" + cvr + "\",\"relief\":\"" + rel + "\",\"people\":\"" + ppl + "\"}";
 }
 inline std::string worldInfoJson(const World& W, const Vis& vis = nullptr) {
-    std::string o = "{\"name\":" + q(W.name) + ",\"w\":" + num(std::llround(W.w)) + ",\"h\":" + num(std::llround(W.h)) + ",\"cellKm\":0.3048,\"tile\":256,\"zMax\":" +
+    char cell[32];
+    std::snprintf(cell, sizeof cell, "%.6g", W.cellKm());
+    std::string o = "{\"name\":" + q(W.name) + ",\"w\":" + num(std::llround(W.w)) + ",\"h\":" + num(std::llround(W.h)) + ",\"cellKm\":" + cell + ",\"tile\":256,\"realmLayer\":" + bl(W.realmLayer) + ",\"peopleLayer\":" + bl(W.peopleLayer) + ",\"zMax\":" +
                     num(W.zMax()) + ",\"terrains\":[";
     for (size_t i = 0; i < terrains().size(); i++) o += std::string(i ? "," : "") + q(terrains()[i].name);
     o += "],\"towns\":[";
@@ -659,7 +738,7 @@ inline std::string worldInfoJson(const World& W, const Vis& vis = nullptr) {
     for (const Label& l : W.labels) {
         if (vis && !vis(l.x, l.y)) continue;
         std::snprintf(b, sizeof b, "%.2f,%.2f", l.x, l.y);
-        o += std::string(k++ ? "," : "") + "[" + q(l.text) + "," + b + "]";
+        o += std::string(k++ ? "," : "") + "[" + q(l.text) + "," + b + "," + q(l.kind) + "]";
     }
     return o + "]}";
 }
@@ -698,7 +777,7 @@ struct EditedWorld : World {
     std::vector<int> townMap;         // индекс исходного поселения → в этом мире (−1 — убрано)
     size_t addFrom = 0;               // с этого индекса — добавленные поселения
     void build(const std::shared_ptr<World>& b, const std::vector<Edit>& edits) {
-        base = b, name = b->name, w = b->w, h = b->h, labels = b->labels;
+        base = b, name = b->name, w = b->w, h = b->h, labels = b->labels, realmLayer = b->realmLayer, peopleLayer = b->peopleLayer;
         std::set<std::string> gone;
         for (auto& e : edits)
             if (e.op == "untown") gone.insert(e.text);

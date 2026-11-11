@@ -5,7 +5,7 @@
 // черновику: принять, перебросить, править итог, отменить; игрок предлагает.
 // ====================================================================================================================
 // sub — вкладка внутри кампании; draft — маршрут, который прокладывают щелчками; mode — 'route' | 'pos'; speaker — кто говорит
-const KMP = {id: '', v: null, timer: 0, sub: 'map', speaker: '', world: null, worldOf: '', draft: [], mode: '', justCreated: false, gen: null, pmode: 'быстрее всего', preview: null};
+const KMP = {id: '', v: null, timer: 0, sub: 'map', speaker: '', world: null, worldOf: '', draft: [], mode: '', justCreated: false, gen: null, pmode: 'быстрее всего', preview: null, mapStyle: 'physical', layers: {water: true, relief: true, cover: true, landforms: true, biome: false, rivers: true, roads: true, realm: false, people: false, settlements: true, labels: true, grid: false, compass: true, game: true}};
 const KMP_TERR = ['Пашни и сёла', 'Лес', 'Холмы и плато', 'Горы', 'Болото', 'Река и переправа', 'Город'];
 const KMP_ROLES = ['без занятия', 'проводник', 'дозорный', 'добытчик', 'картограф', 'следопыт', 'помощь'];
 const KMP_TRAV = ['пеший', 'всадник', 'гонец', 'армия', 'обоз'];
@@ -61,7 +61,7 @@ async function kmpHome(){
   h += `<div class="sec-h">Мои кампании</div>` + (list.length ? list.map(c => `<div class="card" style="margin:6px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
       <div style="flex:1;min-width:220px"><b>${esc(c.title)}</b> <span class="small">· код <b class="tnum">${esc(c.id)}</b></span><br>
       <span class="small">${c.master ? 'вы мастер' : 'мастер: ' + esc(c.masterName)} · героев ${c.heroes} · игроков ${c.players} · изменена ${ago(c.t)}</span></div>
-      <button class="primary" data-open="${esc(c.id)}">Открыть</button></div>`).join('')
+      <div><button class="primary" data-open="${esc(c.id)}">Открыть</button>${c.master ? `<button class="danger" data-delete="${esc(c.id)}" data-title="${esc(c.title)}">Удалить</button>` : '<div class="small" style="color:var(--muted);margin-top:4px">Вы игрок. Удалить кампанию может только мастер.</div>'}</div></div>`).join('')
     : `<div class="hint">Пока нет. Создайте кампанию ниже (вы станете мастером) или войдите по коду, который дал мастер.</div>`);
   h += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px">
     <div class="card" style="flex:1;min-width:260px"><h3>Новая кампания</h3><div class="hint">Вы будете мастером. После создания появится код для игроков.</div>
@@ -71,9 +71,35 @@ async function kmpHome(){
       <div class="row"><label>Код <input id="kmpCode" maxlength="5" style="width:90px;text-transform:uppercase"></label><button class="primary" id="kmpJoin">Войти</button></div></div></div>`;
   $('kmpHome').innerHTML = h;
   $('kmpHome').querySelectorAll('button[data-open]').forEach(b => b.onclick = () => { KMP.id = b.dataset.open; kmpCall({cmd: 'kmp_open'}); });
+  $('kmpHome').querySelectorAll('button[data-delete]').forEach(b => b.onclick = () => kmpDeleteDialog(b));
   $('kmpNew').onclick = async () => { KMP.justCreated = true; const r = await kmpCall({cmd: 'kmp_create', title: $('kmpTitle').value.trim() || 'Кампания'}); if (r.type !== 'kmp') KMP.justCreated = false; };
   const join = () => { const c = $('kmpCode').value.trim().toUpperCase(); if (c.length !== 5){ toast('код — пять знаков'); return; } KMP.id = c; kmpCall({cmd: 'kmp_open'}); };
   $('kmpJoin').onclick = join; $('kmpCode').onkeydown = e => { if (e.key === 'Enter') join(); };
+}
+
+function kmpDeleteDialog(button){
+  const id = button.dataset.delete, title = button.dataset.title;
+  document.getElementById('kmpDeleteDialog')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="kmpDeleteDialog" class="kmp-delete-backdrop"><div class="kmp-delete-dialog" role="dialog" aria-modal="true" aria-label="Подтверждение удаления кампании"><p>Удалить кампанию «${esc(title)}»? Это действие нельзя отменить.</p><div class="err" data-delete-error style="display:none"></div><div class="row"><button type="button" class="danger" data-delete-confirm>Удалить</button><button type="button" data-delete-cancel>Отмена</button></div></div></div>`);
+  const modal = $('kmpDeleteDialog'), cancel = modal.querySelector('[data-delete-cancel]'), remove = modal.querySelector('[data-delete-confirm]'), error = modal.querySelector('[data-delete-error]');
+  const close = () => { modal.remove(); document.removeEventListener('keydown', onKey); button.focus(); };
+  const onKey = e => { if (e.key === 'Escape' && modal.isConnected){ e.preventDefault(); close(); } };
+  cancel.onclick = close;
+  modal.onclick = e => { if (e.target === modal) close(); };
+  document.addEventListener('keydown', onKey);
+  cancel.focus();
+  remove.onclick = async () => {
+    remove.disabled = true; remove.textContent = 'Удаляю…'; error.style.display = 'none';
+    let r;
+    try { r = await api({cmd:'kmp_delete', id, name:kmpName()}); }
+    catch (e) { r = {type:'error', err:e.message || String(e)}; }
+    if (r.type !== 'kmp_deleted'){
+      remove.disabled = false; remove.textContent = 'Удалить';
+      error.textContent = `Не удалось удалить кампанию: ${r.err || 'неизвестная ошибка'}. Кампания осталась в списке.`; error.style.display = '';
+      return;
+    }
+    close(); toast(`Кампания «${title}» удалена.`, 4000); kmpHome();
+  };
 }
 
 async function kmpCall(o){
@@ -177,6 +203,16 @@ function kmpTabMap(v, s, M, heroes){
   h += `<div class="row small"><button id="kmRoute"${KMP.mode === 'route' ? ' class="primary"' : ''}>✏ Прокладывать путь щелчками</button>
       <label>или поселение <input id="kmTown" list="kmTowns" style="width:150px"></label><datalist id="kmTowns">${W.towns.map(t => `<option value="${esc(t[0])}">`).join('')}</datalist>
       <button id="kmTownAdd">+ в маршрут</button><label>путь <select id="kmMode">${kmpOpt(['быстрее всего', 'по дорогам', 'напрямик'], KMP.pmode)}</select></label>
+      <div class="row small" aria-label="Профили слоёв"><span>Профиль:</span>${[['physical','Физическая'],['political','Политическая'],['people','Расы'],['master','Мастер (всё)'],['player','Для игроков']].map(([id,n]) => `<button data-kmpreset="${id}"${KMP.mapStyle===id?' class="primary"':''}>${n}</button>`).join('')}</div>
+      <details style="display:inline-block"><summary>Слои карты</summary><div class="row small" style="max-width:700px">
+        <label><input data-kmlayer="water" type="checkbox"${KMP.layers.water ? ' checked' : ''}> вода</label><label><input data-kmlayer="relief" type="checkbox"${KMP.layers.relief ? ' checked' : ''}> затенение высот</label>
+        <label><input data-kmlayer="cover" type="checkbox"${KMP.layers.cover ? ' checked' : ''}> покров</label><label><input data-kmlayer="landforms" type="checkbox"${KMP.layers.landforms ? ' checked' : ''}> горы, холмы, деревья</label>
+        <label><input data-kmlayer="biome" type="checkbox"${KMP.layers.biome ? ' checked' : ''}> биомы</label><label><input data-kmlayer="rivers" type="checkbox"${KMP.layers.rivers ? ' checked' : ''}> реки и озёра</label>
+        <label><input data-kmlayer="roads" type="checkbox"${KMP.layers.roads ? ' checked' : ''}> дороги</label><label><input data-kmlayer="realm" type="checkbox"${KMP.layers.realm ? ' checked' : ''}${W.realmLayer ? '' : ' disabled'}> границы и государства</label>
+        <label><input data-kmlayer="people" type="checkbox"${KMP.layers.people ? ' checked' : ''}${W.peopleLayer ? '' : ' disabled'}> расы</label><label><input data-kmlayer="settlements" type="checkbox"${KMP.layers.settlements ? ' checked' : ''}> поселения</label>
+        <label><input data-kmlayer="labels" type="checkbox"${KMP.layers.labels ? ' checked' : ''}> подписи</label><label><input data-kmlayer="grid" type="checkbox"${KMP.layers.grid ? ' checked' : ''}> сетка</label>
+        <label><input data-kmlayer="compass" type="checkbox"${KMP.layers.compass ? ' checked' : ''}> компас</label>
+        <label><input data-kmlayer="game" type="checkbox"${KMP.layers.game ? ' checked' : ''}> отряд и маршрут</label></div></details>
       <button id="kmClear"${KMP.draft.length ? '' : ' disabled'}>Очистить</button>
       <button id="kmSend" class="primary"${KMP.preview && KMP.preview.path ? '' : ' disabled'}>${M ? 'Задать маршрут' : 'Предложить маршрут мастеру'}</button>
       ${M ? `<button id="kmTownPos">Отряд — в поселение</button><button id="kmPos"${KMP.mode === 'pos' ? ' class="primary"' : ''}>📍 Поставить отряд щелчком</button>` : ''}</div>
@@ -187,9 +223,8 @@ function kmpTabMap(v, s, M, heroes){
         <button id="kmIn" title="Ближе (колесо мыши)">＋</button><button id="kmOut" title="Дальше">－</button>
         <button id="kmHome" title="Весь мир">⤢</button>${s.pos ? '<button id="kmParty" title="К отряду">◎</button>' : ''}</div>
       <div id="kmScale" style="position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.55);color:#fff;padding:3px 8px;border-radius:6px;font-size:12px"></div></div>
-    <div class="small" id="kmHover" style="min-height:1.3em">Тяните карту мышью, колесо — ближе и дальше. Наведите — местность и путь от отряда.</div>
-    <div class="small">${KM_LEG.map(i => `<span style="display:inline-block;width:10px;height:10px;background:${KM_COL[i]};margin:0 3px 0 8px"></span>${esc(W.terrains[i])}`).join('')}
-    <span style="margin-left:8px">коричневое — дорога (×1), синее — река; красная точка — отряд, жёлтое — маршрут</span></div>`;
+    <div class="small" style="min-height:1.3em"><strong>Под курсором:</strong> <span id="kmHover">наведите на карту — покажу местность и расстояние</span></div>
+    <div class="small" id="kmLegend">${kmLegendHtml(KMP.mapStyle, W)}</div>`;
   return h;
 }
 function kmpTabParty(v, s, M, heroes){
@@ -338,6 +373,44 @@ function kmpParse(t){ let tot = 0; t.replace(/(\d+)\s*(зм|см|мм)?/g, (m, n
 const KM_COL = ['#d8d09e', '#3f8f3f', '#b5a46a', '#8a6a4a', '#2e8b8b', '#4a7fd6', '#b22222', '#5f86b5', '#e8d28c', '#eef2f7', '#11161d'];   // 10 — скрыто туманом
 const KM_LEG = [0, 1, 2, 3, 4, 8, 9, 6, 7];
 const KM_RGB = KM_COL.map(x => [1, 3, 5].map(i => parseInt(x.substr(i, 2), 16)));
+const KM_BIOME_NAME = ['Тундра', 'Тайга', 'Умеренный пояс', 'Средиземноморье', 'Степь', 'Пустыня', 'Горы', 'Болота', 'Древний лес', 'Пустоши'];
+const KM_BIOME_COL = ['#dfe9ef', '#5f8a6a', '#cfe0a8', '#e8d48a', '#e0cf8f', '#ead6a6', '#a08060', '#7fbcae', '#3f7f3f', '#8f8f7a'];
+const KM_BIOME_RGB = KM_BIOME_COL.map(x => [1, 3, 5].map(i => parseInt(x.substr(i, 2), 16)));
+const KM_COVER_NAME = ['вода', 'тундра', 'тайга', 'лес', 'степь', 'поля и луга', 'редколесье', 'пустыня', 'скалы', 'болото'];
+const KM_COVER_COL = ['#4e7fa5', '#e1e8e4', '#6c8871', '#397247', '#c5b878', '#d8d19d', '#a1ad77', '#d5bd7b', '#8b8173', '#708f83'];
+const KM_COVER_RGB = KM_COVER_COL.map(x => x.match(/[\da-f]{2}/gi).map(v => parseInt(v,16)));
+const KM_RELIEF_NAME = ['равнина', 'холмы', 'плато', 'горы', 'высокие горы'];
+function kmLegendHtml(_style, W){
+  let h = '';
+  const item = (color, name) => { h += `<span style="display:inline-block;width:10px;height:10px;background:${color};margin:0 3px 0 8px"></span>${esc(name)}`; };
+  if (KMP.layers.water) item(KM_COVER_COL[0], 'море и озёра');
+  if (KMP.layers.cover) KM_COVER_NAME.slice(1).forEach((name, i) => item(KM_COVER_COL[i+1], name));
+  if (KMP.layers.biome) KM_BIOME_NAME.forEach((name, i) => item(KM_BIOME_COL[i], name));
+  if (KMP.layers.relief) KM_RELIEF_NAME.slice(1).forEach(name => item('#6a5947', name));
+  if (KMP.layers.landforms) item('#6a5947','значки рельефа и деревьев');
+  if (KMP.layers.settlements) [['#b22222','город'],['#333333','деревня']].forEach(([c,n]) => item(c,n));
+  if (KMP.layers.realm) { item('#9b87bd','государства'); }
+  if (KMP.layers.people) {
+    item('#687b9c','ареалы рас');
+    const names = [...new Set((W.labels || []).filter(l => l[3] === 'people').map(l => l[0]))];
+    if (names.length) h += `<details style="display:inline-block;margin-left:8px"><summary>расы (${names.length})</summary>${names.map(n => `<span style="margin-right:8px">${esc(n)}</span>`).join('')}</details>`;
+  }
+  if (KMP.layers.roads) h += '<span style="display:inline-block;width:18px;border-top:3px solid #bd3027;margin:0 3px 0 8px"></span>дороги';
+  if (KMP.layers.rivers) h += '<span style="display:inline-block;width:18px;border-top:3px solid #2878bd;margin:0 3px 0 8px"></span>реки';
+  if (KMP.layers.grid) h += '<span style="display:inline-block;width:18px;border-top:1px solid #65717b;margin:0 3px 0 8px"></span>сетка';
+  if (KMP.layers.compass) h += ' ↑ север';
+  if (kmFogged()) h += '<span style="display:inline-block;width:10px;height:10px;background:repeating-linear-gradient(135deg,#202630 0 3px,#68717e 3px 5px);margin:0 3px 0 8px"></span>не разведано';
+  return h;
+}
+function kmSetPreset(name){
+  KMP.mapStyle = name;
+  const common = {water:true,relief:true,cover:true,landforms:true,biome:false,rivers:true,roads:true,realm:false,people:false,settlements:true,labels:true,grid:false,compass:true,game:true};
+  KMP.layers = Object.assign({}, common);
+  if (name === 'political') KMP.layers.realm = true, KMP.layers.landforms = false;
+  if (name === 'people') KMP.layers.people = true;
+  if (name === 'master') KMP.layers.realm = true, KMP.layers.people = true, KMP.layers.grid = true;
+  if (name === 'player') KMP.layers.people = false, KMP.layers.realm = false;
+}
 const KMV = {cx: 0, cy: 0, kpp: 1, tiles: {}, raw: {}, wait: {}, drag: null};   // центр вида (км), км на пиксель, куски: ключ → картинка и данные
 async function kmLoadWorld(id){
   const r = await api({cmd: 'kmp_worldinfo', id, name: kmpName(), asPlayer: KMP.asPlayer});
@@ -355,18 +428,43 @@ async function kmSyncFog(){   // туман сменился — у игрока
 }
 function kmFit(){ const W = KMP.world; KMV.cx = W.w / 2; KMV.cy = W.h / 2; KMV.kpp = Math.max(W.w, W.h) / 900; }
 const kmLevel = () => Math.max(0, Math.min(KMP.world.zMax, Math.floor(Math.log2(Math.max(1e-9, KMV.kpp / KMP.world.cellKm)))));
-function kmTileCanvas(t){   // кусок → картинка: цвет местности, выше — темнее, дорога, река
+function kmTileCanvas(t){
   const c = document.createElement('canvas'); c.width = c.height = 256;
   const g = c.getContext('2d'), im = g.createImageData(256, 256);
   for (let k = 0; k < 65536; k++){
-    const ter = t.terr.charCodeAt(k) - 48, lv = t.level.charCodeAt(k) - 48, f = t.flags.charCodeAt(k) - 48;
-    let p = KM_RGB[ter];
-    if (ter !== 7 && ter !== 10) { const sh = 1 - Math.max(0, lv - 2) * 0.045; p = p.map(v => v * sh); }
-    if (f & 1) p = [110, 84, 60];
-    if (f & 2) p = [42, 111, 176];
+    const ter = t.terr.charCodeAt(k) - 48, lv = t.level.charCodeAt(k) - 48;
+    const bi = t.biome ? t.biome.charCodeAt(k) - 48 : 4;
+    const cover = t.cover ? t.cover.charCodeAt(k) - 48 : (ter === 1 ? 3 : ter === 3 ? 8 : ter === 4 ? 9 : ter === 8 ? 7 : 5);
+    let p = KMP.layers.cover ? (KM_COVER_RGB[cover] || KM_RGB[ter]) : KM_RGB[ter];
+    if (ter === 7) p = KMP.layers.water ? [66,116,153] : [212,205,179];
+    const rc = t.realm ? t.realm.charCodeAt(k) : 48, pc = t.people ? t.people.charCodeAt(k) : 48;
+    const blend = (a,b,alpha) => a.map((v,i) => Math.round(v*(1-alpha)+b[i]*alpha));
+    if (KMP.layers.biome && ter !== 10 && ter !== 7) p = blend(p, KM_BIOME_RGB[bi] || p, .46);
+    if (KMP.layers.realm && ter !== 10 && rc !== 48) {
+      const col = [100+(rc*47)%100,85+(rc*31)%100,95+(rc*67)%100];
+      if ((k % 11) < 3) p = blend(p,col,.34);
+    }
+    if (KMP.layers.people && ter !== 10 && pc !== 48) {
+      const col = [80+(pc*47)%130,85+(pc*31)%120,105+(pc*67)%120];
+      if ((k % 13) < 3) p = blend(p,col,.35);
+    }
+    if (ter === 10) p = (k % 256 + Math.floor(k / 256)) % 6 < 2 ? [91, 100, 112] : [29, 36, 47];
+    else if (KMP.layers.relief && ter !== 7) { const sh = 1 - Math.max(0, lv - 2) * 0.035; p = p.map(v => Math.round(v * sh)); }
     im.data[k * 4] = p[0]; im.data[k * 4 + 1] = p[1]; im.data[k * 4 + 2] = p[2]; im.data[k * 4 + 3] = 255;
   }
   g.putImageData(im, 0, 0);
+  if (KMP.layers.landforms) {
+    g.fillStyle = '#60462f';
+    for (let y = 2; y < 256; y += 6) for (let x = 2; x < 256; x += 6) {
+      const k = y * 256 + x, rel = t.relief ? t.relief.charCodeAt(k)-48 : (t.terr.charCodeAt(k)-48 === 3 ? 3 : t.terr.charCodeAt(k)-48 === 2 ? 1 : 0);
+      if (rel >= 3) { g.beginPath(); g.moveTo(x,y-2); g.lineTo(x-2,y+2); g.lineTo(x+2,y+2); g.closePath(); g.fill(); }
+      else if (rel === 1 || rel === 2) { g.beginPath(); g.arc(x,y,1.2,0,Math.PI*2); g.fill(); }
+      if (KMP.layers.cover && t.cover && t.cover.charCodeAt(k)-48 === 3) { g.fillStyle='#234e35'; g.beginPath(); g.moveTo(x,y-2); g.lineTo(x-2,y+2); g.lineTo(x+2,y+2); g.closePath(); g.fill(); g.fillStyle='#60462f'; }
+    }
+  }
+  const strokes = (bit, color, outline, step=1) => { for (let y=0;y<256;y+=step) for(let x=0;x<256;x+=step){ const k=y*256+x, f=t.flags.charCodeAt(k)-48; if(f&bit){ g.fillStyle=outline; g.fillRect(x,y,step,step); g.fillStyle=color; g.fillRect(x,y,Math.max(1,step*.52),Math.max(1,step*.52)); } } };
+  if(KMP.layers.roads) strokes(1,'#cf392e','#f1dfbd');
+  if(KMP.layers.rivers) strokes(2,'#2878bd','#d4e4e8');
   return c;
 }
 function kmGetTile(wid, z, tx, ty, redraw){
@@ -400,30 +498,79 @@ function kmDraw(){
     }
   // поселения: крупные — всегда, мелкие — когда близко
   g.textBaseline = 'middle';
-  for (const t of W.towns){
+  const occupied = [];
+  if (KMP.layers.settlements) for (const t of W.towns){
     const [px, py] = kmToPx(cv, t[1], t[2]); if (px < -50 || py < -20 || px > cv.width + 50 || py > cv.height + 20) continue;
     const big = t[3] >= 20000, mid = t[3] >= 5000;
     if (!big && !(mid && KMV.kpp < 2) && KMV.kpp > 0.5) continue;
+    if (KMV.kpp > 2 && !big) continue;
+    const box = [px+3,py-13,px+Math.min(130,t[0].length*7+8),py+2];
+    if (occupied.some(a => box[0]<a[2] && box[2]>a[0] && box[1]<a[3] && box[3]>a[1])) continue;
+    occupied.push(box);
     g.fillStyle = big ? '#b22222' : '#222'; g.beginPath(); g.arc(px, py, big ? 4 : 3, 0, 7); g.fill();
     g.font = big ? 'bold 12px sans-serif' : '11px sans-serif'; g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = 3; g.strokeText(t[0], px + 6, py - 7); g.fillStyle = '#111'; g.fillText(t[0], px + 6, py - 7);
   }
   g.font = 'italic 12px serif'; g.fillStyle = 'rgba(30,20,10,.85)';
-  for (const l of W.labels || []){ const [px, py] = kmToPx(cv, l[1], l[2]); if (px > -200 && py > -20 && px < cv.width + 50 && py < cv.height + 20){ g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = 3; g.strokeText(l[0], px, py); g.fillText(l[0], px, py); } }
+  if (KMP.layers.labels) for (const l of W.labels || []){
+    const kind = l[3] || 'place';
+    if (kind === 'people' && !KMP.layers.people) continue;
+    if (kind === 'realm' && !KMP.layers.realm) continue;
+    const [px, py] = kmToPx(cv, l[1], l[2]); if (px > -200 && py > -20 && px < cv.width + 50 && py < cv.height + 20){ g.strokeStyle = 'rgba(255,255,255,.75)'; g.lineWidth = 3; g.strokeText(l[0], px, py); g.fillText(l[0], px, py); }
+  }
   const line = (pts, col, dash) => { if (pts.length < 2) return; g.strokeStyle = col; g.lineWidth = 3; g.setLineDash(dash || []); g.beginPath();
     pts.forEach((p, i) => { const [x, y] = kmToPx(cv, p[0], p[1]); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); g.setLineDash([]); };
-  const from = s.pos ? [s.pos] : [];
-  line(from.concat(s.route), '#ffcc00');
-  if (KMP.preview && KMP.preview.path) line(from.concat(KMP.preview.path), '#ffffff', [6, 5]);
-  else line(from.concat(KMP.draft), 'rgba(255,255,255,.6)', [2, 6]);
-  for (const p of KMP.draft){ const [x, y] = kmToPx(cv, p[0], p[1]); g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = 1; g.fillRect(x - 4, y - 4, 8, 8); g.strokeRect(x - 4, y - 4, 8, 8); }
-  if (s.route.length){ const e = s.route[s.route.length - 1], [x, y] = kmToPx(cv, e[0], e[1]); g.fillStyle = '#ffcc00'; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); }
+  if (KMP.layers.game) {
+    const from = s.pos ? [s.pos] : [];
+    line(from.concat(s.route), '#ffcc00');
+    if (KMP.preview && KMP.preview.path) line(from.concat(KMP.preview.path), '#ffffff', [6, 5]);
+    else line(from.concat(KMP.draft), 'rgba(255,255,255,.6)', [2, 6]);
+    for (const p of KMP.draft){ const [x, y] = kmToPx(cv, p[0], p[1]); g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = 1; g.fillRect(x - 4, y - 4, 8, 8); g.strokeRect(x - 4, y - 4, 8, 8); }
+    if (s.route.length){ const e = s.route[s.route.length - 1], [x, y] = kmToPx(cv, e[0], e[1]); g.fillStyle = '#ffcc00'; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); }
+  }
   if (KMV.stroke){ g.fillStyle = KMP.tool === 'fogHide' ? 'rgba(0,0,0,.45)' : KMP.tool === 'fogOpen' ? 'rgba(255,255,255,.35)' : 'rgba(255,220,0,.35)';
     for (const p of KMV.stroke){ const [x, y] = kmToPx(cv, p[0], p[1]); g.beginPath(); g.arc(x, y, Math.max(2, KMP.brushR / KMV.kpp), 0, 7); g.fill(); } }
   if (KMP.line && KMP.line.length) line(KMP.line, KMP.tool === 'river' ? '#2a6fb0' : '#6e543c', [4, 3]);
-  if (s.pos){ const [x, y] = kmToPx(cv, s.pos[0], s.pos[1]); g.fillStyle = '#e8112d'; g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill(); g.stroke(); }
+  if (KMP.layers.game && s.pos){ const [x, y] = kmToPx(cv, s.pos[0], s.pos[1]); g.fillStyle = '#e8112d'; g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill(); g.stroke(); }
+  if (KMP.layers.grid) {
+    const step = kmNiceKm(KMV.kpp * 80), left = Math.floor(x0 / step) * step, top = Math.floor(y0 / step) * step;
+    g.save(); g.strokeStyle = 'rgba(65,78,88,.25)'; g.lineWidth = 1; g.beginPath();
+    for(let x=left;x<=x1;x+=step){ const px=kmToPx(cv,x,0)[0]; g.moveTo(px,0); g.lineTo(px,cv.height); }
+    for(let y=top;y<=y1;y+=step){ const py=kmToPx(cv,0,y)[1]; g.moveTo(0,py); g.lineTo(cv.width,py); }
+    g.stroke(); g.restore();
+  }
+  if (KMP.layers.compass) {
+    g.save(); g.translate(28,28); g.strokeStyle='rgba(20,28,36,.8)'; g.fillStyle='rgba(255,255,255,.9)'; g.lineWidth=1.5;
+    g.beginPath(); g.moveTo(0,-13); g.lineTo(-5,2); g.lineTo(0,-1); g.lineTo(5,2); g.closePath(); g.fill(); g.stroke();
+    g.font='bold 11px sans-serif'; g.textAlign='center'; g.fillText('С',0,-17); g.restore();
+  }
   // масштаб: линейка и размер клетки уровня
   const km = kmNiceKm(KMV.kpp * 110), px = km / KMV.kpp, ckTxt = ck < 1 ? Math.round(ck * 1000) + ' м' : ck.toFixed(ck < 10 ? 1 : 0) + ' км';
   $('kmScale').innerHTML = `<span style="display:inline-block;width:${Math.round(px)}px;border-bottom:3px solid #fff;margin-right:6px;vertical-align:middle"></span>${km} км · клетка ${ckTxt} · мир ${W.w}×${W.h} км`;
+}
+async function kmOpenCity(town){
+  const r=await api({cmd:'kmp_city',id:KMP.id,name:kmpName(),asPlayer:KMP.asPlayer,town:town[0],x:town[1],y:town[2]});
+  if(r.type!=='city'||!r.plan){toast(r.err||'Не удалось построить план поселения');return;}
+  const p=r.plan, old=document.getElementById('kmCityDialog'); if(old)old.remove();
+  const dlg=document.createElement('div');dlg.id='kmCityDialog';dlg.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(8,12,20,.82);display:grid;place-items:center;padding:16px';
+  dlg.innerHTML=`<section class="card" style="width:min(1100px,96vw);max-height:94vh;overflow:auto;background:var(--panel,#171b25);padding:16px">
+    <div class="row" style="justify-content:space-between"><div><h2 style="margin:0">${esc(town[0])}</h2><span class="small">${Number(town[3]||0).toLocaleString('ru-RU')} жителей · зерно ${p.seed} · 1 клетка = ${p.cellFt} футов</span></div>
+    <div class="row"><button id="kmCityPng">Скачать PNG</button><button id="kmCityJson">Скачать JSON</button><button id="kmCityClose">Закрыть</button></div></div>
+    <canvas id="kmCityCanvas" style="display:block;width:100%;height:min(67vh,650px);margin-top:10px;background:#e8dfc0;border:1px solid #75694f"></canvas><div id="kmCityKey" class="small" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:4px;margin-top:8px"></div></section>`;
+  document.body.appendChild(dlg);
+  const cv=dlg.querySelector('#kmCityCanvas'),dpr=window.devicePixelRatio||1,rect=cv.getBoundingClientRect();cv.width=Math.max(1,Math.floor(rect.width*dpr));cv.height=Math.max(1,Math.floor(rect.height*dpr));
+  const g=cv.getContext('2d');g.scale(dpr,dpr);const w=rect.width,h=rect.height,m=28,scale=Math.min((w-2*m)/p.widthFt,(h-2*m)/(p.heightFt+270)),ox=(w-p.widthFt*scale)/2,oy=(h-(p.heightFt+270)*scale)/2,X=x=>ox+x*scale,Y=y=>oy+y*scale;
+  g.fillStyle='#e8dfc0';g.fillRect(0,0,w,h);const key=[];
+  for(const f of p.fields){g.fillStyle=['#d7c58a','#cbb578','#e1d094'][f.key%3];g.fillRect(X(f.x),Y(f.y),f.w*scale,f.h*scale);g.strokeStyle='#a28e5e';g.strokeRect(X(f.x),Y(f.y),f.w*scale,f.h*scale);}
+  for(const a of p.roads){g.fillStyle=a.kind==='avenue'?'#c3a36d':'#d4c39a';g.fillRect(X(a.x),Y(a.y),a.w*scale,a.h*scale);}
+  for(const a of p.walls){g.fillStyle=p.wall===2?'#625b52':'#735d3e';g.fillRect(X(a.x),Y(a.y),Math.max(2,a.w*scale),Math.max(2,a.h*scale));}
+  for(const b of p.buildings){if(b.kind==='gate'){g.fillStyle='#bd8d44';g.fillRect(X(b.x),Y(b.y),b.w*scale,b.h*scale);key.push([b.key,b.name]);continue;}if(b.kind==='wall')continue;
+    g.fillStyle=b.kind==='citadel'?'#796248':b.kind==='temple'?'#d5d1b8':b.kind==='market'?'#d29d4f':b.kind==='warehouse'?'#987a50':b.kind==='bridge'?'#856141':b.kind==='hall'?'#9a744c':b.district==='noble'?'#879ab3':b.district==='craft'?'#aa6551':b.district==='trade'?'#c49555':'#a9664b';
+    g.strokeStyle='rgba(48,38,28,.65)';g.lineWidth=Math.max(.7,scale*2);g.fillRect(X(b.x),Y(b.y),Math.max(1,b.w*scale),Math.max(1,b.h*scale));g.strokeRect(X(b.x),Y(b.y),Math.max(1,b.w*scale),Math.max(1,b.h*scale));if(b.key<20)key.push([b.key,b.name]);}
+  g.fillStyle='#2b2119';g.font='12px sans-serif';g.fillText('СЕВЕР ↑',ox+8,oy-8);g.fillText('Масштаб: 100 футов',ox+8,Math.min(h-8,Y(p.heightFt+250)));
+  dlg.querySelector('#kmCityKey').innerHTML=key.map(k=>`<span><b>${k[0]}.</b> ${esc(k[1])}</span>`).join('')+`<span>Дома: ${p.buildings.filter(b=>b.kind==='house').length}</span><span>Ворота: ${p.buildings.filter(b=>b.kind==='gate').length}</span>`;
+  dlg.querySelector('#kmCityClose').onclick=()=>dlg.remove();dlg.querySelector('#kmCityPng').onclick=()=>{const a=document.createElement('a');a.download=`${town[0]}_plan.png`;a.href=cv.toDataURL('image/png');a.click();};
+  dlg.querySelector('#kmCityJson').onclick=()=>{const a=document.createElement('a'),u=URL.createObjectURL(new Blob([JSON.stringify({town:town[0],plan:p},null,2)],{type:'application/json'}));a.href=u;a.download=`${town[0]}_plan.json`;a.click();URL.revokeObjectURL(u);};
+  dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.remove();});
 }
 function kmHoverInfo(e){
   const cv = $('kMap'), b = cv.getBoundingClientRect(), [x, y] = kmToKm(cv, (e.clientX - b.left) * cv.width / b.width, (e.clientY - b.top) * cv.height / b.height);
@@ -433,7 +580,8 @@ function kmHoverInfo(e){
   let txt = '';
   const raw = KMV.raw && KMV.raw[kmKey(W.wid, z, tx, ty)];
   if (raw){ const k = Math.floor((y - ty * span) / ck) * 256 + Math.floor((x - tx * span) / ck), ter = raw.terr.charCodeAt(k) - 48, f = raw.flags.charCodeAt(k) - 48;
-    txt = ter === 10 ? 'не разведано' : `${W.terrains[ter]}, высота ${raw.level[k]}${f & 1 ? ', дорога' : ''}${f & 2 ? ', река' : ''}`; }
+    const cov = raw.cover ? raw.cover.charCodeAt(k)-48 : -1, bi = raw.biome ? raw.biome.charCodeAt(k)-48 : -1, rel = raw.relief ? raw.relief.charCodeAt(k)-48 : -1;
+    txt = ter === 10 ? 'не разведано' : `${W.terrains[ter]}${cov >= 0 ? ` · ${KM_COVER_NAME[cov] || 'покров'}` : ''}${bi >= 0 ? ` · биом: ${KM_BIOME_NAME[bi]}` : ''}${rel > 0 ? ` · ${KM_RELIEF_NAME[rel] || 'рельеф'}` : ''}, высота ${raw.level[k]}${f & 1 ? ', дорога' : ''}${f & 2 ? ', река' : ''}`; }
   else if (im) txt = '…';
   if (s.pos){ const d = Math.hypot(x - s.pos[0], y - s.pos[1]), kmDay = {'пеший': 35, 'всадник': 47, 'гонец': 85, 'армия': 25, 'обоз': 15}[s.traveler] || 35;
     txt += ` · от отряда ${d < 10 ? d.toFixed(1) : Math.round(d)} км по прямой — ${(d / kmDay).toFixed(1)} дн. по дороге, ${(d / (kmDay * 0.5)).toFixed(1)} дн. по лесу`; }
@@ -444,6 +592,19 @@ function kmBind(){
   if (!KMV.cx && !KMV.cy) kmFit();
   kmDraw();   // сразу: requestAnimationFrame в фоновой вкладке не срабатывает
   const cv = $('kMap'), W = KMP.world;
+  const redrawLayers = () => { for (const [key, raw] of Object.entries(KMV.raw)) KMV.tiles[key] = kmTileCanvas(raw); $('kmLegend').innerHTML = kmLegendHtml(KMP.mapStyle, W); kmDraw(); };
+  $('kmpBox').querySelectorAll('[data-kmpreset]').forEach(b => b.onclick = async () => {
+    const oldFog = KMP.asPlayer;
+    kmSetPreset(b.dataset.kmpreset);
+    KMP.asPlayer = KMP.v.master && b.dataset.kmpreset === 'player';
+    if (!W.realmLayer) KMP.layers.realm = false;
+    if (!W.peopleLayer) KMP.layers.people = false;
+    $('kmpBox').querySelectorAll('[data-kmlayer]').forEach(i => { i.checked = !!KMP.layers[i.dataset.kmlayer]; });
+    $('kmpBox').querySelectorAll('[data-kmpreset]').forEach(i => i.classList.toggle('primary', i.dataset.kmpreset === KMP.mapStyle));
+    if (oldFog !== KMP.asPlayer) await kmLoadWorld(KMP.id);
+    redrawLayers();
+  });
+  $('kmpBox').querySelectorAll('[data-kmlayer]').forEach(i => i.onchange = () => { KMP.layers[i.dataset.kmlayer] = i.checked; redrawLayers(); });
   const zoom = (f, px, py) => { const [x, y] = px == null ? [KMV.cx, KMV.cy] : kmToKm(cv, px, py);
     KMV.kpp = Math.min(Math.max(W.w, W.h) / 200, Math.max(W.cellKm / 6, KMV.kpp * f)); const [nx, ny] = px == null ? [KMV.cx, KMV.cy] : kmToKm(cv, px, py);
     KMV.cx += x - nx; KMV.cy += y - ny; kmDraw(); };
@@ -466,6 +627,10 @@ function kmBind(){
       kmEdit([{op: 'town', name: n, kind: $('kbKind').value, x: p[0], y: p[1]}]); return; }
     if (KMP.tool === 'label'){ const t = ($('kbText') || {}).value; if (!t){ toast('Впишите надпись'); return; } kmEdit([{op: 'label', text: t, x: p[0], y: p[1]}]); return; }
     if (KMP.mode === 'pos'){ KMP.mode = ''; kmpDirect({type: 'gm', pos: p, text: 'отряд перенесён'}); return; }
+    if (KMP.mode === '' && KMP.layers.settlements){
+      const q=pxOf(e), hit=W.towns.find(t=>{const z=kmToPx(cv,t[1],t[2]);return Math.hypot(z[0]-q[0],z[1]-q[1])<12;});
+      if(hit){kmOpenCity(hit);return;}
+    }
     if (KMP.mode !== 'route') { toast('Чтобы проложить путь, нажмите «✏ Прокладывать путь щелчками»'); return; }
     KMP.draft.push(p); kmPreview(); };
   $('kmIn').onclick = () => zoom(0.5); $('kmOut').onclick = () => zoom(2); $('kmHome').onclick = () => { kmFit(); kmDraw(); };
@@ -556,7 +721,7 @@ const KM_GEN = [['size', 'Размер мира, км', 50, 5000, 50, 800], ['se
 function kmWorldPanel(){
   const W = KMP.world, G = KMP.gen;
   let h = `<details class="card" style="margin:6px 0"${G ? ' open' : ''}><summary><b>Мир:</b> ${W ? esc(W.name) + ` — ${W.w}×${W.h} км, поселений ${W.towns.length}` : 'нет'} <span class="small">(сменить мир, создать новый)</span></summary>`;
-  if (!G) return h + `<div class="row"><button id="kmGenOpen" class="primary">Новый мир…</button><button id="kmAct1">Европа 1208 (Акт I)</button>
+  if (!G) return h + `<div class="row"><button id="kmGenOpen" class="primary">Новый мир…</button><button id="kmAct1">Европа и Средиземноморье 1208</button>
     <span class="hint">Смена мира не двигает отряд: поставьте его заново.</span></div></details>`;
   h += `<div class="hint">Подберите параметры и нажмите «Показать» — мир кампании не изменится, пока вы не нажмёте «Взять этот мир».</div>
     <div class="row"><label>Название <input id="kgName" value="${esc(G.name)}" style="width:180px"></label><label>Зерно ${kq('зерно')} <input id="kgSeed" type="number" value="${G.params.seed}" style="width:110px"></label><button id="kgDice" title="Другое зерно">🎲</button></div>
@@ -576,7 +741,17 @@ function kmWorldPanel(){
 function kmBindWorld(){
   const click = (id, f) => { if ($(id)) $(id).onclick = f; };
   click('kmGenOpen', () => { KMP.gen = {name: 'Новый мир', params: Object.fromEntries(KM_GEN.map(x => [x[0], x[5]]).concat([['seed', 1 + Math.floor(Math.random() * 99999)]])), info: null}; kmpRender(); });
-  click('kmAct1', () => confirm('Сделать миром кампании Европу 1208 (карту Акта I)?') && kmpCall({cmd: 'kmp_world_use', act1: true}));
+  click('kmAct1', async () => {
+    const b = $('kmAct1'), label = b.textContent;
+    b.disabled = true; b.textContent = 'Загружаю Европу…';
+    try {
+      const v = await kmpCall({cmd: 'kmp_world_use', act1: true});
+      if (v.type !== 'kmp') { b.disabled = false; b.textContent = label; toast(v.err || 'Не удалось загрузить карту Европы'); }
+    } catch (e) {
+      b.disabled = false; b.textContent = label;
+      toast('Не удалось загрузить карту Европы: ' + (e && e.message || e));
+    }
+  });
   if (!KMP.gen) return;
   const G = KMP.gen;
   document.querySelectorAll('[data-kg]').forEach(r => r.oninput = () => { G.params[r.dataset.kg] = +r.value; document.querySelector(`[data-kgv="${r.dataset.kg}"]`).textContent = r.value; });

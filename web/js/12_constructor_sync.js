@@ -72,6 +72,13 @@ $('form').addEventListener('click', e => {
     save(); syncForm(); renderPrice(); return;
   }
   if (e.target.closest('[data-altadd]')){ (S.altWeapons = S.altWeapons || []).push({n:1, s:6, type:7, att:1, range:80, reach:5, ammo:true}); save(); buildForm(); queuePrice(); return; }
+  const moreAdd = e.target.closest('[data-moreadd]');
+  if (moreAdd){
+    const path = moreAdd.dataset.moreadd, list = PATHS(S, path) || {}, keys = Object.keys(list).map(Number).filter(Number.isFinite);
+    const idx = keys.length ? Math.max(...keys) + 1 : 0, ai = +(path.match(/abilities\.(\d+)/) || [])[1], ability = S.abilities[ai];
+    if (keys.length < DT_OPTS().length){ list[idx] = {n:1, s:6, type:DT_OPTS().map(x => x[0]).find(t => t !== +(ability || {}).dtype)}; save(); renderAbilities(); queuePrice(); }
+    return;
+  }
   const adel = e.target.closest('[data-altdel]');
   if (adel){ S.altWeapons.splice(+adel.dataset.altdel, 1); save(); buildForm(); queuePrice(); return; }
   const del = e.target.closest('[data-del]');
@@ -196,6 +203,7 @@ function budgetLine(b){
 function renderPrice(){
   const d = lastPrice, b = d.boss;
   $('spent').textContent = d.spent != null ? d.spent : '—';
+  $('budgetUnit').textContent = pluralRu(S.budget, 'очко', 'очка', 'очков');
   $('leftLbl').textContent = d.left != null ? (d.left >= 0 ? 'осталось ' + d.left : 'перерасход ' + (-d.left)) : '';
   const seg = {};
   if (b) b.items.forEach(it => seg[it.cat] = (seg[it.cat] || 0) + Math.max(0, it.cost));
@@ -207,9 +215,14 @@ function renderPrice(){
     renderPrice.last = d;
   }
   const dHp = renderPrice.dHp || 0;
-  const big = (v, n, t) => `<div style="text-align:center;min-width:70px" title="${t}"><div class="big tnum" style="font-size:24px">${v}</div><div class="small">${n}</div></div>`;
+  const dexMod = Math.floor(((S.stats || [])[1] - 10) / 2);
+  const dexAc = (S.armor && S.armor.kind === 3) ? 0 : (S.armor && S.armor.kind === 2) ? Math.min(dexMod, 2) : dexMod;
+  const uaStat = S.passives && +S.passives.unarmoredStat;
+  const ua = S.armor && +S.armor.kind === 0 && uaStat >= 0 ? Math.max(0, Math.floor(((S.stats || [])[uaStat] - 10) / 2)) : 0;
+  const acBreakdown = `КД ${b ? b.ac : '—'} = база 10 + доспех ${S.acV || 0} + ЛОВ ${dexAc} + щит ${S.armor && S.armor.shield ? 2 : 0}${ua ? ` + защита без доспеха ${ua}` : ''}`;
+  const big = (v, n, t, term) => `<div style="text-align:center;min-width:70px" title="${t}"><div class="big tnum" style="font-size:24px">${v}</div><div class="small">${n}${infoIcon(term)}</div></div>`;
   $('verdict').innerHTML = d.ok ? `<div class="small" style="margin-top:6px">Персонаж собран — можно в бой или в кампанию:</div>
-    <div style="display:flex;gap:6px;margin:4px 0">${big(b.hp, 'ХП', 'Хиты: здоровье')}${big(b.ac, 'КД', 'Класс доспеха')}${big(b.speed + ' фт', 'скорость', 'Шагов по 5 фт за ход')}</div>
+    <div style="display:flex;gap:6px;margin:4px 0">${big(b.hp, 'ХП (здоровье)', 'Хиты: здоровье', 'ХП')}${big(b.ac, 'КД (защита)', 'Класс доспеха', 'КД')}${big(ftToText(b.speed), 'Скорость', 'Шагов по 5 фт за ход', 'фт')}</div><div class="small" style="color:var(--muted)">${esc(acBreakdown)}</div>
     ${dHp ? `<div class="small"><b style="color:${dHp > 0 ? 'var(--good)' : 'var(--bad)'}">${dHp > 0 ? '+' : ''}${dHp} ХП: ${dHp > 0 ? 'освободилось' : 'потрачено'} ${Math.abs(2 * dHp)} оч.</b></div>` : ''}
     <div class="small">Всё, что не потрачено, уходит в хиты: 2 очка = 1 ХП.</div>${budgetLine(b)}` : `<div class="err">${esc(d.err)}</div>`;
   $('toOpp').disabled = !d.ok;
@@ -250,14 +263,15 @@ function weaponSummary(){
 }
 $('btnExport').onclick = () => {
   const blob = new Blob([JSON.stringify(S, null, 2)], {type:'application/json'}), a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = (S.name || 'character') + '.json'; a.click();
+  a.href = URL.createObjectURL(blob); a.download = (S.name || 'character') + '.json'; a.click(); URL.revokeObjectURL(a.href); toast('Файл персонажа скачан.');
 };
 $('btnImport').onclick = () => $('fileImport').click();
 async function importChar(j){ S = Object.assign(JSON.parse(JSON.stringify(DEFAULT_CHAR)), migrateChar(j)); save(); await loadCatalog(); buildForm(); queuePrice(); }
 $('fileImport').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
-  try { await importChar(JSON.parse(await f.text())); }
+  try { await importChar(JSON.parse(await f.text())); toast(`Персонаж «${S.name || 'без имени'}» загружен.`); }
   catch (err) { alert('Не удалось прочитать файл: ' + err.message); }
+  e.target.value = '';
 };
 // файл, брошенный в окно: персонаж (есть характеристики) или карта; без этого браузер открывал файл вместо страницы
 addEventListener('dragover', e => e.preventDefault());

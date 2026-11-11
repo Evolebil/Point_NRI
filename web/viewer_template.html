@@ -219,7 +219,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 function brainOf(i){
   const b = BOSS[i];
-  if (b.int >= 12) return R.ctrl[i] ? 'нейросеть (GRU), ИНТ ' + b.int : 'умный бот, ИНТ ' + b.int;
+  if (b.int >= 12) return R.ctrl[i] ? 'автоматический противник, ИНТ ' + b.int : 'умный бот, ИНТ ' + b.int;
   if (b.int <= 3) return 'инстинкты, ИНТ ' + b.int;
   if (b.int <= 7) return 'простая тактика, ИНТ ' + b.int;
   return 'бот-тактик, ИНТ ' + b.int;
