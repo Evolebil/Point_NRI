@@ -283,7 +283,8 @@ main{position:relative;z-index:1}
 .ed-file{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .ed-main{display:flex;flex-direction:column;gap:22px;min-width:0}
 .ed-top{display:grid;grid-template-columns:230px minmax(0,1fr);gap:30px}
-.ed-token{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:20px;border-radius:16px;background:rgba(0,0,0,.35)}
+.ed-token{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:10px;padding:0 0 12px;border-radius:16px;background:rgba(0,0,0,.35)}
+.ed-token .token{width:100%;height:auto;aspect-ratio:1;font-size:13px}   /* круг во всю ширину рамки: касается её сверху и по бокам */
 :root[data-theme="light"] .ed-token{background:var(--glass)}
 .token{width:136px;height:136px;border-radius:50%;background:#9a9a9a;border:5px solid #e8e8e8;display:grid;place-items:center;text-align:center;font-size:11px;color:#222;padding:14px;overflow:hidden}
 .token img{width:100%;height:100%;object-fit:cover;border-radius:50%}
@@ -520,7 +521,7 @@ table{border-collapse:collapse}
   .ed-head{flex-wrap:wrap}.ed-title{font-size:30px}
   .ed-top{grid-template-columns:1fr;gap:14px}
   .ed-token{flex-direction:row;padding:12px}
-  .token{width:80px;height:80px;font-size:9px;padding:6px}
+  .ed-token{padding:12px}.ed-token .token{width:80px;height:80px;aspect-ratio:auto;font-size:9px;padding:6px}
   .ed-stats{grid-template-columns:1fr}
   .shield{width:80px;height:92px;margin:0 auto}.shield b{font-size:24px}
   .stat-grid{grid-template-columns:1fr 1fr;gap:8px}
