@@ -8,17 +8,21 @@ API:      POST /api, JSON. У каждого браузера свой id (sid):
           room_npc (противник из карточки персонажа — кампания),
           room_kick, room_start (хозяин), room_poll (состояние, кадры, мой ход), room_step (ход игрока своего места).
 """
+import base64
 import gzip
 import json
 import os
 import queue
 import random
+import re
+import smtplib
 import string
 import subprocess
 import sys
 import threading
 import time
-from urllib.parse import urlparse, parse_qs
+from email.message import EmailMessage
+from urllib.parse import urlparse, parse_qs, unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # корень проекта (сервер лежит в web/)
@@ -26,10 +30,10 @@ WEB = os.path.join(HERE, "web")
 STATE = os.path.join(HERE, "state")   # игроки и журналы — не в git
 os.makedirs(STATE, exist_ok=True)
 ENGINE = os.path.join(HERE, "build", "arena_play")
-TURN_TIMEOUT = 150   # сек: игрок комнаты не ходит — ход за него завершается
+TURN_TIMEOUT = 300   # сек: после пяти минут без ответа ход завершается за игрока
 ROOM_IDLE = 3 * 3600  # сек: заброшенная комната удаляется
 # предохранители сервера наружу (аудит кода, раздел Д, шаг 4)
-MAX_BODY = 2 * 1024 * 1024   # байт: самый большой запрос — персонаж со своей картой
+MAX_BODY = 3 * 1024 * 1024   # байт: включает WebP-портрет в base64
 ENGINE_TIMEOUT = 120         # сек: движок не ответил — процесс убит, игроку ошибка
 MAX_SOLO = 32                # одиночных боёв (процессов движка) одновременно
 MAX_ROOMS = 16               # комнат одновременно
@@ -95,6 +99,10 @@ SOLO = {}                 # sid -> {"eng": Engine, "in_game": bool, "t": вре�
 SOLO_LOCK = threading.Lock()
 ROOMS = {}                # код -> Room
 ROOMS_LOCK = threading.Lock()
+MATCH_TICKETS = {}        # sid -> заявка/результат быстрого боя; очередь общая для всех игроков
+MATCH_LOCK = threading.Lock()
+REPORT_TIMES = {}         # имя игрока -> отметки успешных отправок за последний час
+REPORT_LOCK = threading.Lock()
 # игроки по имени (v21): персонаж (состояние конструктора) и текущая комната — переживают смену адреса туннеля
 PLAYERS_FILE = os.path.join(STATE, "players.json")
 PLAYERS_LOCK = threading.Lock()
@@ -123,6 +131,37 @@ def player_set(name, **kw):
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(PLAYERS, f, ensure_ascii=False)
         os.replace(tmp, PLAYERS_FILE)
+
+
+def player_chars_set(name, chars, active):
+    k = pkey(name)
+    if not k:
+        return {"type": "error", "err": "Сначала укажите имя игрока."}
+    if not isinstance(chars, list) or len(chars) > 100:
+        return {"type": "error", "err": "На сервере можно хранить до 100 персонажей."}
+    clean = []
+    for item in chars:
+        if not isinstance(item, dict) or not isinstance(item.get("character"), dict):
+            return {"type": "error", "err": "Не удалось сохранить список персонажей."}
+        c = item["character"]
+        clean.append({"id": str(item.get("id", ""))[:80], "name": str(item.get("name") or c.get("name") or "Персонаж").strip()[:40],
+                      "budget": max(0, min(100000, int(c.get("budget", item.get("budget", 0)) or 0))), "character": c,
+                      "portrait": str(item.get("portrait", ""))[:300]})
+    if len(json.dumps(clean, ensure_ascii=False)) > 4 * 1024 * 1024:
+        return {"type": "error", "err": "Список персонажей слишком большой для хранения."}
+    with PLAYERS_LOCK:
+        if k not in PLAYERS and len(PLAYERS) >= MAX_PLAYERS:
+            return {"type": "error", "err": "На сервере сохранено слишком много игроков."}
+        PLAYERS.setdefault(k, {})["chars"] = clean
+        PLAYERS[k]["activeChar"] = str(active or "")[:80]
+        if not clean:
+            PLAYERS[k].pop("s", None)
+            PLAYERS[k]["activeChar"] = ""
+        tmp = PLAYERS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(PLAYERS, f, ensure_ascii=False)
+        os.replace(tmp, PLAYERS_FILE)
+    return {"type": "ok"}
 
 
 def solo(sid):
@@ -176,7 +215,7 @@ class Room:
                 if k == self.pending["seat"]:
                     who = next((m["name"] for m in self.members if m["sid"] == s), "")
         return {"type": "room", "code": self.code, "host": self.host == sid, "status": self.status, "err": self.err,
-                "members": [{"name": m["name"], "team": m["team"], "bot": m["bot"], "npc": bool(m.get("npc")), "me": m["sid"] == sid, "ready": bool(m["char"]) or m["bot"] is not None,
+                "members": [{"name": m["name"], "team": m["team"], "bot": m["bot"], "brain": m.get("brain", "rules"), "npc": bool(m.get("npc")), "me": m["sid"] == sid, "host": m["sid"] == self.host, "selected": bool(m.get("char")), "ready": bool(m.get("ready")) or m["bot"] is not None,
                              "i": i} for i, m in enumerate(self.members)],
                 "seat": self.seats.get(sid, -1), "init": self.init if self.init and since == 0 else None,
                 "frames": self.frames[since:], "nframes": len(self.frames), "req": mine["req"] if mine else None,
@@ -190,6 +229,13 @@ class Room:
             return
         if out.get("init") is not None:
             self.init = out["init"]
+            bosses = self.init.get("bosses", []) if isinstance(self.init, dict) else []
+            for i, boss in enumerate(bosses):
+                member = self.members[i] if i < len(self.members) else {}
+                char = member.get("char") if isinstance(member.get("char"), dict) else {}
+                portrait = char.get("portrait")
+                if portrait:
+                    boss["portrait"] = portrait
         self.frames.extend(out.get("frames", []))
         if out.get("type") == "turn":
             self.pending = {"seat": out.get("seat", -1), "req": out.get("req"), "t": time.time()}
@@ -262,15 +308,20 @@ def room_cmd1(msg, sid):
             if ROOMS[k].eng:
                 ROOMS[k].eng.kill()
             del ROOMS[k]
+        r = None if cmd == "room_create" else ROOMS.get(str(msg.get("code", "")).upper().strip())
+        if cmd != "room_create" and r is None:
+            return {"type": "error", "err": "Комната не найдена"}
+        # имя занято живым игроком другой комнаты (замок ROOMS_LOCK уже взят — второй раз брать нельзя: вечное ожидание)
+        name = str(msg.get("name") or "").strip()
+        if cmd in ("room_create", "room_join") and name:
+            for other in ROOMS.values():
+                if other is not r and any(m.get("bot") is None and not m.get("left") and pkey(m.get("name")) == pkey(name) for m in other.members):
+                    return {"type": "error", "err": "Имя занято: этот игрок уже в другой комнате"}
         if cmd == "room_create":
             if len(ROOMS) >= MAX_ROOMS:
                 return {"type": "error", "err": "сервер занят: слишком много комнат, попробуйте позже"}
             r = Room(new_code(), sid)
             ROOMS[r.code] = r
-        else:
-            r = ROOMS.get(str(msg.get("code", "")).upper().strip())
-            if r is None:
-                return {"type": "error", "err": "нет такой комнаты"}
     with r.lock:
         r.t = time.time()
         me = next((m for m in r.members if m["sid"] == sid), None)
@@ -278,6 +329,8 @@ def room_cmd1(msg, sid):
             if me is None and msg.get("name"):   # вернулся по новой ссылке: то же имя — то же место (и в идущем бою)
                 old = next((m for m in r.members if m["bot"] is None and pkey(m["name"]) == pkey(msg["name"])), None)
                 if old is not None:
+                    if old["sid"] != sid and not old.get("left"):
+                        return {"type": "error", "err": "Имя занято"}
                     if old["sid"] in r.seats:
                         r.seats[sid] = r.seats.pop(old["sid"])
                     if r.host == old["sid"]:
@@ -287,25 +340,43 @@ def room_cmd1(msg, sid):
             if me is None:
                 if r.status == "fight":
                     return {"type": "error", "err": "бой уже идёт — войдите после него (или под своим именем, если вы в нём)"}
-                me = {"sid": sid, "name": (msg.get("name") or "Игрок")[:40], "team": len({m["team"] for m in r.members}) % 2, "char": None, "bot": None}
+                me = {"sid": sid, "name": (msg.get("name") or "Игрок")[:24], "team": len({m["team"] for m in r.members}) % 2, "char": None, "bot": None, "ready": False}
                 r.members.append(me)
             if msg.get("name"):
-                me["name"] = msg["name"][:40]
+                me["name"] = str(msg["name"]).strip()[:24]
             player_set(me["name"], room=r.code)
         elif cmd == "room_set":
             if me is None:
                 return {"type": "error", "err": "вы не в этой комнате"}
+            target = me
+            if "i" in msg:
+                if r.host != sid:
+                    return {"type": "error", "err": "менять другого участника может только хозяин комнаты"}
+                i = int(msg.get("i", -1))
+                if not (0 <= i < len(r.members)):
+                    return {"type": "error", "err": "участник не найден"}
+                target = r.members[i]
             if "team" in msg:
-                me["team"] = max(0, min(63, int(msg["team"])))
+                target["team"] = max(0, min(63, int(msg["team"])))
             if "char" in msg:
-                me["char"] = msg["char"]
+                target["char"] = msg["char"]
+                target["ready"] = bool(msg["char"])
+            if "brain" in msg:
+                if target.get("bot") is None or target.get("npc") or r.host != sid or r.status != "lobby":
+                    return {"type": "error", "err": "выбирать, кто ведёт бота, может хозяин комнаты до боя"}
+                target["brain"] = "net" if msg["brain"] == "net" else "rules"
+            if "ready" in msg:
+                if msg["ready"] and not target.get("char"):
+                    return {"type": "error", "err": "Сначала выберите персонажа."}
+                target["ready"] = bool(msg["ready"])
             if msg.get("name"):
-                me["name"] = msg["name"][:40]
+                me["name"] = str(msg["name"]).strip()[:24]
         elif cmd == "room_bot":
             if r.host != sid or r.status != "lobby":
                 return {"type": "error", "err": "ботов добавляет хозяин комнаты до боя"}
             r.members.append({"sid": "bot%d" % random.randint(0, 1 << 30), "name": "Бот %d" % (1 + sum(m["bot"] is not None for m in r.members)),
-                              "team": max(0, min(63, int(msg.get("team", 1)))), "char": None, "bot": max(20, min(100000, int(msg.get("budget", 500))))})
+                              "team": max(0, min(63, int(msg.get("team", 1)))), "char": None, "bot": max(20, min(100000, int(msg.get("budget", 500)))),
+                              "brain": "net" if msg.get("brain") == "net" else "rules"})
         elif cmd == "room_npc":   # противник из карточки (кампания, задача Б-2): персонаж без игрока — им ходит бот или сеть по ИНТ
             if r.host != sid or r.status != "lobby":
                 return {"type": "error", "err": "противников добавляет хозяин комнаты до боя"}
@@ -319,6 +390,13 @@ def room_cmd1(msg, sid):
             i = int(msg.get("i", -1))
             if 0 <= i < len(r.members) and r.members[i]["sid"] != sid:
                 r.members.pop(i)
+        elif cmd == "room_host":
+            if r.host != sid or r.status != "lobby":
+                return {"type": "error", "err": "Передать комнату может только хозяин до боя."}
+            i = int(msg.get("i", -1))
+            if not (0 <= i < len(r.members)) or r.members[i].get("bot") is not None:
+                return {"type": "error", "err": "Выберите игрока, которому передать комнату."}
+            r.host = r.members[i]["sid"]
         elif cmd == "room_start":
             if r.host != sid:
                 return {"type": "error", "err": "начинает хозяин комнаты"}
@@ -327,6 +405,10 @@ def room_cmd1(msg, sid):
             humans = [m for m in r.members if m["bot"] is None]   # NPC из карточки — не игроки (bot = 0)
             if any(not m["char"] for m in humans):
                 return {"type": "error", "err": "не все игроки выбрали персонажа: " + ", ".join(m["name"] for m in humans if not m["char"])}
+            if any(not m.get("ready") for m in humans):
+                return {"type": "error", "err": "не все игроки готовы: " + ", ".join(m["name"] for m in humans if not m.get("ready"))}
+            if len({m["team"] for m in r.members}) < 2:
+                return {"type": "error", "err": "для начала боя нужны как минимум две команды"}
             r.seats = {m["sid"]: k for k, m in enumerate(humans)}
             members = []
             for m in r.members:
@@ -335,6 +417,8 @@ def room_cmd1(msg, sid):
                     e["char"] = m["char"]   # без места: ходит бот или сеть
                 elif m["bot"] is not None:
                     e["budget"] = m["bot"]
+                    if m.get("brain"):
+                        e["brain"] = m["brain"]
                 else:
                     e["char"], e["seat"] = m["char"], r.seats[m["sid"]]
                 members.append(e)
@@ -415,6 +499,187 @@ def page():
     return rd("play.html").replace("/*PLAY_CSS*/\n", rd("css", "play.css")).replace("/*PLAY_JS*/\n", js.replace("/*RENDER_JS*/", v[a:b]))
 
 
+def quick_match_room(players):
+    """Создать комнату с двумя реальными игроками после пары в очереди."""
+    if not isinstance(players, list) or len(players) != 2:
+        return {"type": "error", "err": "для боя нужны два игрока"}
+    clean = []
+    for p in players:
+        if not isinstance(p, dict) or not isinstance(p.get("char"), dict) or not p.get("sid"):
+            return {"type": "error", "err": "не удалось проверить заявку на бой"}
+        budget = int(p.get("budget", 0))
+        if budget <= 0 or int(p["char"].get("budget", 0)) != budget:
+            return {"type": "error", "err": "бюджет персонажа не совпадает с заявкой"}
+        clean.append({"sid": str(p["sid"])[:64], "name": str(p.get("name") or "Игрок").strip()[:24], "char": p["char"], "budget": budget})
+    with ROOMS_LOCK:
+        if len(ROOMS) >= MAX_ROOMS:
+            return {"type": "error", "err": "сервер занят: слишком много комнат, попробуйте позже"}
+        r = Room(new_code(), clean[0]["sid"])
+        r.members = [
+            {"sid": clean[0]["sid"], "name": clean[0]["name"], "team": 0, "char": clean[0]["char"], "bot": None, "ready": True},
+            {"sid": clean[1]["sid"], "name": clean[1]["name"], "team": 1, "char": clean[1]["char"], "bot": None, "ready": True},
+        ]
+        ROOMS[r.code] = r
+    return {"type": "quick_match_room", "code": r.code}
+
+
+def match_cmd(msg, sid):
+    cmd = msg.get("cmd")
+    now = time.time()
+    if cmd == "quick_match_create":
+        return quick_match_room(msg.get("players"))
+    if cmd == "match_cancel":
+        with MATCH_LOCK:
+            ticket = MATCH_TICKETS.get(sid)
+            if ticket and ticket.get("status") == "waiting":
+                ticket["status"] = "cancelled"
+        return {"type": "match_cancelled"}
+    if cmd == "match_find":
+        char = msg.get("char")
+        try:
+            budget = int(msg.get("budget", 0))
+            if not isinstance(char, dict) or budget <= 0 or int(char.get("budget", 0)) != budget:
+                return {"type": "error", "err": "Бюджет персонажа должен совпадать с выбранной суммой."}
+            name = str(msg.get("name") or char.get("name") or "Игрок").strip()[:24] or "Игрок"
+        except (TypeError, ValueError):
+            return {"type": "error", "err": "Не удалось проверить бюджет персонажа."}
+        with MATCH_LOCK:
+            old = MATCH_TICKETS.get(sid)
+            if old and old.get("status") in ("match", "bot"):
+                return dict(old["result"])
+            if old and old.get("status") == "waiting" and old.get("budget") == budget:
+                if now - old["created"] >= 60:
+                    old["status"], old["result"] = "bot", {"type": "match_bot", "budget": budget}
+                    return dict(old["result"])
+                old["lastSeen"] = now
+                return {"type": "match_wait", "budget": budget, "elapsed": int(now - old["created"])}
+            if old and old.get("status") == "waiting":
+                old["status"] = "cancelled"
+            ticket = {"status": "waiting", "created": now, "lastSeen": now, "budget": budget, "sid": sid, "name": name, "char": char}
+            others = sorted((t for k, t in MATCH_TICKETS.items() if k != sid and t.get("status") == "waiting" and t.get("budget") == budget and now - t.get("lastSeen", t["created"]) <= 15 and now - t["created"] <= 60), key=lambda t: t["created"])
+            if any(pkey(t.get("name")) == pkey(name) for t in others):
+                return {"type": "error", "err": "Поиск уже идёт"}
+            if others:
+                first = others[0]
+                room = quick_match_room([first, ticket])
+                if room.get("type") != "quick_match_room":
+                    return room
+                result = {"type": "match", "code": room["code"]}
+                first["status"], first["result"] = "match", result
+                ticket["status"], ticket["result"] = "match", result
+                MATCH_TICKETS[sid] = ticket
+                return dict(result)
+            MATCH_TICKETS[sid] = ticket
+            for k, t in list(MATCH_TICKETS.items()):
+                if t.get("status") in ("cancelled", "bot", "match") and now - t.get("created", now) > 1800:
+                    MATCH_TICKETS.pop(k, None)
+        return {"type": "match_wait", "budget": budget, "elapsed": 0}
+    if cmd == "match_poll":
+        with MATCH_LOCK:
+            ticket = MATCH_TICKETS.get(sid)
+            if not ticket:
+                return {"type": "error", "err": "Поиск боя завершён. Нажмите «Найти бой» ещё раз."}
+            if ticket.get("status") in ("match", "bot"):
+                return dict(ticket["result"])
+            if ticket.get("status") == "cancelled":
+                return {"type": "error", "err": "Поиск отменён."}
+            if now - ticket.get("lastSeen", ticket["created"]) > 15:
+                ticket["status"] = "cancelled"
+                return {"type": "error", "err": "Поиск завершён. Нажмите «Найти бой» ещё раз."}
+            ticket["lastSeen"] = now
+            elapsed = int(now - ticket["created"])
+            if elapsed >= 60:
+                ticket["status"], ticket["result"] = "bot", {"type": "match_bot", "budget": ticket["budget"]}
+                return dict(ticket["result"])
+        return {"type": "match_wait", "budget": ticket["budget"], "elapsed": elapsed}
+    return {"type": "error", "err": "Неизвестная команда поиска боя."}
+
+
+def site_config():
+    path = os.path.join(HERE, "config", "site.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            value = json.load(f)
+        if not isinstance(value, dict):
+            raise ValueError("ожидался объект")
+        return {"type": "site_config", "version": str(value.get("version", "0.1.0")),
+                "developers": value.get("developers", []), "templates": value.get("templates", [])}
+    except Exception:  # noqa: BLE001
+        return {"type": "site_config", "version": "0.1.0", "developers": [], "templates": []}
+
+
+def report_env():
+    """Настройки почты для жалоб: переменные окружения или файл state/smtp.env (строки КЛЮЧ=значение, не в git).
+    Файл читается при каждой отправке — после правки перезапуск сервера не нужен."""
+    env = {k: os.environ.get(k, "") for k in ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_TLS", "REPORT_TO")}
+    try:
+        with open(os.path.join(STATE, "smtp.env"), encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    if k.strip() in env and not env[k.strip()]:
+                        env[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return env
+
+
+def send_report(msg):
+    category = str(msg.get("category", "Ошибка"))
+    text = str(msg.get("text", "")).strip()
+    contact = str(msg.get("contact", "")).strip()[:200]
+    metadata = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
+    name = str(metadata.get("name", "")).strip()[:24] or "Не указано"
+    if category not in ("Ошибка", "Идея", "Другое") or not 10 <= len(text) <= 2000:
+        return {"type": "error", "err": "Проверьте категорию и текст сообщения (10–2000 символов)."}
+    now = time.time()
+    key = pkey(name)
+    with REPORT_LOCK:
+        times = [t for t in REPORT_TIMES.get(key, []) if now - t < 3600]
+        if times and now - times[-1] < 60 or len(times) >= 5:
+            return {"type": "error", "err": "Слишком часто, попробуйте позже."}
+        times.append(now)
+        REPORT_TIMES[key] = times
+    E = report_env()
+    host = E.get("SMTP_HOST", "").strip()
+    recipient = E.get("REPORT_TO", "").strip()
+    if not host or not recipient:
+        return {"type": "error", "err": "Не удалось отправить: отправка писем ещё не настроена."}
+    try:
+        port = int(E.get("SMTP_PORT", "465"))
+        sender = E.get("SMTP_FROM", E.get("SMTP_USER", recipient)).strip()
+        payload = (f"Категория: {category}\nИгрок: {name}\nКонтакт: {contact or 'не указан'}\n"
+                   f"Версия: {str(metadata.get('version', '0.1.0'))[:40]}\nЭкран: {str(metadata.get('screen', ''))[:40]}\n"
+                   f"Тема: {str(metadata.get('theme', ''))[:40]}\nБраузер: {str(metadata.get('browser', ''))[:300]}\n\n{text}")
+        mail = EmailMessage()
+        mail["Subject"] = f"Горнило Миров — {category}"
+        mail["From"] = sender
+        mail["To"] = recipient
+        mail.set_content(payload)
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=15) as smtp:
+                user = E.get("SMTP_USER", "").strip()
+                if user:
+                    smtp.login(user, E.get("SMTP_PASSWORD", ""))
+                smtp.send_message(mail)
+        else:
+            with smtplib.SMTP(host, port, timeout=15) as smtp:
+                smtp.ehlo()
+                if E.get("SMTP_TLS", "1") != "0":
+                    smtp.starttls()
+                    smtp.ehlo()
+                user = E.get("SMTP_USER", "").strip()
+                if user:
+                    smtp.login(user, E.get("SMTP_PASSWORD", ""))
+                smtp.send_message(mail)
+        return {"type": "ok"}
+    except Exception:  # noqa: BLE001
+        with REPORT_LOCK:
+            REPORT_TIMES[key] = [t for t in REPORT_TIMES.get(key, []) if t != now]
+        return {"type": "error", "err": "Не удалось отправить, повторите."}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -436,7 +701,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         path = u.path
-        if path == "/sheet":
+        if path.startswith("/portrait/"):
+            portrait_id = unquote(path[len("/portrait/"):])
+            if not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", portrait_id):
+                self._send(404, "не найдено", "text/plain; charset=utf-8")
+                return
+            try:
+                with open(os.path.join(STATE, "portraits", portrait_id + ".webp"), "rb") as f:
+                    self._send(200, f.read(), "image/webp")
+            except OSError:
+                self._send(404, "не найдено", "text/plain; charset=utf-8")
+        elif path == "/sheet":
             try:
                 b = int(parse_qs(u.query).get("budget", ["800"])[0])
                 self._send(200, sheet_mod().sheet(b), "text/markdown; charset=utf-8")
@@ -479,6 +754,42 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if cmd and cmd.startswith("room_"):
                 out = room_cmd(msg, sid)
+            elif cmd in ("match_find", "match_poll", "match_cancel", "quick_match_create"):
+                out = match_cmd(msg, sid)
+            elif cmd == "site_config":
+                out = site_config()
+            elif cmd == "report":
+                out = send_report(msg)
+            elif cmd == "portrait_put":
+                portrait_id = str(msg.get("portraitId") or "")
+                data = str(msg.get("data") or "")
+                match = re.fullmatch(r"data:image/webp;base64,([A-Za-z0-9+/=]+)", data)
+                if not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", portrait_id) or not match or len(match[1]) > 2800000:
+                    out = {"type": "error", "err": "Портрет должен быть WebP до 2 МБ."}
+                else:
+                    try:
+                        raw = base64.b64decode(match[1], validate=True)
+                        if len(raw) > 2 * 1024 * 1024 or len(raw) < 12 or raw[:4] != b"RIFF" or raw[8:12] != b"WEBP":
+                            raise ValueError("invalid WebP")
+                        portrait_dir = os.path.join(STATE, "portraits")
+                        os.makedirs(portrait_dir, exist_ok=True)
+                        tmp = os.path.join(portrait_dir, portrait_id + ".tmp")
+                        with open(tmp, "wb") as f:
+                            f.write(raw)
+                        os.replace(tmp, os.path.join(portrait_dir, portrait_id + ".webp"))
+                        out = {"type": "portrait", "url": "/portrait/" + portrait_id}
+                    except Exception:  # noqa: BLE001
+                        out = {"type": "error", "err": "Файл портрета повреждён или не удалось сохранить."}
+            elif cmd == "portrait_delete":
+                portrait_id = str(msg.get("portrait") or "").split("/")[-1]
+                if not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", portrait_id):
+                    out = {"type": "error", "err": "Некорректный идентификатор портрета."}
+                else:
+                    try:
+                        os.remove(os.path.join(STATE, "portraits", portrait_id + ".webp"))
+                    except FileNotFoundError:
+                        pass
+                    out = {"type": "ok"}
             elif cmd and cmd.startswith("kmp_"):   # кампания: исследование и социалка (web/kampaniya.py)
                 import kampaniya
                 out = kampaniya.kmp_cmd(msg, sid)
@@ -491,18 +802,36 @@ class Handler(BaseHTTPRequestHandler):
                 if p.get("room") and p["room"] not in ROOMS:
                     p["room"] = ""
                 out = {"type": "player", "s": p.get("s"), "room": p.get("room", "")}
+            elif cmd == "player_chars_load":
+                with PLAYERS_LOCK:
+                    p = dict(PLAYERS.get(pkey(msg.get("name")), {}))
+                out = {"type": "player_chars", "chars": p.get("chars", []), "active": p.get("activeChar", "")}
+            elif cmd == "player_chars_save":
+                out = player_chars_set(msg.get("name"), msg.get("chars"), msg.get("active"))
             elif cmd in ("start", "step"):
                 s = solo(sid)
                 with s["eng"].lock:
                     if cmd == "start":
                         s["eng"].kill()
                         out = s["eng"].talk(msg)
+                        char = msg.get("char") if isinstance(msg.get("char"), dict) else {}
+                        if char.get("portrait") and isinstance(out.get("init"), dict):
+                            bosses = out["init"].get("bosses", [])
+                            own = int(out["init"].get("me", 0))
+                            if 0 <= own < len(bosses):
+                                bosses[own]["portrait"] = str(char["portrait"])[:300]
                         s["in_game"] = out.get("type") == "turn"
                     elif not s["in_game"]:
                         out = {"type": "error", "err": "игра не идёт"}
                     else:
-                        out = s["eng"].talk({k: v for k, v in msg.items() if k != "cmd"})
-                        s["in_game"] = out.get("type") == "turn"
+                        try:
+                            out = s["eng"].talk({k: v for k, v in msg.items() if k != "cmd"})
+                        except Exception as e:  # noqa: BLE001 — движок упал или завис: бой не продолжить
+                            s["in_game"] = False
+                            log("api", "step", "ошибка:", repr(e))
+                            raise Refuse("Бой прерван: движок перезапущен, начните новый бой.") from e
+                        # ответ-ошибка (не тот ход) не обрывает бой — игрок просто ходит заново
+                        s["in_game"] = out.get("type") in ("turn", "error")
             elif cmd in ("catalog", "price", "preview", "genmap", "checkmap", "worldmap", "regionmap"):
                 with QUERY.lock:
                     out = QUERY.talk(msg)

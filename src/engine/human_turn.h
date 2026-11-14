@@ -88,8 +88,11 @@ static std::string humanRequest(World& w, int idx, const TurnState& ts, const st
         o += std::string(i ? "," : "") + "{\"k\":" + std::to_string(i) + ",\"title\":" + jq(specTitle(s)) + ",\"desc\":" + jq(describe(s)) + ",\"avail\":" + (why.empty() ? "true" : "false") + ",\"why\":" + jq(why) +
              ",\"bonus\":" + (s.bonus ? "true" : "false") + ",\"react\":" + std::to_string(s.react) + ",\"self\":" + (s.self ? "true" : "false") + ",\"ally\":" + (s.ally ? "true" : "false") + ",\"ground\":" + (s.ground ? "true" : "false") +
              ",\"wallLen\":" + std::to_string(s.wallLen) + ",\"range\":" + std::to_string(specReach(me.b, s)) + ",\"radius\":" + std::to_string(s.radius) +
-             ",\"tele\":" + std::to_string(s.teleFt) + ",\"uses\":" + std::to_string(me.uses[i] >= UNL ? -1 : me.uses[i]) + "}";
+             ",\"tele\":" + std::to_string(s.teleFt) + ",\"uses\":" + std::to_string(me.uses[i] >= UNL ? -1 : me.uses[i]) + ",\"slot\":" + std::to_string(s.slotLvl) + "}";
     }
+    o += "],\"slots\":[";   // ячейки заклинаний: [уровень, осталось, всего] по купленным уровням
+    for (int L = 1, n = 0; L < 10; L++)
+        if (me.b.slots[L] > 0) o += std::string(n++ ? "," : "") + "[" + std::to_string(L) + "," + std::to_string(me.slotLeft[L]) + "," + std::to_string(me.b.slots[L]) + "]";
     o += "],\"alts\":[";   // запасное оружие: что можно взять вместо нынешнего
     for (size_t k = 0; k < me.b.alt.size(); k++) {
         const Wp& q = me.b.alt[k];

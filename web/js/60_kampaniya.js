@@ -30,57 +30,43 @@ const KMP_HELP = {
 const kq = t => `<span title="${esc(KMP_HELP[t] || t)}" style="cursor:help;border:1px solid currentColor;border-radius:50%;padding:0 5px;font-size:11px;opacity:.7;margin-left:3px">?</span>`;
 
 // вкладка: кнопка и раздел; showTab (00_common.js) знает вкладки 1–6 — седьмую включаем сами
-(function kmpMount(){
-  const b = document.createElement('button');
-  b.className = 'tab'; b.id = 'tab7'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', 'false'); b.textContent = 'Кампания';
-  $('tab6').after(b);
-  const s = document.createElement('section');
-  s.className = 'scene'; s.id = 's7';
-  s.innerHTML = `<div class="card" style="max-width:1100px;margin:0 auto"><div id="kmpHome"></div><div id="kmpBox"></div></div>`;
-  $('s6').after(s);
-  const orig = showTab;
-  showTab = function(n){ orig(n <= 6 ? n : 0); $('s7').classList.toggle('on', n === 7); $('tab7').setAttribute('aria-selected', n === 7);
-    if (n === 7) KMP.id ? kmpCall({cmd: 'kmp_open'}) : kmpHome(); };
-  b.onclick = () => showTab(7);
-  // ссылка с кодом кампании: /?k=КОД — сразу в неё
+// экран «Кампания» (раздел s7 в play.html): вход — список кампаний или открытая кампания
+ROUTE_ENTER.campaign = () => { KMP.id ? kmpCall({cmd: 'kmp_open'}) : kmpHome(); };
+ROUTE_BACK.campaign = () => { if (KMP.id){ KMP.id = ''; clearTimeout(KMP.timer); kmpHome(); } else go('home'); };
+{ // ссылка с кодом кампании: /?k=КОД — сразу в неё
   const k = new URLSearchParams(location.search).get('k');
-  if (k) setTimeout(() => { KMP.id = k.toUpperCase(); showTab(7); }, 300);
-})();
+  if (k && /^[A-Za-z0-9]{5}$/.test(k)) setTimeout(() => { KMP.id = k.toUpperCase(); go('campaign'); }, 300);
+}
 
 // ---- экран входа: мои кампании, новая, по коду ----
 async function kmpHome(){
   KMP.id = ''; KMP.v = null; clearTimeout(KMP.timer);
   $('kmpBox').innerHTML = '';
   const who = kmpName();
-  let h = `<h3>Кампания</h3><div class="hint">Поход с мастером: путь по карте, встречи, разговоры с NPC, торговля, отдых. Мастер создаёт
-    кампанию и даёт игрокам код; движок бросает кости, мастер решает. (Бой на арене против бота или друзей — вкладки «Соперник» и «Комната».)</div>`;
-  if (!who){ $('kmpHome').innerHTML = h + `<div class="card" style="margin-top:10px">Сначала введите своё имя в строке над вкладками — под ним вы будете мастером или игроком.</div>`; return; }
+  const intro = `<h1 class="page-title">Кампания</h1>`;
+  if (!who){ $('kmpHome').innerHTML = intro + `<div class="panel">Сначала задайте имя игрока в настройках.</div>`; return; }
   const v = await api({cmd: 'kmp_list', name: who});
   const list = v.type === 'kmp_list' ? v.list : [];
   const ago = t => { const m = Math.round((Date.now() / 1000 - t) / 60); return m < 1 ? 'только что' : m < 60 ? m + ' мин назад' : m < 1440 ? Math.round(m / 60) + ' ч назад' : Math.round(m / 1440) + ' дн. назад'; };
-  h += `<div class="sec-h">Мои кампании</div>` + (list.length ? list.map(c => `<div class="card" style="margin:6px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-      <div style="flex:1;min-width:220px"><b>${esc(c.title)}</b> <span class="small">· код <b class="tnum">${esc(c.id)}</b></span><br>
-      <span class="small">${c.master ? 'вы мастер' : 'мастер: ' + esc(c.masterName)} · героев ${c.heroes} · игроков ${c.players} · изменена ${ago(c.t)}</span></div>
-      <div><button class="primary" data-open="${esc(c.id)}">Открыть</button>${c.master ? `<button class="danger" data-delete="${esc(c.id)}" data-title="${esc(c.title)}">Удалить</button>` : '<div class="small" style="color:var(--muted);margin-top:4px">Вы игрок. Удалить кампанию может только мастер.</div>'}</div></div>`).join('')
-    : `<div class="hint">Пока нет. Создайте кампанию ниже (вы станете мастером) или войдите по коду, который дал мастер.</div>`);
-  h += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px">
-    <div class="card" style="flex:1;min-width:260px"><h3>Новая кампания</h3><div class="hint">Вы будете мастером. После создания появится код для игроков.</div>
-      <div class="row"><label>Название <input id="kmpTitle" placeholder="например, Акт I — Каркассон" style="width:220px"></label>
-      <button class="primary" id="kmpNew">Создать</button></div></div>
-    <div class="card" style="flex:1;min-width:260px"><h3>Войти по коду</h3><div class="hint">Код из пяти знаков даёт мастер.</div>
-      <div class="row"><label>Код <input id="kmpCode" maxlength="5" style="width:90px;text-transform:uppercase"></label><button class="primary" id="kmpJoin">Войти</button></div></div></div>`;
-  $('kmpHome').innerHTML = h;
+  const rows = list.length ? list.map(c => `<div class="list-row simple"><span class="name"><b>${esc(c.title)}</b><span class="meta">код ${esc(c.id)} · ${c.master ? 'вы мастер' : 'мастер: ' + esc(c.masterName)} · героев ${c.heroes} · игроков ${c.players} · ${ago(c.t)}</span></span>
+      <span class="acts-r"><button data-open="${esc(c.id)}">Открыть</button>${c.master ? `<button class="danger" data-delete="${esc(c.id)}" data-title="${esc(c.title)}">Удалить</button>` : ''}</span></div>`).join('')
+    : '<div class="empty">Пока нет кампаний. Создайте свою (вы станете мастером) или войдите по коду мастера.</div>';
+  $('kmpHome').innerHTML = `${intro}<div class="cols cols-side"><div class="panel"><h2>Мои кампании</h2><div class="list">${rows}</div></div>
+    <aside style="display:flex;flex-direction:column;gap:24px"><div class="panel"><h2>Новая кампания</h2><p class="muted small">Вы станете мастером. После создания появится код для игроков.</p>
+      <label class="field">Название<input id="kmpTitle" placeholder="например, Акт I" maxlength="60"></label><button class="primary wide" id="kmpNew">Создать</button></div>
+    <div class="panel"><h2>Войти по коду</h2><label class="field">Код из пяти знаков<input id="kmpCode" class="code-input" maxlength="5" placeholder="XXXXX" autocomplete="off" spellcheck="false"></label><button class="primary wide" id="kmpJoin">Войти</button></div></aside></div>`;
   $('kmpHome').querySelectorAll('button[data-open]').forEach(b => b.onclick = () => { KMP.id = b.dataset.open; kmpCall({cmd: 'kmp_open'}); });
   $('kmpHome').querySelectorAll('button[data-delete]').forEach(b => b.onclick = () => kmpDeleteDialog(b));
-  $('kmpNew').onclick = async () => { KMP.justCreated = true; const r = await kmpCall({cmd: 'kmp_create', title: $('kmpTitle').value.trim() || 'Кампания'}); if (r.type !== 'kmp') KMP.justCreated = false; };
+  $('kmpNew').onclick = async () => { const title=$('kmpTitle').value.trim();if(!title||title.length>60){toast('Введите название кампании (1–60 символов)');$('kmpTitle').focus();return;}KMP.justCreated = true; const r = await kmpCall({cmd: 'kmp_create', title}); if (r.type !== 'kmp') KMP.justCreated = false; };
   const join = () => { const c = $('kmpCode').value.trim().toUpperCase(); if (c.length !== 5){ toast('код — пять знаков'); return; } KMP.id = c; kmpCall({cmd: 'kmp_open'}); };
-  $('kmpJoin').onclick = join; $('kmpCode').onkeydown = e => { if (e.key === 'Enter') join(); };
+  $('kmpJoin').onclick = join; $('kmpCode').oninput = () => { $('kmpCode').value=$('kmpCode').value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5); }; $('kmpCode').onkeydown = e => { if (e.key === 'Enter') join(); };
+  $('kmpTitle').onkeydown = e => { if (e.key === 'Enter') $('kmpNew').click(); };
 }
 
 function kmpDeleteDialog(button){
   const id = button.dataset.delete, title = button.dataset.title;
   document.getElementById('kmpDeleteDialog')?.remove();
-  document.body.insertAdjacentHTML('beforeend', `<div id="kmpDeleteDialog" class="kmp-delete-backdrop"><div class="kmp-delete-dialog" role="dialog" aria-modal="true" aria-label="Подтверждение удаления кампании"><p>Удалить кампанию «${esc(title)}»? Это действие нельзя отменить.</p><div class="err" data-delete-error style="display:none"></div><div class="row"><button type="button" class="danger" data-delete-confirm>Удалить</button><button type="button" data-delete-cancel>Отмена</button></div></div></div>`);
+  document.body.insertAdjacentHTML('beforeend', `<div id="kmpDeleteDialog" class="kmp-delete-backdrop"><div class="kmp-delete-dialog" role="dialog" aria-modal="true" aria-label="Подтверждение удаления кампании"><h2 style="margin-bottom:12px">Подтвердите</h2><p>Удалить кампанию «${esc(title)}»? Это действие нельзя отменить.</p><div class="err" data-delete-error style="display:none"></div><div class="row"><button type="button" class="danger" data-delete-confirm>Удалить</button><button type="button" data-delete-cancel>Отмена</button></div></div></div>`);
   const modal = $('kmpDeleteDialog'), cancel = modal.querySelector('[data-delete-cancel]'), remove = modal.querySelector('[data-delete-confirm]'), error = modal.querySelector('[data-delete-error]');
   const close = () => { modal.remove(); document.removeEventListener('keydown', onKey); button.focus(); };
   const onKey = e => { if (e.key === 'Escape' && modal.isConnected){ e.preventDefault(); close(); } };
@@ -229,7 +215,7 @@ function kmpTabMap(v, s, M, heroes){
 }
 function kmpTabParty(v, s, M, heroes){
   let h = '';
-  if (!s.heroes.length) h += `<div class="card" style="margin:6px 0">Героев пока нет. Соберите героя во вкладке «Персонаж» и нажмите «➕ Мой герой» — ${M ? 'черновик придёт вам в «Решения»' : 'мастер примет его в отряд'}.</div>`;
+  if (!s.heroes.length) h += `<div class="card" style="margin:6px 0">Героев пока нет. Соберите героя в «Мои персонажи» (берётся выбранный) и нажмите «➕ Мой герой» — ${M ? 'черновик придёт вам в «Решения»' : 'мастер примет его в отряд'}.</div>`;
   else h += `<table class="small" style="width:100%;border-collapse:collapse"><tr><th align="left">Герой</th><th>Ур.</th><th>ХП</th><th>Кости хитов ${kq('кости хитов')}</th><th>Истощение ${kq('истощение')}</th><th>Голод, дней</th><th>Пасс. Внимат. ${kq('пассивная Внимательность')}</th><th>Кошелёк</th><th align="left">Вещи</th></tr>` +
     s.heroes.map(x => `<tr${x.dead ? ' style="opacity:.5"' : ''}><td>${esc(x.name)}${x.dead ? ' ☠' : ''}</td><td align="center">${x.level}</td><td align="center">${x.hp}/${x.hpMax}</td><td align="center">${x.hd}/${x.hdMax}</td>
       <td align="center">${x.exh}</td><td align="center">${x.daysNoFood}</td><td align="center">${x.passivePerception}</td><td align="center">${kmpMoney(x.purse)}</td>
@@ -237,7 +223,7 @@ function kmpTabParty(v, s, M, heroes){
   h += `<div class="small" style="margin:6px 0">Путник: ${esc(s.traveler)} · жизнь: ${esc(s.lifestyle)} · груз отряда: ${Object.entries(s.inv).map(([k, n]) => esc(k) + ' ×' + n).join(', ') || '—'}<br>
     Сведения: ${s.facts.map(esc).join('; ') || '—'}<br>NPC ${kq('отношение')}: ${Object.entries(s.npcs).map(([k, n]) => esc(k) + ' — ' + n.attitude + (n.shift ? ` (${n.shift > 0 ? '+' : ''}${n.shift})` : '')).join('; ') || '—'}
     · Задания: ${Object.entries(s.quests).map(([k, q]) => esc(k) + ': за новые сведения ' + kmpMoney(q.tier)).join('; ') || '—'}</div>`;
-  h += `<div class="sec-h">Действия</div><div class="row"><button id="kmpMine">➕ Мой герой (из вкладки «Персонаж»)</button></div>`;
+  h += `<div class="sec-h">Действия</div><div class="row"><button id="kmpMine">➕ Мой герой (выбранный в «Мои персонажи»)</button></div>`;
   if (heroes.length) h += `<div class="row"><label>Проверка: герой <select id="kChHero">${kmpOpt(heroes)}</select></label><label>навык <select id="kChWhat">${kmpOpt(kmpChecks())}</select></label>
     ${M ? `<label>СЛ ${kq('СЛ')} <input id="kChDC" type="number" value="15" style="width:60px"></label><label><input type="checkbox" id="kChAdv"> преимущество</label><label><input type="checkbox" id="kChDis"> помеха</label>
       <label><input type="checkbox" id="kChHid"> скрыто от игроков</label>` : ''}<button id="kmpCheck">🎲 Проверка</button>${M ? '<button id="kmpGroup">Групповая (весь отряд)</button>' : ''}</div>
@@ -319,7 +305,7 @@ function kmpBind(){
     if (k === 'rr') kmpCall({cmd: 'kmp_reroll', draft: d});
     if (k === 'cn') kmpCall({cmd: 'kmp_cancel', draft: d});
   });
-  click('kmpMine', () => { if (!lastPrice || !lastPrice.ok){ toast('Персонаж не собран: проверьте вкладку «Персонаж»'); return; }
+  click('kmpMine', () => { if (!lastPrice || !lastPrice.ok){ toast('Персонаж не собран: откройте его в «Мои персонажи»'); return; }
     kmpPropose({type: 'hero', name: S.name || kmpName(), char: toChar()}); });
   click('kmpCheck', () => kmpPropose({type: 'check', hero: val('kChHero'), what: val('kChWhat'), dc: +val('kChDC') || 10, adv: on('kChAdv'), dis: on('kChDis'), hidden: on('kChHid')}));
   click('kmpTrade', () => { const a = {type: val('kTrK'), who: val('kTrWho'), item: val('kTrItem').trim(), qty: +val('kTrQty') || 1, price: val('kTrPrice'), npc: val('kTrNpc')};

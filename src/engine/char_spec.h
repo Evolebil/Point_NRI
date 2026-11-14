@@ -383,6 +383,8 @@ static bool bossFromJson(const Json& j, Boss& b, long long& budget, int& hpWante
             const Json& q = rl[i];
             addR(q["when"].num(0), q["warg"].num(0), q["what"].num(0), q["n"].num(0), q["s"].num(6), q["once"].flag());
             b.rules.back().allyR = q["allyR"].num(0);   // аура: и на союзников в пределах allyR фт (v21)
+            const int rdt = q.has("dt") ? q["dt"].num(-1) : -1;
+            b.rules.back().dt = rdt >= 0 && rdt < DT_N ? rdt : -1;
         }
         if (p["pack"].flag()) addR(W_ALLYADJ, 0, E_ADVATK, 0, 6, false);
         if (p["reckless"].flag()) { addR(W_RECKLESS, 0, E_ADVATK, 0, 6, false); addR(W_RECKLESS, 0, E_ADVVSME, 0, 6, false); }
@@ -403,6 +405,7 @@ static bool bossFromJson(const Json& j, Boss& b, long long& budget, int& hpWante
             t.b = q["b"].num(0);
             t.cond = q["cond"].num(0);
             t.arg = q["arg"].num(0);   // тип урона для «я получил урон выбранного типа»
+            t.dt = q.has("dt") && q["dt"].num(-1) >= 0 && q["dt"].num(-1) < DT_N ? q["dt"].num(-1) : -1;
             t.uses = q["uses"].num(0) > 0 ? q["uses"].num(0) : UNL;
             if (!inRange(t.on, 0, T_N - 1, "событие", err) || !inRange(t.what, 0, X_N - 1, "эффект события", err) || !inRange(t.n, 0, MAX_DICE, "кубики события", err) ||
                 !inRange(t.b, 0, 1000, "прибавка события", err) || !isDie(t.s))
@@ -454,6 +457,17 @@ static bool bossFromJson(const Json& j, Boss& b, long long& budget, int& hpWante
     if (b.blindsight != 0 && b.blindsight != 10 && b.blindsight != 30 && b.blindsight != 60) { err = "слепое зрение: 0, 10, 30 или 60 фт"; return false; }
     for (int L = 1; L < 10; L++)
         if (!inRange(b.slots[L], 0, MAX_COUNT, "ячейки заклинаний", err)) return false;
+    // способность с ячейкой без подходящих ячеек не сработает ни разу — это ошибка сборки, а не тихая трата очков
+    for (size_t i = 0; i < b.abil.size(); i++) {
+        const int need = b.abil[i].slotLvl;
+        if (need <= 0) continue;
+        int have = 0;
+        for (int L = need; L < 10; L++) have += b.slots[L];
+        if (!have) {
+            err = "способность " + std::to_string(i + 1) + " тратит ячейку " + std::to_string(need) + " ур., а ячеек этого уровня или выше нет: купите их в «Черты → Ячейки заклинаний» или уберите уровень ячейки";
+            return false;
+        }
+    }
     const Json& au = p["aura"];
     b.auraN = au["n"].num(0);
     b.auraS = au["s"].num(6);

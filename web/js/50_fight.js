@@ -52,25 +52,27 @@ function seenHTML(){
   Object.values(z.abil).forEach(sp => r.push(`✨ «${esc(sp.title)}»${sp.desc ? ` <span class="small">— ${esc(sp.desc)}</span>` : ''}`));
   return `<div class="seen"><div class="small">Замечено в бою:</div>${r.length ? r.map(x => `<div>${x}</div>`).join('') : '<div class="small">пока ничего</div>'}</div>`;
 }
+// карточки бойцов поверх поля: слева — вы, справа — враг (в бою команд — своя команда и противники)
 function drawCards(i){
-  const fr = FR[i], me = G.me;
-  if (G.room){   // команды: моя карточка и список остальных главных бойцов
-    const row = k => { const f = fr.f[k], b = BOSS[k], pct = Math.max(0, 100 * f.hp / f.maxHp);
-      return `<div style="margin:4px 0"><span class="chip" style="background:${teamCol(f.team)}">${f.team + 1}</span> ${esc(b.title)}${k === me ? ' (вы)' : ''}${f.hp <= 0 ? ' ☠' : ''}<div class="hpbar"><i style="width:${pct}%"></i></div><span class="small">${Math.max(0, f.hp)}/${f.maxHp} ХП · КД ${f.ac}${f.cond.length ? ' · ' + f.cond.map(esc).join(', ') : ''}</span></div>`; };
-    const n = BOSS.length;
-    $('cardMe').className = 'card pcard'; $('cardMe').innerHTML = `<h4>Ваша команда</h4>` + [...Array(n).keys()].filter(k => fr.f[k].team === fr.f[me].team).map(row).join('');
-    $('cardEnemy').className = 'card pcard'; $('cardEnemy').innerHTML = `<h4>Противники</h4>` + [...Array(n).keys()].filter(k => fr.f[k].team !== fr.f[me].team).map(row).join('') + seenHTML();
+  const fr = FR[i], me = G.me; if (!fr) return;
+  const face = b => b.portrait ? `<img class="portrait" src="${esc(b.portrait)}" alt="">` : '';
+  const hp = (f, cls) => `<div class="hpbar ${cls}"><i style="width:${Math.max(0, 100 * f.hp / f.maxHp)}%"></i></div>`;
+  if (G.room){
+    const n = BOSS.length, myT = fr.f[me].team;
+    const row = k => { const f = fr.f[k], b = BOSS[k];
+      return `<div class="team-row"><h4>${face(b)}<span class="chip" style="background:${teamCol(f.team)}">${f.team + 1}</span><span class="ttl">${esc(b.title)}${k === me ? ' (вы)' : ''}${f.hp <= 0 ? ' ☠' : ''}</span></h4>${hp(f, f.team === myT ? 'A' : 'B')}<div class="small stats-line">${Math.max(0, f.hp)} / ${f.maxHp} ХП · КД ${f.ac}${f.cond.length ? ' · ' + f.cond.map(esc).join(', ') : ''}</div></div>`; };
+    $('cardMe').className = 'fx fx-me glass pcard'; $('cardMe').innerHTML = `<div class="caps">Ваша команда</div>` + [...Array(n).keys()].filter(k => fr.f[k].team === myT).map(row).join('');
+    $('cardEnemy').className = 'fx fx-enemy glass pcard'; $('cardEnemy').innerHTML = `<div class="caps">Противники</div>` + [...Array(n).keys()].filter(k => fr.f[k].team !== myT).map(row).join('') + seenHTML();
     return;
   }
-  [[me, 'cardMe'], [1 - me, 'cardEnemy']].forEach(([k, id]) => {
-    const f = fr.f[k], b = BOSS[k], el = $(id);
-    el.className = 'card pcard ' + SIDE[k];
-    const pct = Math.max(0, 100 * f.hp / f.maxHp), mins = fr.f.filter((m, idx) => idx >= 2 && m.kind - 2 === k && m.hp > 0).length;
+  [[me, 'cardMe', 'fx-me'], [1 - me, 'cardEnemy', 'fx-enemy']].forEach(([k, id, pos]) => {
+    const f = fr.f[k], b = BOSS[k], el = $(id), mine = k === me;
+    el.className = `fx ${pos} glass pcard ${mine ? 'A' : 'B'}`;
+    const mins = fr.f.filter((m, idx) => idx >= 2 && m.kind - 2 === k && m.hp > 0).length;
     const conds = f.cond.map(c => `<span class="pill">${esc(c)}</span>`).join('') + (f.exh ? `<span class="pill">истощение ${f.exh}</span>` : '');
-    el.innerHTML = `<h4><span class="chip ${SIDE[k]}">${k === me ? 'вы' : 'враг'}</span>${esc(b.title)}${f.hp <= 0 ? ' ☠' : ''}</h4>
-      ${k !== me && G.enemyBrain ? `<div class="small">🧠 играет: ${esc(G.enemyBrain)}</div>` : ''}
-      <div class="hpbar"><i style="width:${pct}%"></i></div>
-      <div class="small"><b class="tnum">${Math.max(0, f.hp)}</b> / ${f.maxHp} ХП${infoIcon('ХП')}${f.temp ? ` · +${f.temp} врем.` : ''} · КД${infoIcon('КД')} <b>${f.ac}</b> · скорость <b>${ftToText(f.spd)}</b>${infoIcon('фт')}${b.minion ? ` · приспешников ${mins}` : ''}</div>
-      <div style="margin-top:6px">${conds || '<span class="small">без состояний</span>'}</div>${k !== me ? seenHTML() : ''}`;
+    const sub = [!mine && G.enemyBrain ? 'играет ' + esc(G.enemyBrain) : '', conds ? '' : 'без состояний', b.minion ? 'приспешников ' + mins : ''].filter(Boolean).join(' · ');
+    el.innerHTML = `<h4>${face(b)}<span class="chip ${mine ? 'A' : 'B'}">${mine ? 'вы' : 'враг'}</span><span class="ttl">${esc(b.title)}${f.hp <= 0 ? ' ☠' : ''}</span></h4>${hp(f, mine ? 'A' : 'B')}
+      <div class="stats-line tnum">${Math.max(0, f.hp)} / ${f.maxHp} ХП${f.temp ? ` (+${f.temp})` : ''} · КД ${f.ac} · ${f.spd} фт</div>
+      <div class="small sub">${sub}</div>${conds ? `<div style="margin-top:6px">${conds}</div>` : ''}${!mine ? seenHTML() : ''}`;
   });
 }

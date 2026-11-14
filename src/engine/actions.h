@@ -331,13 +331,17 @@ void doWeaponMain(World& w, Fighter& me, int tIdx, int nAtt, int man, bool offha
         if (me.growRounds != 0) dmg += rollDice(crit ? 2 : 1, 4);   // увеличение (пакет атомов 2): +1к4 к урону оружия
         if (me.buffRounds > 0) dmg += rollDice(me.buffN * (crit ? 2 : 1), me.buffS);
         // «когда → что»: кубики к урону оружия (каждое попадание или раз в ход)
+        int extra[DT_N] = {};   // кубики правил своего типа урона — отдельным уроном (свои сопротивления цели)
         forRules(me, [&](const Rule& r, int k) {
             if (r.what != E_DMG || (r.once && k >= 0 && ((me.onceUsed >> k) & 1u)) || !ruleOn(w, me, &t, r, true, range <= 5)) return;
-            dmg += rollDice(r.n * (crit ? 2 : 1), r.s);
+            const int add = rollDice(r.n * (crit ? 2 : 1), r.s);
+            if (r.dt >= 0 && r.dt != me.b.wType) extra[r.dt] += add; else dmg += add;
             if (r.once && k >= 0) me.onceUsed |= 1u << k;
         });
         const int hpBefore = t.hp;
         hurt(t, applyUncanny(t, std::max(dmg, 1)), me.b.wType, wPierceNM(me.b));
+        for (int d = 0; d < DT_N; d++)
+            if (extra[d] > 0 && t.hp > 0) hurt(t, extra[d], d, true);
         if (crit) fireTrig(w, me, T_CRIT, &t);                      // «событие → эффект» (v21)
         if (hpBefore > 0 && t.hp <= 0) fireTrig(w, me, T_KILL, &t);
         if (range <= 5) {   // Подвижный (v21): после моей атаки ближнего боя цель не провоцирует от меня до конца хода
@@ -402,7 +406,7 @@ void fireTrig(World& w, Fighter& me, int on, Fighter* tgt) {
                 break;
             case X_HEAL: me.hp = std::min(me.maxHp, me.hp + rollDice(t.n, t.s) + t.b); break;
             case X_TEMP: me.temp = std::max(me.temp, rollDice(t.n, t.s) + t.b); break;
-            case X_DMG: hurt(*tgt, rollDice(t.n, t.s) + t.b, me.b.wN > 0 ? me.b.wType : DT_FORCE, me.b.wMagic); break;
+            case X_DMG: hurt(*tgt, rollDice(t.n, t.s) + t.b, t.dt >= 0 ? t.dt : (me.b.wN > 0 ? me.b.wType : DT_FORCE), t.dt >= 0 || me.b.wMagic); break;
             case X_COND: if (t.cond > 0) applyCond(*tgt, t.cond, std::max(1, t.n), condSaveStat(t.cond), me.dc(), true, (int)(&me - &w.f[0])); break;
             case X_ADVNEXT: me.advNext = true; break;
             case X_SPEED: me.pendSpeed += 5 * t.n; break;

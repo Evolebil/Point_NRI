@@ -150,7 +150,7 @@ struct World {
     bool strong[W][W] = {};               // крепкая стена (крепость, башни): больше хитов
     bool mainc[W][W] = {};                // клетка основной связной части арены (там начинают бой)
     unsigned long long wseed = 0;         // мир, из которого вырезана арена (0 — не из мира), и угол участка
-    int wsize = 0, wx = 0, wy = 0;
+    int wsize = 0, wx = 0, wy = 0, wstep = 1;
     int hazN = 2, hazDC = 13;             // урон опасной зоны — hazN к10, спасбросок СЛ hazDC (по силе боссов боя)
     short ohp[W][W] = {};                 // хиты объекта в клетке (стена, дерево, укрытие); 0 — неразрушим (край арены, барьеры способностей)
     // погоня: идёт ли, кто преследуемый (индекс босса), не терял ли он из виду преследователя за раунд
@@ -291,6 +291,14 @@ inline int fpAt(const World& w, const Fighter& f, int x, int y, int l) {
 }
 inline bool stepOK(const World& w, const Fighter& f, int x, int y, int l, int nx, int ny, int nl) {
     if (!nodeOK(w, f, nx, ny, nl)) return false;
+    // летун в воздухе держит высоту (zF — его высота сейчас): выше крыши — летит по крыше, а не ныряет под неё
+    // (залететь внутрь — сначала снизиться); с крыши — в открытое небо
+    if (f.b.fly && f.alt > 0) {
+        const int zf = zF(w, f);
+        if (!nl && w.deck[ny][nx] && w.deck[ny][nx] <= zf && !(!l && w.deck[y][x])) return false;
+        if (nl && w.deck[ny][nx] <= zf) return true;
+        if (l && !nl && !w.deck[ny][nx]) return true;
+    }
     const int dz = std::abs(nodeZ(w, nx, ny, nl) - nodeZ(w, x, y, l));
     if (dz <= 1 || w.ladder[y][x] || w.ladder[ny][nx]) return true;
     if (!l && !nl && (f.b.climbS || f.b.burrowS)) return true;   // лазун — по скале, копатель — сквозь землю
@@ -667,13 +675,14 @@ int moveToCell(World& w, Fighter& f, int cx, int cy, int speed) {
                 }
             }
         }
-        const int fx0 = f.x, fy0 = f.y, fz0 = zF(w, f);
+        const int fx0 = f.x, fy0 = f.y, fz0 = zF(w, f), up0 = f.up;
         const bool useMe = fi >= 0 && fi < 2;
         const int dBefore = useMe ? nearestKnownFoe(w, f) : 0;
         if (!c.l && w.door[c.second][c.first] == 1) setDoor(w, c.first, c.second, 2);   // открыл дверь по пути
         f.x = c.first;
         f.y = c.second;
         f.up = c.l;
+        if (f.b.fly && f.up != up0) f.alt = std::max(0, fz0 - nodeZ(w, f.x, f.y, f.up));   // летун сел на крышу или слетел с неё — та же высота
         f.alt = std::min(f.alt, maxAltAt(w, f, f.x, f.y, f.up));   // под настилом — ниже (бесплатно)
         left -= cost;
         hazardHit(w, f);

@@ -107,7 +107,7 @@ $('form').addEventListener('click', e => {
   }
   const sb = e.target.closest('[data-step]');
   if (sb){ goStep(+sb.dataset.step); return; }
-  if (e.target.closest('[data-tab2]')) showTab(2);
+  if (e.target.closest('[data-edsave]')) $('edSave').click();
 });
 $('form').addEventListener('change', e => {   // заготовки из выпадающего списка
   const el = e.target.closest('[data-presetsel]');
@@ -162,9 +162,8 @@ function save(){
   // копия на сервере под именем игрока: адрес туннеля меняется — браузер «забывает», сервер помнит
   clearTimeout(save.t); save.t = setTimeout(() => { const n = playerName(false); if (n) api({cmd:'player_save', name:n, s:S}); }, 1500);
 }
-function playerName(ask){   // имя — из строки «Вы: …» под меню (05_name.js); не задано и нужно — подсветить её
+function playerName(){   // имя игрока (задаётся при первом входе и в «Настройках»)
   let n = ''; try { n = localStorage.getItem('dnd_rmname') || ''; } catch (e) {}
-  if (!n && ask && $('nameIn')) $('nameIn').focus();
   return n;
 }
 
@@ -225,7 +224,9 @@ function renderPrice(){
     <div style="display:flex;gap:6px;margin:4px 0">${big(b.hp, 'ХП (здоровье)', 'Хиты: здоровье', 'ХП')}${big(b.ac, 'КД (защита)', 'Класс доспеха', 'КД')}${big(ftToText(b.speed), 'Скорость', 'Шагов по 5 фт за ход', 'фт')}</div><div class="small" style="color:var(--muted)">${esc(acBreakdown)}</div>
     ${dHp ? `<div class="small"><b style="color:${dHp > 0 ? 'var(--good)' : 'var(--bad)'}">${dHp > 0 ? '+' : ''}${dHp} ХП: ${dHp > 0 ? 'освободилось' : 'потрачено'} ${Math.abs(2 * dHp)} оч.</b></div>` : ''}
     <div class="small">Всё, что не потрачено, уходит в хиты: 2 очка = 1 ХП.</div>${budgetLine(b)}` : `<div class="err">${esc(d.err)}</div>`;
-  $('toOpp').disabled = !d.ok;
+  $('toOpp').disabled = !d.ok; edHead();
+  { const el = document.querySelector('[data-slotwarn]'), bought = ((S.passives || {}).slots || []).some(x => +x > 0), used = (S.abilities || []).some(a => +a.slotLvl > 0);
+    if (el) el.textContent = bought && !used ? '⚠ Ячейки куплены, но ни одна способность их не тратит — очки уходят впустую.' : ''; }
   weaponSummary();
   $('items').innerHTML = b ? b.items.map(it => `<div class="item${it.cost < 0 ? ' neg' : ''}" style="--c:${(CATS[it.cat] || CATS.passive).c}"><span>${(CATS[it.cat] || CATS.passive).ic}</span><div><div>${esc(it.label)}</div>${it.detail ? `<div class="dt">${esc(it.detail)}</div>` : ''}</div><span class="co tnum">${it.cost > 0 ? '−' : '+'}${Math.abs(it.cost)}</span></div>`).join('') : '';
   // цена каждой способности рядом с её редактором
@@ -270,7 +271,7 @@ async function importChar(j){ S = Object.assign(JSON.parse(JSON.stringify(DEFAUL
 $('fileImport').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   try { await importChar(JSON.parse(await f.text())); toast(`Персонаж «${S.name || 'без имени'}» загружен.`); }
-  catch (err) { alert('Не удалось прочитать файл: ' + err.message); }
+  catch (err) { toast('Не удалось прочитать файл: ' + err.message, 6000, true); }
   e.target.value = '';
 };
 // файл, брошенный в окно: персонаж (есть характеристики) или карта; без этого браузер открывал файл вместо страницы
@@ -279,9 +280,11 @@ addEventListener('drop', async e => {
   e.preventDefault();
   const f = e.dataTransfer && e.dataTransfer.files[0]; if (!f) return;
   try {
+    if (f.size > 4 * 1024 * 1024) throw new Error('файл больше 4 МБ');
     const j = JSON.parse(await f.text());
-    if (Array.isArray(j.stats)){ await importChar(j); showTab(1); }
-    else { ME = meFromJson(j, j.name || f.name.replace(/\.json$/, '')); showTab(5); meShow(); meMsg('Карта прочитана: проверьте и сохраните.'); }
-  } catch (err) { alert('Не удалось прочитать файл: ' + err.message); }
+    if (Array.isArray(j.stats) || (j && j.format === 'gornilo-character')){ await importCharacterFile(f); go('characters'); }
+    else if (j && j.aw && j.ah){ ME = meFromJson(j, j.name || f.name.replace(/\.json$/, '')); meSaved = ''; go('workshop'); meMsg('Карта прочитана: проверьте и сохраните.'); }
+    else throw new Error('это не персонаж и не карта');
+  } catch (err) { toast('Не удалось прочитать файл: ' + err.message, 6000, true); }
 });
-$('toOpp').onclick = () => showTab(2);
+

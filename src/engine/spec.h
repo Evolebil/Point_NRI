@@ -498,6 +498,7 @@ struct Rule {
     int what = E_ADVATK, n = 0, s = 6;   // n — кубиков (урон) или +КД
     bool once = false;   // урон «раз в ход»
     int allyR = 0;       // союзники (v21): правило действует и на своих в пределах allyR фт (аура; 0 — только на себя)
+    int dt = -1;         // тип урона кубиков E_DMG (−1 — как у оружия; иначе отдельный урон этого типа)
     long long price = 0;   // цена при покупке в генераторе (для пересчёта по готовому телу)
 };
 
@@ -535,6 +536,7 @@ inline bool trigAllowed(int on, int x) {
 struct Trig {
     int on = T_KILL, what = X_HEAL, n = 1, s = 6, b = 0, cond = 0, uses = UNL;
     int arg = 0;   // тип урона для T_DMGTYPE («я получил урон этого типа»)
+    int dt = -1;   // тип урона эффекта X_DMG (−1 — как у оружия, без оружия — силовое поле)
 };
 
 struct Boss {

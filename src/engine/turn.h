@@ -324,6 +324,8 @@ bool applyPrim0(World& w, int idx, TurnState& ts, const Prim& p, bool check, std
                 if (p.x < 0 || p.y < 0 || p.x >= w.aw || p.y >= w.ah) return no("Туда нельзя: это за пределами арены.");
                 if (w.wall[p.y][p.x] || w.pit[p.y][p.x]) return no("Клетка непроходима (стена или ущелье).");
                 if (ts.speed < 5) return no("Движения не осталось.");
+                // опутан, схвачен или парализован посреди хода (реакция, ловушка): бюджет хода уже выдан, но скорость — 0
+                if (speedOf(me) <= 0) return no("Вы не можете двигаться: опутаны, схвачены или парализованы.");
                 if (me.cond[C_FRIGHT] > 0) {   // испуганный не приближается добровольно
                     int nowD = 1 << 30, newD = 1 << 30;
                     for (size_t i = 0; i < w.f.size(); i++) {

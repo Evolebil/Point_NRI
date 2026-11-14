@@ -155,6 +155,7 @@ int main() {
                 g_style.worldSize = std::clamp(wj["size"].num(1000), 1000, 10000);
                 g_style.wx = wj["x"].num(-1);
                 g_style.wy = wj["y"].num(-1);
+                g_style.worldStep = std::clamp(wj["step"].num(1), 1, 200);
                 g_style.fixedW = std::clamp(wj["w"].num(0), 0, 100);
                 g_style.fixedH = std::clamp(wj["h"].num(0), 0, 100);
             } else
@@ -211,6 +212,7 @@ int main() {
             std::vector<Boss> bs;
             std::vector<int> team, seat;
             std::vector<std::string> names;
+            std::vector<std::string> brains;
             std::vector<long long> budgets;
             std::string err;
             g_customMap = CustomMap();
@@ -231,6 +233,7 @@ int main() {
                 team.push_back(std::clamp(M[i]["team"].num(0), 0, MAXT - 1));
                 seat.push_back(M[i]["char"].t == Json::OBJ ? M[i]["seat"].num(-1) : -1);
                 names.push_back(M[i]["name"].str(M[i]["char"].t == Json::OBJ ? M[i]["char"]["name"].str("Игрок") : bossTitle(b, seed + (unsigned)i)));
+                brains.push_back(M[i]["brain"].str("rules"));
             }
             if (bad || bs.size() < 2) { emitLine("{\"type\":\"error\",\"err\":" + jq(bad ? err : "нужно хотя бы два бойца") + "}"); continue; }
             {   // нужно хотя бы две команды
@@ -246,6 +249,7 @@ int main() {
                 g_style.worldSize = std::clamp(wj["size"].num(1000), 1000, 10000);
                 g_style.wx = wj["x"].num(-1);
                 g_style.wy = wj["y"].num(-1);
+                g_style.worldStep = std::clamp(wj["step"].num(1), 1, 200);
                 g_style.fixedW = std::clamp(wj["w"].num(0), 0, 100);
                 g_style.fixedH = std::clamp(wj["h"].num(0), 0, 100);
             } else
@@ -280,6 +284,9 @@ int main() {
             for (size_t i = 0; i < seat.size(); i++)
                 if (seat[i] >= 0 && g_human.idx < 0) g_human.idx = (int)i;
             g_forceNetMask = 0;
+            if (anyFighterNet())
+                for (size_t i = 0; i < brains.size() && i < 31; i++)
+                    if (seat[i] < 0 && brains[i] == "net") g_forceNetMask |= (1 << i);
             World* wp = nullptr;
             (void)wp;
             g_human.ask = [&](const std::string& req) {
@@ -300,6 +307,7 @@ int main() {
             g_human.seats.clear();
             g_human.multi = false;
             g_human.idx = -1;
+            g_forceNetMask = 0;
             g_maxRounds = maxR0;
             g_customMap = CustomMap();
             g_style = MapStyle();

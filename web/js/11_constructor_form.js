@@ -151,8 +151,8 @@ function moreHTML(P, dt){
 
 // шаги конструктора: показан один; в подписи — цена шага (по категориям покупок) или сколько выбрано
 const STEPS = [
-  {n:'Основа', icon:'character'}, {n:'Характеристики и КД', icon:'stats', cats:['stat', 'ac']}, {n:'Владения', icon:'skill'}, {n:'Оружие', icon:'weapon', cats:['weapon']},
-  {n:'Способности', icon:'magic', cats:['ability', 'minions']}, {n:'Защита', icon:'shield', adv:true}, {n:'Движение и чувства', label:'Скорость и чувства', icon:'move', adv:true}, {n:'Особенности', label:'Черты и особые свойства', icon:'feature', adv:true}];
+  {n:'Основа', icon:'character'}, {n:'Характеристики и броня', icon:'stats', cats:['stat', 'ac']}, {n:'Навыки', icon:'skill'}, {n:'Оружие', icon:'weapon', cats:['weapon']},
+  {n:'Способности', icon:'magic', cats:['ability', 'minions']}, {n:'Защита', icon:'shield', adv:true}, {n:'Движение и чувства', label:'Скорость и чувства', icon:'move', adv:true}, {n:'Особенности', label:'Черты', icon:'feature', adv:true}];
 let STEP = 0, SIMPLE = false, WPN_OPEN = false;   // WPN_OPEN — раскрыта ли ручная настройка оружия
 try { SIMPLE = localStorage.getItem('dnd_simple') === '1'; } catch (e) {}
 // простой режим прячет шаги для опытных (adv); купленное на них остаётся и считается в цене
@@ -172,12 +172,17 @@ const CHAR_PRESETS = [
     weapon:{armed:false, fistS:8, att:2}, abilities:[], passives:{speed:40, saveProf:[0, 1], evasion:true, unarmoredStat:4, disengB:true}}},
   {n:'Варвар — двуручный топор, много здоровья', c:{name:'Варвар', stats:[16,14,16,8,10,8], main:0, acV:0,
     weapon:{armed:true, n:1, s:12, _dt:'рубящ', range:5, att:2, reach:5, twoHanded:true, heavy:true, prof:true}, abilities:[], passives:{speed:40, saveProf:[0, 2], unarmoredStat:2}}},
+  {n:'Следопыт — лук и верный спутник', c:{name:'Следопыт', stats:[10,16,14,10,14,10], main:1, acV:3, armor:{kind:1, shield:false, stealthDis:false, prof:true},
+    weapon:{armed:true, n:1, s:8, _dt:'колющ', range:80, long:320, att:2, reach:5, ammo:true, twoHanded:true, prof:true}, abilities:[], passives:{speed:35, saveProf:[1, 4]}}},
 ];
-function applyCharPreset(k){
-  const P = CHAR_PRESETS[+k], c = JSON.parse(JSON.stringify(DEFAULT_CHAR)), x = JSON.parse(JSON.stringify(P.c));
+function presetChar(k, budget){
+  const P = CHAR_PRESETS[+k] || CHAR_PRESETS[0], c = JSON.parse(JSON.stringify(DEFAULT_CHAR)), x = JSON.parse(JSON.stringify(P.c));
   if (x.weapon){ const ti = CAT.dtypes.findIndex(t => t.startsWith(x.weapon._dt || '~')); delete x.weapon._dt; x.weapon = Object.assign({}, c.weapon, x.weapon); if (ti >= 0) x.weapon.type = ti; }
   if (x.passives) x.passives = Object.assign({}, c.passives, x.passives);
-  S = Object.assign(c, x, {budget: S.budget});
+  return Object.assign(c, x, {budget});
+}
+function applyCharPreset(k){
+  S = presetChar(k, S.budget);
   save(); buildForm(); queuePrice();
 }
 try { STEP = Math.min(STEPS.length - 1, Math.max(0, +localStorage.getItem('dnd_step') || 0)); } catch (e) {}
@@ -206,7 +211,7 @@ function renderSteps(){
   if (!stepVis(STEP)) STEP = Math.max(0, stepPrev(STEP));
   const bad = stepIssue();
   bar.innerHTML = STEPS.map((s, i) => { if (!stepVis(i)) return ''; const note = stepNote(i), mark = i === bad ? '⚠' : /^пусто|^—$/.test(note) ? '·' : '✓';
-    return `<button class="step-b${i === STEP ? ' on' : ''}" data-step="${i}"${i === bad ? ' style="outline:2px solid var(--bad)"' : ''} title="${i === bad ? 'Здесь ошибка — откройте шаг' : ''}">${uiIcon(s.icon)}<span>${mark} ${i + 1} · ${esc(s.label || s.n)}</span><small>${esc(note)}</small></button>`; }).join('');
+    return `<button type="button" class="step-b${i === STEP ? ' on' : ''}${i === bad ? ' bad' : ''}" data-step="${i}" title="${i === bad ? 'Здесь ошибка — откройте раздел' : esc(note)}"${i === STEP ? ' aria-current="step"' : ''}><span>${esc(s.label || s.n)}${i === bad ? ' ⚠' : ''}</span><small>${mark === '·' ? '' : esc(note)}</small></button>`; }).join('');
   document.querySelectorAll('[data-cnt]').forEach(el => { el.textContent = ((S.passives || {})[el.dataset.cnt] || []).length; });
   const fe = $('formErr');
   if (fe) fe.innerHTML = lastPrice && !lastPrice.ok ? `<div class="err" style="margin:6px 0">Персонаж пока не готов: ${esc(lastPrice.err || '')}${bad >= 0 ? ` <button data-step="${bad}">Открыть шаг «${esc(STEPS[bad].label || STEPS[bad].n)}»</button>` : ''}</div>` : '';
@@ -221,7 +226,7 @@ function goStep(i){
 }
 function stepNav(i){
   const a = stepPrev(i), b = stepNext(i);
-  return `<div class="stepnav">${a >= 0 ? `<button data-step="${a}">← ${esc(STEPS[a].label || STEPS[a].n)}</button>` : '<span></span>'}${b >= 0 ? `<button class="primary" data-step="${b}">${esc(STEPS[b].label || STEPS[b].n)} →</button>` : '<button class="primary" data-tab2>К сопернику →</button>'}</div>`;
+  return `<div class="stepnav">${a >= 0 ? `<button data-step="${a}">← ${esc(STEPS[a].label || STEPS[a].n)}</button>` : '<span></span>'}${b >= 0 ? `<button class="primary" data-step="${b}">${esc(STEPS[b].label || STEPS[b].n)} →</button>` : '<button class="primary" data-edsave>Сохранить и выйти</button>'}</div>`;
 }
 function presetSel(kind, list){
   return `<select data-presetsel="${kind}"><option value="">+ из заготовки…</option>${list.map((p, i) => `<option value="${i}">${esc(p.n)}</option>`).join('')}</select>`;
@@ -235,10 +240,10 @@ function buildForm(){
   S.passives = S.passives || {};
   const p = S.passives, PP = f => 'passives.' + f;
   const box = (i, inner) => `<div class="stepbox" data-box="${i}">${inner}${stepNav(i)}</div>`;
-  let h = `<div id="formErr"></div><div class="steps" id="stepBar"></div><div class="hint" style="background:rgba(255,255,255,.06);padding:10px;margin:8px 0">Здесь собирается боец для арены за очки, а не персонаж по классам и уровням D&amp;D 5e. Очки тратятся на характеристики, оружие и способности. Неизрасходованные очки превращаются в ХП: 2 очка = 1 ХП.</div>`;
+  let h = `<div id="formErr"></div>`;
   // 0 · основа
   h += box(0, `<div class="card"><h3>Основа</h3>
-    <div class="row"><label><input type="checkbox" id="simpleMode"${SIMPLE ? ' checked' : ''}> Простой режим</label><span class="small">только основные шаги; защита, движение и особенности — в полном режиме (купленное там остаётся)</span></div>
+    <div class="row"><label><input type="checkbox" id="simpleMode"${SIMPLE ? ' checked' : ''}> Простой режим</label><span class="small">— только основные шаги</span></div>
     <div class="row">${presetSel('char', CHAR_PRESETS).replace('+ из заготовки…', 'Выбрать готового персонажа…')}<span class="small">Выбранный герой заменит текущего. Количество доступных очков не изменится.</span></div>
     <div class="row"><label>Имя <input type="text" data-p="name" data-t="str" style="width:200px"></label>
     <label>Бюджет (очки) ${numIn('budget', CAT.minBudget || 20, CAT.maxBudget || 100000, 1, 90)}</label>
@@ -247,7 +252,7 @@ function buildForm(){
     <div class="hint">Бюджет — сила персонажа, любое целое число от ${CAT.minBudget || 20} до ${CAT.maxBudget || 100000}. Все характеристики по 10 бесплатны, поэтому очки уходят на то, что выше десяти, и возвращаются, если что-то опустить ниже. Здоровье тратит остаток: 2 очка за ХП. У соперника по умолчанию столько же очков.</div>
     <div class="hint">Дальше по шагам: характеристики, владения, оружие, способности, защита, движение, особенности. Шаги можно проходить в любом порядке; справа — сколько потрачено и все покупки.</div></div>`);
   // 1 · характеристики и КД
-  let st = `<div class="card"><h3>Характеристики и КД</h3>
+  let st = `<div class="card"><h3>Характеристики и броня</h3>
     <div class="hint">Десять в каждой характеристике — бесплатно. Выше — платите, ниже — очки возвращаются в бюджет:</div>
     <table class="small tnum" style="border-collapse:collapse;margin:4px 0"><tr><th style="text-align:left;padding-right:8px">значение</th>${STAT_TABLE.map(v => `<td style="padding:0 6px">${v}</td>`).join('')}</tr>
       <tr><th style="text-align:left;padding-right:8px;cursor:help" title="Формула: значение × (значение + 1) / 2 − 55">цена, оч. ?</th>${STAT_TABLE.map(v => { const c = v * (v + 1) / 2 - 55;
@@ -255,7 +260,7 @@ function buildForm(){
     <div class="hint"><b>Главная характеристика</b> — любая из шести, отметьте кружок «главная» справа. От неё бросок атаки способностей и СЛ ${infoIcon('СЛ')} спасбросков ${infoIcon('Спасбросок')} против них (8 + мастерство + её модификатор). Оружие бьёт своей: СИЛ, фехтовальное и боеприпасы — ЛОВ.</div>`;
   STAT_N.forEach((n, i) => {
     st += `<div class="statrow"><span class="nm" title="${STAT_FULL[i]}" style="cursor:help">${n}</span><input type="range" min="1" max="${LIM.stat}" data-p="stats.${i}" data-t="int">${numIn('stats.' + i, 1, LIM.stat, 1, 56)}<span class="tnum small" data-statcost="${i}"></span>
-      <label class="small" title="От главной характеристики — бросок атаки способностей и СЛ ${infoIcon('СЛ')} спасбросков ${infoIcon('Спасбросок')} против них"><input type="radio" name="main" data-main="${i}"> главная</label></div>`;
+      <label class="small" title="От главной характеристики — бросок атаки способностей и СЛ спасбросков против них"><input type="radio" name="main" data-main="${i}"> главная</label></div>`;
   });
   st += `<div class="statrow"><span class="nm" title="Класс доспеха: чтобы попасть, атака должна набрать не меньше" style="cursor:help">КД</span><input type="range" min="0" max="${LIM.ac}" data-p="acV" data-t="int">${numIn('acV', 0, LIM.ac, 1, 56)}<span class="tnum small" data-accost></span><span class="small" data-acval></span></div>
     <div class="hint">КД = 10 + купленные единицы + ЛОВ (по доспеху) + щит. Средний доспех пропускает ЛОВ не больше +2, тяжёлый — не пропускает вовсе; за срезанную ЛОВ очки возвращаются.</div>
@@ -265,7 +270,7 @@ function buildForm(){
   h += box(1, st);
   // 2 · владения
   const SKL = (CAT.skills || []).map(k => k.name + ' (' + STAT_N[k.stat] + ')' + (k.combat ? ' ⚔' : ''));
-  h += box(2, `<div class="card"><h3>Владения</h3>
+  h += box(2, `<div class="card"><h3>Навыки</h3>
     <div class="hint">Как в D&D: бонус мастерства — один на всё, чем вы владеете. +2 даром, каждая единица сверх — ${U.prof1} оч. Цена владения растёт с мастерством (× мастерство/2). Экспертиза удваивает мастерство в навыке. ⚔ — навык работает в бою (${U.skillC} оч.), остальные нужны вне боя (${U.skillNC} оч.).</div>
     <div class="row"><label>Бонус мастерства +${numIn('prof', 2, 6, 1, 56)}</label><label>Инструментов ${numIn('passives.tools', 0, 40, 1, 56)}</label></div>
     <div class="sec-h">Спасброски (${U.saveProf} оч. × мастерство/2) · выбрано <span data-cnt="saveProf"></span></div>${chipsFor('passives.saveProf', STAT_N)}
@@ -347,7 +352,7 @@ function buildForm(){
         html:G2(`<label>Регенерация, к6 в ход ${numIn(PP('regenN'), 0, LIM.dice)}</label><label>Всплеск действий (раз за бой) ${numIn(PP('surge'), 0, LIM.count)}</label>
           <label>Легендарное сопротивление ${numIn(PP('legRes'), 0, LIM.count)}</label><label>Легендарные действия (очки) ${numIn(PP('legAct'), 0, LIM.count)}</label>${chkIn(PP('wMagic'), 'Магическое оружие', pc('wMagic'))}`)},
       {id:'slots', n:'Ячейки заклинаний', has:o => (o.slots || []).some(x => +x > 0), clear:o => { o.slots = [0,0,0,0,0,0,0,0,0,0]; },
-        html:`<div class="small">Нужны способностям с «ячейкой».</div>` + G2([1,2,3,4,5,6,7,8,9].map(L => `<label>${L} ур. × ${numIn(PP('slots.' + L), 0, LIM.count, 1, 56)}</label>`).join(''))},
+        html:`<div class="small">Нужны способностям с «ячейкой» (Способности → Ограничения → Уровень ячейки). В бою способность тратит ячейку своего уровня или выше.</div><div class="small" data-slotwarn style="color:var(--bad)"></div>` + G2([1,2,3,4,5,6,7,8,9].map(L => `<label>${L} ур. × ${numIn(PP('slots.' + L), 0, LIM.count, 1, 56)}</label>`).join(''))},
       {id:'aura', n:'Аура (на врагов рядом)', has:o => +(o.aura || {}).rad > 0, init:o => { o.aura = Object.assign({s:6, type:3, cond:0, rounds:1}, o.aura, {rad:10}); if (!(+o.aura.n > 0) && !(+o.aura.cond > 0)) o.aura.n = 1; }, clear:o => { (o.aura = o.aura || {}).rad = 0; },
         html:G2(`<label>Радиус ${infoIcon('Радиус')}, фт ${numIn(PP('aura.rad'), 0, LIM.ft, 5)}</label><label>кубиков ${numIn(PP('aura.n'), 0, LIM.dice)}</label><label>грань ${selIn(PP('aura.s'), DIE_OPTS())}</label>
           <label>тип ${dtSel(PP('aura.type'))}</label><label>состояние ${selIn(PP('aura.cond'), [[0,'нет'], ...cd])}</label><label>раундов ${numIn(PP('aura.rounds'), 1, LIM.rounds)}</label>`)},
@@ -378,6 +383,8 @@ const RULE_PRESETS = [
   {n:'Меткий стрелок (укрытие)', r:[{when:0, what:13}]},
   {n:'Подвижный (без провоцированных)', r:[{when:0, what:15}]},
 ];
+// тип урона черты: «как у оружия» (−1, по умолчанию) или свой
+const dmgTypeSel = (path, v) => `<label class="small">тип <select data-p="${path}" data-t="num">${[[-1, 'как у оружия'], ...DT_OPTS()].map(([k, n]) => `<option value="${k}" ${+(v ?? -1) === k ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>`;
 function ruleHTML(r, i){
   const P = f => `passives.rules.${i}.${f}`;
   const ws = (CAT.whens || []).map((w, k) => [k, w.name + (([5,6,7,8,10,11,12,15].includes(+r.what)) && !w.self ? ' (нельзя: нужен противник)' : '')]);
@@ -386,7 +393,7 @@ function ruleHTML(r, i){
   let h = `<div class="row rule" data-rule="${i}"><b>Когда</b> ${selIn(P('when'), ws)}`;
   if (+r.when === 5) h += ` состояние ${selIn(P('warg'), cd)}`;
   h += ` <b>→</b> ${selIn(P('what'), es)}`;
-  if (+r.what === 1) h += ` кубиков ${numIn(P('n'), 1, LIM.dice, 1, 56)} грань ${selIn(P('s'), DIE_OPTS())} ${chkIn(P('once'), 'раз в ход')}`;
+  if (+r.what === 1) h += ` кубиков ${numIn(P('n'), 1, LIM.dice, 1, 56)} грань ${selIn(P('s'), DIE_OPTS())} ${dmgTypeSel(P('dt'), r.dt)} ${chkIn(P('once'), 'раз в ход')}`;
   if (+r.what === 2) h += ` +${numIn(P('n'), 1, 20, 1, 56)} КД`;
   if (+r.what === 8) h += ` +${numIn(P('n'), 1, 20, 1, 56)}`;
   if (+r.what === 9 || +r.what === 10) h += ` кубиков ${numIn(P('n'), 1, LIM.dice, 1, 56)} грань ${selIn(P('s'), DIE_OPTS())}`;
@@ -414,6 +421,7 @@ function trigHTML(t, i){
   let h = `<div class="row rule"><b>Событие</b> ${selIn(P('on'), (CAT.tons || []).map((n, k) => [k, n]))} <b>→</b> ${selIn(P('what'), (CAT.tdos || []).map((n, k) => [k, n + (ok[k] ? '' : ' (не сочетается)')]))}`;
   const w = +t.what || 0;
   if (w === 1 || w === 2 || w === 3) h += ` кубиков ${numIn(P('n'), 0, LIM.dice, 1, 56)} грань ${selIn(P('s'), DIE_OPTS())} + ${numIn(P('b'), 0, 1000, 1, 56)}`;
+  if (w === 3) h += ` ${dmgTypeSel(P('dt'), t.dt)}`;   // урон врагу — свой тип
   if (on === 12) h = h.replace('<b>→</b>', `тип ${dtSel(P('arg'))} <b>→</b>`);   // «я получил урон выбранного типа»
   if (w === 4 || w === 10) h += ` ${selIn(P('cond'), cd)} на ${numIn(P('n'), 1, LIM.rounds, 1, 56)} р.${w === 10 ? ' (на себя — очки возвращаются)' : ''}`;
   if (w === 7) h += ` +${numIn(P('n'), 1, 20, 1, 56)}`;

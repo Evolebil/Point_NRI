@@ -23,16 +23,6 @@ const UI_ICON_PATH = {
   plus:'<path d="M12 5v14M5 12h14"/>'
 };
 function uiIcon(name){ return `<svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${UI_ICON_PATH[name] || UI_ICON_PATH.feature}</svg>`; }
-const themeSelect = document.getElementById('themeSelect');
-if (themeSelect){
-  const theme = document.documentElement.dataset.theme || 'system';
-  themeSelect.value = theme;
-  themeSelect.addEventListener('change', () => {
-    const value = themeSelect.value;
-    document.documentElement.dataset.theme = value;
-    try { localStorage.setItem('dnd_theme', value); } catch (e) {}
-  });
-}
 const SIDE = ['A','B'];
 const STAT_N = ['СИЛ','ЛОВ','ТЕЛ','ИНТ','МДР','ХАР'];
 const STAT_FULL = ['Сила: удары, сила рук, Атлетика', 'Ловкость: точность, уклонение, КД без тяжёлого доспеха', 'Телосложение: здоровье, выносливость', 'Интеллект: знания, Анализ', 'Мудрость: внимательность, чутьё', 'Харизма: убеждение, обаяние'];
@@ -53,11 +43,56 @@ async function api(obj){
     return await r.json();
   } catch (e) { return {type:'error', err:'нет связи с сервером: ' + e.message}; }
 }
-function showTab(n){
-  [1,2,3,4,5,6].forEach(i => { $('s' + i).classList.toggle('on', i === n); $('tab' + i).setAttribute('aria-selected', i === n); });
-  if (n === 4) loadSheet();
-  if (n === 5) meShow();
-  if (n === 2) loadPreview();
-  if (n === 3 && G.active) { fitPlay(); }
+// ---- экраны: маршрут -> раздел страницы; модули добавляют свои действия при входе (ROUTE_ENTER) и по кнопке «назад» (ROUTE_BACK) ----
+const SCENES = {home:'s0', editor:'s1', quick:'s2', battle:'s3', sheet:'s4', workshop:'s5', coop:'s6', campaign:'s7', characters:'s8', settings:'s9', worlds:'s10'};
+const TAB_ROUTE = {1:'editor', 2:'quick', 3:'battle', 4:'sheet', 5:'workshop', 6:'coop', 7:'campaign'};
+const FULL_ROUTES = ['battle', 'workshop', 'worlds'];   // поле на весь экран: без шапки и фона
+const ROUTE_ENTER = {}, ROUTE_BACK = {};
+let ROUTE = '';
+function go(route){
+  if (!SCENES[route]) route = 'home';
+  const prev = ROUTE; ROUTE = route;
+  Object.entries(SCENES).forEach(([r, id]) => { const el = $(id); if (el) el.classList.toggle('on', r === route); });
+  document.body.className = document.body.className.replace(/\broute-\S+/g, '').trim() + ' route-' + route;
+  document.body.classList.toggle('full', FULL_ROUTES.includes(route));
+  const back = $('backBtn');
+  back.hidden = route === 'home';
+  back.textContent = route === 'coop' && ROOM.code ? 'Выйти из комнаты' : '← В главное меню';
+  back.classList.toggle('danger', route === 'coop' && !!ROOM.code);
+  if (prev !== route) scrollTo(0, 0);
+  if (ROUTE_ENTER[route]) ROUTE_ENTER[route](prev);
 }
-$('tab6').onclick = () => showTab(6); $('tab5').onclick = () => showTab(5); $('tab4').onclick = () => showTab(4); $('tab1').onclick = () => showTab(1); $('tab2').onclick = () => showTab(2); $('tab3').onclick = () => showTab(3);
+// место под содержимое внутри блока (без отступов) — поле мастерской между панелями
+function innerSize(el){ const cs = getComputedStyle(el); return [el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)]; }
+function goBack(){ if (ROUTE_BACK[ROUTE]) ROUTE_BACK[ROUTE](); else go('home'); }
+function showTab(n){ go(TAB_ROUTE[n] || 'home'); }
+$('backBtn').onclick = goBack;
+document.addEventListener('click', e => { const b = e.target.closest('[data-go]'); if (b) { e.preventDefault(); go(b.dataset.go); } });
+// уведомление внизу экрана (одно на всю игру)
+function toast(t, ms = 3500, isErr = false){
+  const e = $('toast'); if (!e) return;
+  e.textContent = t || ''; e.classList.toggle('on', !!t); e.classList.toggle('err', !!isErr);
+  clearTimeout(toast.t); if (t) toast.t = setTimeout(() => e.classList.remove('on'), isErr ? Math.max(ms, 6000) : ms);
+}
+// окно поверх экрана: закрывается крестиком действия, Esc и щелчком мимо (кроме обязательных)
+function modal(title, body, buttons, opts = {}){
+  const root = document.createElement('div'); root.className = 'modal-bg'; root.dataset.modal = '1';
+  root.innerHTML = `<section class="modal ${opts.cls || ''}" role="dialog" aria-modal="true" aria-label="${esc(title || '')}">${title ? `<h2>${esc(title)}</h2>` : ''}<div class="modal-body">${body}</div>${buttons ? `<div class="modal-acts">${buttons}</div>` : ''}</section>`;
+  // окна складываются стопкой (подтверждение поверх окна); Esc закрывает только верхнее
+  const onKey = e => { if (e.key !== 'Escape' || [...document.querySelectorAll('.modal-bg[data-modal]')].pop() !== root) return; e.preventDefault(); e.stopImmediatePropagation(); if (!opts.required) close(); };
+  const close = (force) => { if (opts.required && force !== true) return; if (!root.isConnected) return; root.remove(); document.removeEventListener('keydown', onKey, true); if (opts.onClose) opts.onClose(); };
+  root._close = close;
+  document.addEventListener('keydown', onKey, true);
+  root.addEventListener('click', e => { if (e.target === root && !opts.required) close(); });
+  document.body.append(root);
+  root.querySelectorAll('[data-close]').forEach(b => b.onclick = () => close(true));
+  const f = root.querySelector('[autofocus],input,select,textarea,button.primary'); if (f) setTimeout(() => f.focus(), 30);
+  return {root, close: () => close(true), q: sel => root.querySelector(sel)};
+}
+function confirmBox(text, okText = 'Да', danger = false){
+  return new Promise(res => {
+    const m = modal('Подтвердите', `<p>${esc(text)}</p>`, `<button data-no>Отмена</button><button class="${danger ? 'danger' : 'primary'}" data-yes>${esc(okText)}</button>`, {onClose: () => res(false)});
+    m.q('[data-no]').onclick = () => m.close();
+    m.q('[data-yes]').onclick = () => { res(true); m.close(); };
+  });
+}

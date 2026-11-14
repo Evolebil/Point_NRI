@@ -26,7 +26,7 @@ inline void putWorldCell(World& w, int x, int y, const wg::Cell& c) {
 struct MapStyle {
     int fixedW = 0, fixedH = 0, theme = -1;   // заданный размер участка и тема (−1 — как получится), для тестов и редактора
     unsigned long long worldSeed = 0;         // мир по зерну (игра; 0 — обучение: новый мир каждые 500 боёв)
-    int worldSize = 1000, wx = -1, wy = -1;   // размер мира и угол участка (−1 — случайно)
+    int worldSize = 1000, wx = -1, wy = -1, worldStep = 1;   // размер мира, угол участка и шаг выборки (−1 — случайно)
 };
 MapStyle g_style;
 // размер стороны арены из мира: 2–100, чаще средние (TZ_karta_shum.md)
@@ -125,27 +125,32 @@ void genMap(World& w) {
         w.ah = g_style.fixedH > 0 ? std::min(W, g_style.fixedH) : pickArenaSide();
         w.aw = std::min(w.aw, wsz);
         w.ah = std::min(w.ah, wsz);
+        const int maxStride = std::max(1, std::min(w.aw > 1 ? (wsz - 1) / (w.aw - 1) : 200, w.ah > 1 ? (wsz - 1) / (w.ah - 1) : 200));
+        const int stride = std::clamp(g_style.worldStep, 1, maxStride);
+        const int spanW = (w.aw - 1) * stride + 1, spanH = (w.ah - 1) * stride + 1;
+        const int maxX = std::max(0, wsz - spanW), maxY = std::max(0, wsz - spanH);
         int x0, y0;
         if (g_style.wx >= 0) {
-            x0 = std::clamp(g_style.wx, 0, wsz - w.aw);
-            y0 = std::clamp(g_style.wy, 0, wsz - w.ah);
+            x0 = std::clamp(g_style.wx, 0, maxX);
+            y0 = std::clamp(g_style.wy, 0, maxY);
         } else if (g_style.theme == 1 && !P.towns.empty()) {   // нужен город: участок у случайного поселения
             const wg::Settle& t = P.towns[(size_t)irand((int)P.towns.size())];
-            x0 = std::clamp(t.x - w.aw / 2 + irand(std::max(1, t.r)) - t.r / 2, 0, wsz - w.aw);
-            y0 = std::clamp(t.y - w.ah / 2 + irand(std::max(1, t.r)) - t.r / 2, 0, wsz - w.ah);
+            x0 = std::clamp(t.x - spanW / 2 + irand(std::max(1, t.r)) - t.r / 2, 0, maxX);
+            y0 = std::clamp(t.y - spanH / 2 + irand(std::max(1, t.r)) - t.r / 2, 0, maxY);
         } else {
-            x0 = irand(wsz - w.aw + 1);
-            y0 = irand(wsz - w.ah + 1);
+            x0 = irand(maxX + 1);
+            y0 = irand(maxY + 1);
         }
         int townN = 0;
-        wg::fillLevelCache(P, x0, y0, w.aw, w.ah);
+        if (stride == 1) wg::fillLevelCache(P, x0, y0, spanW, spanH);
+        else wg::lvlCache().p = nullptr;
         for (int y = 0; y < W; y++)
             for (int x = 0; x < W; x++) {
                 if (x >= w.aw || y >= w.ah) {   // за пределами арены — стена
                     w.wall[y][x] = true;
                     continue;
                 }
-                const wg::Cell c = wg::worldCell(P, x0 + x, y0 + y);
+                const wg::Cell c = wg::worldCell(P, x0 + x * stride, y0 + y * stride);
                 putWorldCell(w, x, y, c);
                 townN += c.town;
             }
@@ -153,6 +158,7 @@ void genMap(World& w) {
         w.wsize = wsz;
         w.wx = x0;
         w.wy = y0;
+        w.wstep = stride;
         w.theme = g_style.theme >= 0 ? g_style.theme : (townN * 4 >= w.aw * w.ah ? 1 : 0);   // тема «город» — четверть участка и больше
         const int mainN = markMain(w), startN = startCellsN(w);   // мест для расстановки должно быть хотя бы 2
         if (startN >= 2 && (mainN >= std::max(2, (int)(0.3 * w.aw * w.ah)) || g_style.wx >= 0 || tries >= 40)) break;
@@ -189,6 +195,7 @@ void regionArena(World& w, const wg::RegionDesc& d, int aw, int ah) {
     w.wseed = 0;
     w.wsize = 0;
     w.wx = w.wy = 0;
+    w.wstep = 1;
     w.theme = townN * 4 >= w.aw * w.ah ? 1 : 0;
     markMain(w);
 }

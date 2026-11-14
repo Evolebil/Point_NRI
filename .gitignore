@@ -13,3 +13,9 @@ Sushnost/
 __pycache__/
 *.zip
 *.bak
+grep_*.txt
+Makefile.patch
+docs/*.docx
+docs/Игорь.md
+docs/Манах*.json
+docs/kampaniya_prompt/

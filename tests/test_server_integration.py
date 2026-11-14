@@ -78,6 +78,19 @@ class TestEngineProtocol(unittest.TestCase):
         self.assertTrue(e.talk({"cmd": "price", "char": KNIGHT})["data"]["ok"])   # новый процесс поднимается сам
         e.kill()
 
+    def test_selected_world_scale_is_preserved(self):
+        e = ps.Engine()
+        try:
+            out = e.talk({"cmd": "start", "char": KNIGHT, "seed": 11, "side": 0,
+                          "opp": {"mode": "generator"},
+                          "world": {"seed": "47361", "size": 1000, "x": 340, "y": 400,
+                                    "w": 32, "h": 20, "step": 10}})
+            world = out.get("init", {}).get("map", {}).get("world", {})
+            self.assertIn(out["type"], ("turn", "end"), out)
+            self.assertEqual((world.get("x"), world.get("y"), world.get("step")), (340, 400, 10))
+        finally:
+            e.kill()
+
     def test_closed_engine_is_error(self):
         # Найденный дефект: если процесс успел закрыться до записи, talk() выбрасывает BrokenPipeError,
         # а не своё RuntimeError("движок закрылся"). HTTP-обработчик ловит оба (см. test_dead_engine_over_http).
@@ -170,6 +183,22 @@ class TestHttpApi(unittest.TestCase):
 
     def test_unknown_command(self):
         self.assertEqual(self.api({"cmd": "fly_to_moon"})[1]["err"], "неизвестная команда")
+
+    def test_quick_match_commands(self):
+        sid = "it-quick-match"
+        code, waiting = self.api({"cmd": "match_find", "sid": sid, "name": "Тест", "budget": 800, "char": KNIGHT})
+        self.assertEqual((code, waiting["type"]), (200, "match_wait"))
+        code, cancelled = self.api({"cmd": "match_cancel", "sid": sid})
+        self.assertEqual((code, cancelled["type"]), (200, "match_cancelled"))
+
+        code, room = self.api({"cmd": "quick_match_create", "sid": "it-quick-room", "players": [
+            {"sid": "it-player-a", "name": "Аня", "char": KNIGHT, "budget": 800},
+            {"sid": "it-player-b", "name": "Боря", "char": KNIGHT, "budget": 800},
+        ]})
+        self.assertEqual((code, room["type"]), (200, "quick_match_room"))
+        self.assertIn(room["code"], ps.ROOMS)
+        self.assertEqual([m["team"] for m in ps.ROOMS[room["code"]].members], [0, 1])
+        ps.ROOMS.pop(room["code"], None)
 
     def test_step_without_game(self):
         self.assertEqual(self.api({"cmd": "step", "sid": "nobody", "c": "end"})[1]["err"], "игра не идёт")

@@ -40,7 +40,7 @@ static std::string mapToJson(const World& w) {
     s += layer("deck", [&](int y, int x) { return (char)('0' + w.deck[y][x]); }) + ",";
     s += layer("door", [&](int y, int x) { return (char)('0' + w.door[y][x]); }) + ",";
     s += layer("strong", [&](int y, int x) { return w.strong[y][x] ? '1' : '0'; });
-    if (w.wseed) s += ",\"world\":{\"seed\":\"" + std::to_string(w.wseed) + "\",\"size\":" + std::to_string(w.wsize) + ",\"x\":" + std::to_string(w.wx) + ",\"y\":" + std::to_string(w.wy) + "}";
+    if (w.wseed) s += ",\"world\":{\"seed\":\"" + std::to_string(w.wseed) + "\",\"size\":" + std::to_string(w.wsize) + ",\"x\":" + std::to_string(w.wx) + ",\"y\":" + std::to_string(w.wy) + ",\"step\":" + std::to_string(w.wstep) + "}";
     return s + "}";
 }
 
@@ -161,6 +161,7 @@ static void applyCustomMap(World& w, const CustomMap& m) {
     std::memset(w.door, 0, sizeof w.door);
     std::memset(w.strong, 0, sizeof w.strong);
     w.wseed = 0;
+    w.wstep = 1;
     w.aw = m.aw;
     w.ah = m.ah;
     w.theme = m.theme;
