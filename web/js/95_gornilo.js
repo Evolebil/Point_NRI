@@ -351,7 +351,7 @@ $('edPortraitFile').onchange = async e => {
   $('edPortraitBtn').disabled = true;
   try {
     const bmp = await createImageBitmap(f), side = Math.min(bmp.width, bmp.height), c = document.createElement('canvas'); c.width = c.height = 512;
-    c.getContext('2d').drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, 512, 512); if (bmp.close) bmp.close();
+    c.getContext('2d').drawImage(bmp, (bmp.width - side) / 2, 0, side, side, 0, 0, 512, 512);   // квадрат сверху: в портрете лицо обычно вверху if (bmp.close) bmp.close();
     let blob = await new Promise(r => c.toBlob(r, 'image/webp', .85));
     if (!blob || blob.type !== 'image/webp') throw new Error('браузер не умеет сохранять WebP');
     if (blob.size > 1.5 * 1024 * 1024) blob = await new Promise(r => c.toBlob(r, 'image/webp', .6));

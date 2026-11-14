@@ -243,6 +243,13 @@ main{position:relative;z-index:1}
 /* ---- мастерская (карты и миры): поле во весь экран, панели поверх ---- */
 .ws-stage{position:absolute;inset:0;display:grid;place-items:center;overflow:hidden;padding:96px 356px 84px;background:repeating-conic-gradient(#3e5a40 0 25%,#46634a 0 50%) 0 0/48px 48px}
 .ws-stage canvas{max-width:none;touch-action:none;box-shadow:0 10px 40px rgba(0,0,0,.45);border-radius:4px}
+/* редактор карт: поле на весь экран, карту двигает и масштабирует вид (transform), панели — HUD поверх */
+#meStage{display:block;padding:0;touch-action:none;cursor:crosshair}
+#meStage canvas{position:absolute;left:0;top:0;transform-origin:0 0;image-rendering:pixelated;border-radius:0}
+#meStage.grab,#meStage.grab canvas{cursor:grab}
+#meStage.panning,#meStage.panning canvas{cursor:grabbing}
+.zoom-seg{align-items:center}.zoom-seg button{min-width:40px;font-size:20px;padding:4px 10px}
+.zoom-pct{min-width:54px;text-align:center;font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums}
 .ws-top{position:absolute;left:26px;right:26px;top:22px;display:flex;align-items:center;gap:16px;padding:9px 16px;z-index:4;flex-wrap:wrap}
 .ws-title{font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw}
 .ws-left,.ws-right{position:absolute;top:106px;z-index:4;padding:16px;overflow:auto;max-height:calc(100% - 210px)}
@@ -481,7 +488,7 @@ table{border-collapse:collapse}
   .fx-cam{right:16px;top:auto;bottom:calc(36vh + 34px);width:auto;flex-direction:row;padding:8px}
   .fx-cam .btn{width:auto}
   .ws-left,.ws-right{top:auto;bottom:86px;max-height:34vh;width:calc(50% - 39px)}
-  .ws-stage{padding:80px 16px calc(34vh + 100px)}
+  .ws-stage:not(#meStage){padding:80px 16px calc(34vh + 100px)}
 }
 @media (max-width:760px){
   html,body{font-size:15px}
@@ -544,7 +551,7 @@ table{border-collapse:collapse}
   .ws-top{left:10px;right:10px;top:10px;gap:8px;padding:8px 10px}
   .ws-title{max-width:100%;font-size:16px;order:5;flex-basis:100%}
   .ws-left,.ws-right{left:10px;right:10px;width:auto;bottom:68px;max-height:30vh}
-  .ws-stage{padding:96px 10px calc(30vh + 80px)}
+  .ws-stage:not(#meStage){padding:96px 10px calc(30vh + 80px)}
   .ws-right{display:none}
   body.ws-props .ws-right{display:flex}
   body.ws-props .ws-left{display:none}

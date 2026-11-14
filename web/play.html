@@ -155,7 +155,11 @@
     <button class="btn" id="meExport" type="button">Экспорт</button>
     <button class="btn" id="meImport" type="button">Импорт</button>
     <input type="file" id="meFile" accept="application/json,.json" hidden>
-    <span class="grow"></span><button class="btn show-sm" id="meProps" type="button">Параметры</button><span class="small muted hide-sm">ЛКМ рисует · ПКМ стирает слой</span>
+    <span class="grow"></span>
+    <div class="seg zoom-seg" role="group" aria-label="Масштаб карты"><button type="button" id="meZoomOut" title="Отдалить" aria-label="Отдалить">−</button><span id="meZoomPct" class="zoom-pct">100%</span><button type="button" id="meZoomIn" title="Приблизить" aria-label="Приблизить">+</button></div>
+    <button class="btn" id="meZoomFit" type="button" title="Вписать карту в экран">Вписать</button>
+    <button class="btn show-sm" id="meProps" type="button">Параметры</button>
+    <span class="small muted hide-sm" title="Колесо — масштаб; средняя кнопка или пробел + мышь — сдвиг; на телефоне — два пальца">колесо — масштаб · пробел + мышь — сдвиг</span>
   </div>
 </section>
 

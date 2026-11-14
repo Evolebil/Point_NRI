@@ -34,15 +34,50 @@ function meList(){
   $('meDel').disabled = !(ME && MAPS[ME.name]);
 }
 // холст редактора: рисунок в meCS пикселей на клетку, на экране — по размеру поля мастерской
+// карта во весь экран, инструменты поверх (HUD). Холст рисуется в meCS пикселей на клетку, на экране его двигает и
+// масштабирует вид MV (CSS-преобразование): колесо — масштаб к курсору, средняя кнопка / пробел / два пальца — сдвиг
+const MV = {z: 1, x: 0, y: 0, key: ''};
 function meDraw(){
   const cv2 = $('meCv'), m = ME;
-  meCS = Math.max(6, Math.min(36, Math.floor(900 / Math.max(m.aw, m.ah))));
-  cv2.width = m.aw * meCS; cv2.height = m.ah * meCS;
-  const [bw, bh] = innerSize($('meStage'));
-  const tile = Math.max(3, Math.min(48, (bw - 8) / m.aw, (bh - 8) / m.ah));
-  cv2.style.width = `${m.aw * tile}px`; cv2.style.height = `${m.ah * tile}px`;
+  meCS = Math.max(8, Math.min(40, Math.floor(2400 / Math.max(m.aw, m.ah))));
+  if (cv2.width !== m.aw * meCS || cv2.height !== m.ah * meCS){ cv2.width = m.aw * meCS; cv2.height = m.ah * meCS; cv2.style.width = cv2.width + 'px'; cv2.style.height = cv2.height + 'px'; }
   paintMap(cv2.getContext('2d'), m, meCS);
   $('meTitle').textContent = `${m.name || 'Моя арена'} · ${m.aw}×${m.ah}`;
+  const key = m.aw + 'x' + m.ah + ':' + meCS;
+  if (MV.key !== key){ MV.key = key; meFit(); }
+}
+// свободная часть экрана между панелями HUD — туда карта вписывается при открытии и по кнопке «Вписать»
+function meFreeRect(){
+  const st = $('meStage').getBoundingClientRect(), r = {l: st.left + 12, t: st.top + 12, r: st.right - 12, b: st.bottom - 12};
+  const vis = el => el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect();
+  const top = vis(document.querySelector('#s5 .ws-top')), bot = vis(document.querySelector('#s5 .ws-bottom')), lf = vis(document.querySelector('#s5 .ws-left')), rt = vis(document.querySelector('#s5 .ws-right'));
+  if (top) r.t = Math.max(r.t, top.bottom + 12);
+  if (bot) r.b = Math.min(r.b, bot.top - 12);
+  const side = innerWidth > 1100;   // на широком экране панели по бокам, на узком — внизу
+  if (lf) side ? r.l = Math.max(r.l, lf.right + 12) : r.b = Math.min(r.b, lf.top - 12);
+  if (rt) side ? r.r = Math.min(r.r, rt.left - 12) : r.b = Math.min(r.b, rt.top - 12);
+  if (r.r - r.l < 120){ r.l = st.left + 12; r.r = st.right - 12; }
+  if (r.b - r.t < 120){ r.t = st.top + 12; r.b = st.bottom - 12; }
+  return {x: r.l - st.left, y: r.t - st.top, w: r.r - r.l, h: r.b - r.t};
+}
+function meFit(){
+  if (!$('meStage').clientWidth || !$('meCv').width) return;   // мастерская скрыта — впишем при входе
+  const cv2 = $('meCv'), f = meFreeRect();
+  MV.z = Math.min(f.w / cv2.width, f.h / cv2.height);
+  MV.x = f.x + (f.w - cv2.width * MV.z) / 2; MV.y = f.y + (f.h - cv2.height * MV.z) / 2;
+  meView();
+}
+function meView(){
+  if (!$('meStage').clientWidth) return;
+  $('meCv').style.transform = `translate(${MV.x}px,${MV.y}px) scale(${MV.z})`;
+  const fit = (() => { const f = meFreeRect(); return Math.min(f.w / $('meCv').width, f.h / $('meCv').height); })();
+  $('meZoomPct').textContent = Math.round(100 * MV.z / fit) + '%';
+}
+// масштаб с опорой в точке (px, py) экрана сцены: точка карты под курсором остаётся на месте
+function meZoomAt(k, px, py){
+  const cv2 = $('meCv'), f = meFreeRect(), fit = Math.min(f.w / cv2.width, f.h / cv2.height);
+  const z = Math.max(fit * 0.25, Math.min(fit * 12, 64 / meCS, MV.z * k));   // от ¼ вписанной до ~64 px на клетку
+  MV.x = px - (px - MV.x) * z / MV.z; MV.y = py - (py - MV.y) * z / MV.z; MV.z = z; meView();
 }
 // предпросмотр карты в чужом холсте (комната, фон меню): вписать по центру
 function drawMapFit(cv2, m){
@@ -99,12 +134,38 @@ function mePaint(e, erase){
   meDraw();
 }
 $('meTools').addEventListener('click', e => { const c = e.target.closest('[data-tool]'); if (!c) return; meTool = c.dataset.tool; $('meTools').querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b === c)); });
-const meCvEl = $('meCv');
-meCvEl.addEventListener('contextmenu', e => e.preventDefault());
-meCvEl.addEventListener('pointerdown', e => { mePainting = e.button === 2 ? 2 : 1; meCvEl.setPointerCapture(e.pointerId); mePaint(e, mePainting === 2); });
-meCvEl.addEventListener('pointermove', e => { if (mePainting) mePaint(e, mePainting === 2); });
-meCvEl.addEventListener('pointerup', () => { mePainting = 0; });
-meCvEl.addEventListener('pointercancel', () => { mePainting = 0; });
+const meCvEl = $('meCv'), meStageEl = $('meStage');
+// указатели на сцене: мышь (ЛКМ рисует, ПКМ стирает, средняя или пробел + ЛКМ — сдвиг), касания (один палец рисует,
+// два — сдвиг и масштаб щипком; второй палец отменяет рисование первым)
+const MP = new Map();   // id указателя -> {x, y}
+let mePan = null, meSpace = false, mePinch = null;
+meStageEl.addEventListener('contextmenu', e => e.preventDefault());
+meStageEl.addEventListener('pointerdown', e => {
+  const r = meStageEl.getBoundingClientRect(); MP.set(e.pointerId, {x: e.clientX - r.left, y: e.clientY - r.top});
+  try { meStageEl.setPointerCapture(e.pointerId); } catch (er) {}   // захват не обязателен: без него просто теряем указатель за краем
+  if (e.pointerType === 'touch' && MP.size === 2){ mePainting = 0; mePan = null; const [a, b] = [...MP.values()]; mePinch = {d: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2}; return; }
+  if (MP.size > 1) return;
+  if (e.button === 1 || (e.button === 0 && meSpace)){ e.preventDefault(); mePan = {x: e.clientX, y: e.clientY, ox: MV.x, oy: MV.y}; meStageEl.classList.add('panning'); return; }
+  if (e.target !== meCvEl || (e.button !== 0 && e.button !== 2)) return;
+  mePainting = e.button === 2 ? 2 : 1; mePaint(e, mePainting === 2);
+});
+meStageEl.addEventListener('pointermove', e => {
+  const r = meStageEl.getBoundingClientRect(); if (MP.has(e.pointerId)) MP.set(e.pointerId, {x: e.clientX - r.left, y: e.clientY - r.top});
+  if (mePinch && MP.size >= 2){
+    const [a, b] = [...MP.values()], d = Math.hypot(a.x - b.x, a.y - b.y), cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+    MV.x += cx - mePinch.cx; MV.y += cy - mePinch.cy; meZoomAt(d / Math.max(1, mePinch.d), cx, cy); mePinch = {d, cx, cy}; return;
+  }
+  if (mePan){ MV.x = mePan.ox + e.clientX - mePan.x; MV.y = mePan.oy + e.clientY - mePan.y; meView(); return; }
+  if (mePainting) mePaint(e, mePainting === 2);
+});
+const meUp = e => { MP.delete(e.pointerId); if (MP.size < 2) mePinch = null; if (!MP.size){ mePainting = 0; mePan = null; meStageEl.classList.remove('panning'); } };
+meStageEl.addEventListener('pointerup', meUp);
+meStageEl.addEventListener('pointercancel', meUp);
+meStageEl.addEventListener('wheel', e => { e.preventDefault(); const r = meStageEl.getBoundingClientRect(); meZoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX - r.left, e.clientY - r.top); }, {passive: false});
+addEventListener('keydown', e => { if (e.code === 'Space' && ROUTE === 'workshop' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){ e.preventDefault(); if (!meSpace){ meSpace = true; meStageEl.classList.add('grab'); } } });
+addEventListener('keyup', e => { if (e.code === 'Space'){ meSpace = false; meStageEl.classList.remove('grab'); } });
+const meZoomBtn = k => { const f = meStageEl.getBoundingClientRect(); meZoomAt(k, f.width / 2, f.height / 2); };
+$('meZoomIn').onclick = () => meZoomBtn(1.25); $('meZoomOut').onclick = () => meZoomBtn(0.8); $('meZoomFit').onclick = meFit;
 $('meName').oninput = () => { ME.name = $('meName').value; $('meTitle').textContent = `${ME.name || 'Моя арена'} · ${ME.aw}×${ME.ah}`; };
 $('meTheme').onchange = () => { ME.theme = +$('meTheme').value; meDraw(); };
 $('meResize').onclick = async () => {
@@ -159,11 +220,11 @@ async function meExit(){
   }
   go('home');
 }
-ROUTE_ENTER.workshop = prev => { meShow(); if (prev !== 'workshop' && !meSaved) meSnap(); requestAnimationFrame(meDraw); };
+ROUTE_ENTER.workshop = prev => { meShow(); if (prev !== 'workshop' && !meSaved) meSnap(); requestAnimationFrame(meFit); };
 ROUTE_BACK.workshop = meExit;
 document.querySelectorAll('[data-ws-exit]').forEach(b => b.onclick = () => goBack());
 $('meExport').onclick = () => { const blob = new Blob([JSON.stringify(Object.assign({name: ME.name}, meToJson()), null, 1)], {type:'application/json'}), a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (ME.name || 'map') + '.json'; a.click(); };
 $('meImport').onclick = () => $('meFile').click();
 $('meFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const j = JSON.parse(await f.text()); ME = meFromJson(j, j.name || f.name.replace(/\.json$/, '')); meShow(); meMsg('Карта прочитана: проверьте и сохраните.'); } catch (err) { meMsg('Не удалось прочитать: ' + err.message, 'err'); } };
 meList();
-addEventListener('resize', () => { if (ME && ROUTE === 'workshop') meDraw(); });
+addEventListener('resize', () => { if (ME && ROUTE === 'workshop') meFit(); });
