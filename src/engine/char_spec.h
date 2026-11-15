@@ -428,10 +428,20 @@ static bool bossFromJson(const Json& j, Boss& b, long long& budget, int& hpWante
             if (r.what == E_DMGRED && !inRange(r.n, 1, 1000, "снижение урона в правиле", err)) return false;
             if (r.what == E_PIERCE && !inRange(r.n, 0, DT_N - 1, "тип урона в правиле", err)) return false;
             if (r.what == E_POWER && !inRange(r.n, 1, 20, "размен в правиле", err)) return false;
+            if (r.what == E_ACMINUS && !inRange(r.n, 1, 20, "−КД правила", err)) return false;   // без предела возврат очков бесконечен
             if (!inRange(r.allyR, 0, MAX_FT, "радиус ауры правила", err)) return false;
             if (r.allyR % 5) { err = "радиус ауры кратен 5 фт"; return false; }
             if (r.allyR > 0 && r.once) r.once = false;   // у аур нет «раз в ход»
         }
+        // недостатки (возврат очков) не складываются: каждый — не больше одного правила, иначе очки из ничего
+        for (size_t i = 0; i < b.rules.size(); i++)
+            for (size_t k = 0; k < i; k++)
+                if (b.rules[i].what == b.rules[k].what && (b.rules[i].what == E_DISATK || b.rules[i].what == E_ADVVSME || b.rules[i].what == E_ACMINUS))
+                    { err = std::string("недостаток «") + EN[b.rules[i].what] + "» — только одно правило"; return false; }
+        for (size_t i = 0; i < b.trigs.size(); i++)
+            for (size_t k = 0; k < i; k++)
+                if (b.trigs[i].what == X_SELFCOND && b.trigs[k].what == X_SELFCOND && b.trigs[i].cond == b.trigs[k].cond)
+                    { err = std::string("недостаток «сам ") + CN[b.trigs[i].cond] + "» — только одно событие"; return false; }
     }
     b.riposte = p["riposte"].flag();
     b.surge = p["surge"].num(0);

@@ -637,7 +637,7 @@ long long rulePrice(const Rule& r, const Boss& b, const Coef& C) {
         case E_ACMINUS: e = -P(AT_E_ACMINUS) * r.n; break;
     }
     e *= C[AT_W_ALWAYS + r.when];
-    if (r.allyR > 0) e *= 1 + C[AT_RULEAURA] * tierN(TR_AURARAD, r.allyR / 5.0);   // аура: и на союзников рядом
+    if (r.allyR > 0 && e > 0) e *= 1 + C[AT_RULEAURA] * tierN(TR_AURARAD, r.allyR / 5.0);   // аура: и на союзников рядом (возврат за недостаток аура не растит)
     return e >= 0 ? (long long)std::ceil(e) : -(long long)std::ceil(-e);
 }
 // атомы правила: условие и эффект (и «раз в ход»)

@@ -141,7 +141,7 @@ long long priceOf(const Boss& b, const Coef& C, double budget) {
                  : r.what == E_SKILLADV ? P(AT_E_SKILLADV) * (skCombat(std::clamp(r.n, 0, SK_N - 1)) ? 1.0 : 0.1) : r.what == E_DISATK ? -P(AT_E_DISATK)
                  : r.what == E_ACMINUS ? -P(AT_E_ACMINUS) * r.n : P(AT_E_ADVSAVE);
         e *= C[AT_W_ALWAYS + r.when];
-        if (r.allyR > 0) e *= 1 + C[AT_RULEAURA] * tierN(TR_AURARAD, r.allyR / 5.0);   // аура и на своих (v21)
+        if (r.allyR > 0 && e > 0) e *= 1 + C[AT_RULEAURA] * tierN(TR_AURARAD, r.allyR / 5.0);   // аура и на своих (v21)
         t += e >= 0 ? (long long)std::ceil(e) : -(long long)std::ceil(-e);
     }
     for (int k = 1; k < C_N; k++)
