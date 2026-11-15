@@ -235,7 +235,7 @@ async function startGame(){
   $('btnFight').disabled = true;
   const character=toChar();try{const active=localStorage.getItem('dnd_active_char'),profile=JSON.parse(localStorage.getItem('dnd_chars')||'[]').find(p=>p.id===active);if(profile&&profile.portrait)character.portrait=profile.portrait;}catch(e){}
   const msg = {cmd:'start', char: character, seed: +$('seed').value, opp: oppCfg(), side: +$('side').value};
-  if (R3.want) msg.vox = 1;   // ?3d=1: бой в режиме кубов (этап 1б): путь, обзор, копание — по кубам
+  if (R3.want) msg.vox = 1;   // вид 3D (настройка или ?3d=1): бой в режиме кубов — путь, обзор, копание, области по кубам
   const mname = $('mapSel').value; if (mname && MAPS[mname]) msg.map = MAPS[mname];
   if (mname === '__world') msg.world = {seed: $('wSeed').value.trim() || '1', size: +$('wSize').value, x: WPICK ? WPICK[0] : -1, y: WPICK ? WPICK[1] : -1, w: +$('wW').value, h: +$('wH').value};
   const r = await api(msg);

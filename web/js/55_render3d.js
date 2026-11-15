@@ -1,12 +1,12 @@
 // ====================================================================================================================
-// 3D-вид боя (этап 1а, флаг ?3d=1). Движок не меняется: нынешняя 2D-карта переводится в кубы 5×5×5 фт прямо здесь,
+// 3D-вид боя (настройка «Вид боя», флаг ?3d=1 / ?3d=0 перекрывает её). Карта по слоям переводится в кубы 5×5×5 фт прямо здесь,
 // бойцы — цветные капсулы, камера тактическая (вращение, наклон, приближение), клетка выбирается лучом по кубам.
 // Те же кадры FR, команды cmd() и щелчки по полю (52_turn.js); очередь кадров (step, seek, onCaughtUp) — общая,
 // R3.draw только рисует. Подписи (ХП, урон, броски) и круги дальности — на прежнем холсте cv поверх 3D.
 // ====================================================================================================================
 const R3 = {
-  want: new URLSearchParams(location.search).get('3d') === '1',   // флаг: без него модуль ничего не делает
-  on: false, ready: false, failed: false,
+  want: r3Want(),   // 3D выбран (настройка или флаг): без него модуль ничего не делает, библиотека не грузится
+  on: false, ready: false, failed: false, loading: false,
   map: null, vox: null, H: 0, NX: 0, NY: 0, NZ: 0, chunks: [], dynFr: null, dynKey: '', dynCells: new Map(),
   fm: [], capGeo: new Map(), fogKey: '', dragged: false, hit: null, voxEd: new Map(), voxAt: 0,   // voxEd — правки кубов боя по клеткам
   view: {tx: 0, ty: 0, tz: 0, yaw: .65, pitch: .95, dist: 30, fdist: 22},
@@ -20,15 +20,38 @@ const VM = {AIR:0, GRASS:1, DIRT:2, STONE:3, STRONG:4, WOOD:5, LEAF:6, WATER:7, 
 const VCOL = [0, 0x5b8a4f, 0x6e5236, 0x80848f, 0x4a4e58, 0x6b4a2b, 0x3f7a3a, 0x3a7fc0, 0x5e4524, 0x9a7442, 0x6b4423, 0x15161c,
   0xe2572a, 0x7ccf2e, 0x7e8f57, 0x9fd8ff, 0x5868d8, 0x4b3a63, 0x7a63c9, 0x5c606c, 0x6a6152, 0x2a2e40, 0x7d7568, 0xc9a46a, 0x4e525c];
 
-// ---- загрузка библиотеки: только по флагу, отдельным файлом с кэшем ----
-if (R3.want){
+// Вид боя: ?3d=1 / ?3d=0 в адресе, иначе настройка (localStorage dnd_view: '3d' или '2d'; по умолчанию 2D)
+function r3Want(){
+  const q = new URLSearchParams(location.search).get('3d');
+  if (q === '1' || q === '0') return q === '1';
+  try { return localStorage.getItem('dnd_view') === '3d'; } catch (e) { return false; }
+}
+// ---- загрузка библиотеки: только когда выбран 3D, отдельным файлом с кэшем ----
+R3.load = function(){
+  if (R3.ready || R3.loading || R3.failed) return;
+  R3.loading = true;
   const s = document.createElement('script');
   s.src = '/vendor/three-r159.min.js';
-  s.onload = () => { try { R3.init(); } catch (e) { R3.fail('не удалось включить 3D: ' + e.message); } };
-  s.onerror = () => R3.fail('не загрузилась библиотека 3D');
+  s.onload = () => { R3.loading = false; try { R3.init(); } catch (e) { R3.fail('не удалось включить 3D: ' + e.message); } };
+  s.onerror = () => { R3.loading = false; R3.fail('не загрузилась библиотека 3D'); };
   document.head.appendChild(s);
+};
+if (R3.want) R3.load();
+R3.fail = function(msg){ R3.failed = true; R3.on = false; if (R3.cv) R3.cv.style.display = 'none'; console.error(msg); toast(msg + ' — показан 2D-вид.'); r3SyncSeg(); };
+// Настройка «Вид боя»: 3D — следующий бой в режиме кубов (путь, обзор, области — по кубам), идущий бой — 3D-видом сразу;
+// 2D — прежний вид и прежний бой по слоям
+R3.setWant = function(v){
+  R3.want = v;
+  try { localStorage.setItem('dnd_view', v ? '3d' : '2d'); } catch (e) {}
+  if (v && !R3.ready) R3.load();
+  else if (R3.ready){ R3.on = v; R3.cv.style.display = v ? 'block' : 'none'; cam.snap = true; R3.hit = null; $('view3dBtn').textContent = v ? 'Вид: 3D' : 'Вид: 2D'; }
+  r3SyncSeg();
+};
+function r3SyncSeg(){
+  const seg = $('viewSeg'); if (!seg || !seg.querySelectorAll) return;
+  seg.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', (b.dataset.view === '3d') === R3.want));
+  const n = $('viewNote'); if (n) n.textContent = R3.failed ? '3D не включился на этом устройстве — показан 2D.' : (R3.want ? 'Бой — в объёмном мире из кубов (5×5×5 фт): высота, тоннели, копание, области не сквозь стены. Тяжелее для слабых устройств.' : 'Плоская карта сверху — лёгкий вид для любого устройства.');
 }
-R3.fail = function(msg){ R3.failed = true; R3.on = false; if (R3.cv) R3.cv.style.display = 'none'; console.error(msg); toast(msg + ' — показан 2D-вид.'); };
 
 R3.init = function(){
   const T = THREE, coarse = matchMedia('(pointer: coarse)').matches;
@@ -60,8 +83,10 @@ R3.init = function(){
   R3.shadowGeo = new T.CircleGeometry(.5, 20).rotateX(-Math.PI / 2);
   R3.shadowMat = new T.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: .35, depthWrite: false});
   R3.bindInput();
-  R3.ready = true; R3.on = true;
-  const b = $('view3dBtn'); if (b){ b.hidden = false; b.textContent = 'Вид: 3D'; }
+  R3.ready = true; R3.on = R3.want;
+  if (!R3.on) R3.cv.style.display = 'none';
+  const b = $('view3dBtn'); if (b){ b.hidden = false; b.textContent = R3.on ? 'Вид: 3D' : 'Вид: 2D'; }
+  r3SyncSeg();
 };
 
 // ---- мир из кубов: столбец клетки (x, y) по слоям нынешней карты и изменениям арены ----
@@ -525,9 +550,13 @@ R3.draw = function(now, t, tt){
   R3.fpsN++; if (now - R3.fpsT0 >= 1000){ R3.fps = Math.round(R3.fpsN * 1000 / (now - R3.fpsT0)); R3.fpsN = 0; R3.fpsT0 = now; }
   ctx.save(); ctx.font = '700 11px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText(`3D · ${R3.fps} к/с${R3.low ? ' · телефон' : ''}`, 8, H - 6); ctx.restore();
 };
-// переключатель вида (виден только по флагу ?3d=1 и после загрузки библиотеки): 2D остаётся запасным
+// переключатель вида в бою (виден после загрузки библиотеки): только на этот бой, настройку не меняет; 2D остаётся запасным
 $('view3dBtn').onclick = () => {
   if (!R3.ready || R3.failed) return;
   R3.on = !R3.on; R3.cv.style.display = R3.on ? 'block' : 'none'; cam.snap = true; R3.hit = null;
   $('view3dBtn').textContent = R3.on ? 'Вид: 3D' : 'Вид: 2D';
 };
+if ($('viewSeg') && $('viewSeg').addEventListener){
+  $('viewSeg').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) R3.setWant(b.dataset.view === '3d'); });
+  r3SyncSeg();
+}

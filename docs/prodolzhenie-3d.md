@@ -32,7 +32,7 @@
 - `src/engine/chase.h` `fighterJson` — `"z"` в кадре; `custom_map.h` `mapToJson` — `"vox":1`.
 - `src/apps/arena_play.cc` — `"vox":1` в `start` → `g_voxMode`, соперник — правило-бот; комнаты — `g_voxMode = false`.
 - Клиент: `web/js/55_render3d.js` (`R3`: кубы, `syncVox`, `ENG2VM`, `cellAt` с `z`/`oz`), `52_turn.js` (щелчки),
-  `51_room.js` (`msg.vox` при `?3d=1`), `40_maps.js` (редактор 5 фт, кисть дерева).
+  `51_room.js` (`msg.vox`, когда выбран вид 3D), настройка «Вид боя» (`R3.setWant`, `localStorage dnd_view`, `?3d=1/0` перекрывает), `40_maps.js` (редактор 5 фт, кисть дерева).
 - Проверки: `tests/audit/13_T212_vysota_5ft.inc` — T212 (5 фт), T216 (деревья генератора), T217 (`VoxWorld`), T218 (режим
   кубов); `tests/audit/15_T219-T221_razmery_kuby.inc` — T219 (рост и глаза), T220 (крошечные), T221 (протискивание);
   `tests/audit/16_T222-T223_oblasti_ukrytie.inc` — T222 (области), T223 (укрытие); `tests/test_render3d.mjs` (23, в т. ч. та же сцена областей).
