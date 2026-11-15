@@ -189,7 +189,7 @@ void takeTurn(World& w, int idx) {
                 }
                 // прыгнуть некуда — применение не тратим
                 if (!done) continue;
-                me.up = !nodeOK(w, me, me.x, me.y, 0) && w.deck[me.y][me.x] > 0;
+                if (!w.vx) me.up = !nodeOK(w, me, me.x, me.y, 0) && w.deck[me.y][me.x] > 0;
                 hazardHit(w, me);
                 recordPrim(idx, {PR_SPELL, (int)i, -1, me.x, me.y});
                 paySpec(w, me, (int)i, false);

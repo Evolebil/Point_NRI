@@ -172,14 +172,16 @@ cv.addEventListener('click', e => {
   const c = cellAt(e), q = G.req; if (!c) return;
   if (G.mode === 'move'){ const en = enemyAt(c); if (en != null && (q.actionFree || q.weapon.atkLeft > 0) && q.weapon.armed){ const E = q.enemies.find(x => x.i === en); if (E && E.dist <= q.weapon.range && E.los){ cmd({c:'attack', tgt: en, reckless: q.weapon.reckless}); return; } }
     const n = (FR[curIdx].f[q.me] || {}).n || 1, off = Math.floor((n - 1) / 2);
-    cmd({c:'move', x: Math.max(0, Math.min(AW - n, c.x - off)), y: Math.max(0, Math.min(AH - n, c.y - off))}); return; }
+    const mv = {c:'move', x: Math.max(0, Math.min(AW - n, c.x - off)), y: Math.max(0, Math.min(AH - n, c.y - off))};
+    if (c.z != null) mv.z = c.z;   // режим кубов: высота, куда щёлкнули
+    cmd(mv); return; }
   if (G.mode.startsWith('attack:')){   // удар оружием мультиатаки
     const en = enemyAt(c); if (en == null){ toast('Щёлкните по врагу.'); return; }
     cmd({c:'attack', tgt: en, wk: +G.mode.slice(7), n: G.atkN || 1}); return;
   }
   if (G.mode === 'attack'){
     const en = enemyAt(c);
-    if (en == null){ if (isObjCell(c.x, c.y)) cmd({c:'hitobj', x:c.x, y:c.y}); else toast('Щёлкните по врагу или по объекту (стена, дерево, укрытие).'); return; }
+    if (en == null){ if (c.oz != null) cmd({c:'hitobj', x:c.x, y:c.y, z:c.oz}); else if (isObjCell(c.x, c.y)) cmd({c:'hitobj', x:c.x, y:c.y}); else toast('Щёлкните по врагу или по объекту (стена, дерево, укрытие).'); return; }
     cmd({c:'attack', tgt: en, reckless: q.weapon.reckless, n: G.atkN || 1}); return;
   }
   if (G.mode.startsWith('spell:')){

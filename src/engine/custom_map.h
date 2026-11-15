@@ -47,6 +47,7 @@ static std::string mapToJson(const World& w) {
     s += layer("deck", [&](int y, int x) { return lvChar(w.deck[y][x]); }) + ",";
     s += layer("door", [&](int y, int x) { return (char)('0' + w.door[y][x]); }) + ",";
     s += layer("strong", [&](int y, int x) { return w.strong[y][x] ? '1' : '0'; });
+    if (w.vx) s += ",\"vox\":1";   // режим кубов: клиент берёт высоту бойцов из кадров и правки кубов из событий
     if (w.wseed) s += ",\"world\":{\"seed\":\"" + std::to_string(w.wseed) + "\",\"size\":" + std::to_string(w.wsize) + ",\"x\":" + std::to_string(w.wx) + ",\"y\":" + std::to_string(w.wy) + ",\"step\":" + std::to_string(w.wstep) + "}";
     return s + "}";
 }

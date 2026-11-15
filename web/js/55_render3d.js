@@ -8,7 +8,7 @@ const R3 = {
   want: new URLSearchParams(location.search).get('3d') === '1',   // флаг: без него модуль ничего не делает
   on: false, ready: false, failed: false,
   map: null, vox: null, H: 0, NX: 0, NY: 0, NZ: 0, chunks: [], dynFr: null, dynKey: '', dynCells: new Map(),
-  fm: [], capGeo: new Map(), fogKey: '', dragged: false, hit: null,
+  fm: [], capGeo: new Map(), fogKey: '', dragged: false, hit: null, voxEd: new Map(), voxAt: 0,   // voxEd — правки кубов боя по клеткам
   view: {tx: 0, ty: 0, tz: 0, yaw: .65, pitch: .95, dist: 30, fdist: 22},
   fps: 0, fpsN: 0, fpsT0: 0
 };
@@ -73,7 +73,10 @@ function r3Level(f){
   const gone = R3.dynCells.get(f.x + ',' + f.y) || {};
   return (f.up ? mapN('deck', f.x, f.y) : mapN('height', f.x, f.y) + (gone[4] ? 0 : mapN('tree', f.x, f.y))) + (f.alt || 0);
 }
-const r3Z = f => VZ0 + r3Level(f);   // куб, где ноги
+// куб, где ноги: в режиме кубов (бой по ?3d=1, этап 1б) — из кадра движка, иначе — по слоям карты
+const r3Z = f => MAP && MAP.vox && f.z != null ? f.z : VZ0 + r3Level(f);
+// материалы движка (src/engine/vox.h VoxMat) → материалы рисунка (VM)
+const ENG2VM = [VM.AIR, VM.PITF, VM.DIRT, VM.GRASS, VM.DIRT, VM.STONE, VM.STRONG, VM.WOOD, VM.LEAF, VM.WATER, VM.PLANK, VM.DOOR, VM.COVER, VM.RUBBLE, VM.LAVA, VM.ACID, VM.ICE, VM.FORCE];
 function r3Column(x, y){
   const V = R3.vox, i0 = vIdx(x, y, 0), H = R3.H, d = R3.dynCells.get(x + ',' + y) || {}, city = !!MAP.theme;
   for (let z = 0; z < H; z++) V[i0 + z] = 0;
@@ -101,6 +104,8 @@ function r3Column(x, y){
   const dk = mapN('deck', x, y);
   if (dk && !d[5] && VZ0 + dk - 1 >= top) put(VZ0 + dk - 1, VZ0 + dk, VM.PLANK);   // настил: стоять на его верху
   if (d[1]) put(top, top + 4, VM.FORCE);   // временная стена способности
+  const ed = R3.voxEd.get(x + ',' + y);   // режим кубов: вырытое и разрушенное в бою — поверх (как vxResync в движке)
+  if (ed) for (const [z, m] of ed) if (z >= 0 && z < H) V[i0 + z] = m;
 }
 // изменения арены кадра: клетка -> {вид: 1}; двери — последнее состояние
 function r3DynMap(dyn){
@@ -112,6 +117,7 @@ R3.setMap = function(){
   const T = THREE;
   R3.chunks.forEach(c => { if (c && c.mesh){ R3.scene.remove(c.mesh); c.mesh.geometry.dispose(); } });
   R3.fm.forEach(m => { if (m){ R3.scene.remove(m.body, m.shadow, m.ghost); m.mat.dispose(); m.gmat.dispose(); } });
+  R3.voxEd = new Map(); R3.voxAt = 0;
   R3.fm = []; R3.map = MAP; R3.dynFr = null; R3.fogKey = ''; R3.dynCells = r3DynMap(FR[curIdx] && FR[curIdx].dyn); R3.dynKey = JSON.stringify((FR[curIdx] && FR[curIdx].dyn) || []);
   let maxTop = 0;
   for (let y = 0; y < AH; y++) for (let x = 0; x < AW; x++) maxTop = Math.max(maxTop, VZ0 + Math.max(mapN('height', x, y) + Math.max(6, mapN('tree', x, y)), mapN('deck', x, y)));
@@ -184,6 +190,25 @@ R3.syncDyn = function(fr){
   });
   dirty.forEach(ci => R3.buildChunk(ci));
 };
+// режим кубов: события «vox» из кадров (разрушен блок, вырыт ход) — по порядку кадров; назад по кадрам — мир заново
+R3.syncVox = function(){
+  if (!MAP.vox) return;
+  if (curIdx < R3.voxAt) R3.setMap();
+  if (curIdx <= R3.voxAt) return;
+  const dirty = new Set();
+  for (let k = R3.voxAt + 1; k <= curIdx; k++) for (const e of (FR[k] && FR[k].ev) || []){
+    if (e.k !== 'vox' || e.x < 0 || e.y < 0 || e.x >= AW || e.y >= AH || e.z < 0 || e.z >= R3.H) continue;
+    const m = ENG2VM[e.m] != null ? ENG2VM[e.m] : VM.AIR, key = e.x + ',' + e.y, ed = R3.voxEd.get(key) || [];
+    const old = ed.findIndex(q => q[0] === e.z); if (old >= 0) ed.splice(old, 1); ed.push([e.z, m]); R3.voxEd.set(key, ed);
+    R3.vox[vIdx(e.x, e.y, e.z)] = m;
+    for (const [ax, ay] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]){   // соседний чанк: его грани у границы тоже меняются
+      const nx = e.x + ax, ny = e.y + ay; if (nx < 0 || ny < 0 || nx >= AW || ny >= AH) continue;
+      for (const dz of [-1, 0, 1]){ const zz = e.z + dz; if (zz >= 0 && zz < R3.H) dirty.add(Math.floor(nx / VCH) + R3.NX * (Math.floor(zz / VCH) + R3.NY * Math.floor(ny / VCH))); }
+    }
+  }
+  R3.voxAt = curIdx;
+  dirty.forEach(ci => R3.buildChunk(ci));
+};
 // туман войны: та же маска, что у 2D (бит на клетку из запроса хода)
 R3.syncFog = function(){
   const q = G.req || G.lastReq, on = !!(q && q.vis && !G.over && q.visW === AW && q.visH === AH);
@@ -225,7 +250,7 @@ R3.syncFighters = function(fr, t){
     m.mat.emissive.set(act ? 0x6a5414 : 0x000000);
     if (f.hp <= 0){ m.body.rotation.set(0, 0, Math.PI / 2); m.body.position.set(X, z + .3 * n, Z); }   // павший лежит
     else { m.body.rotation.set(0, 0, 0); m.body.position.set(X, z + h / 2, Z); }
-    m.shadow.scale.setScalar(.9 * n); m.shadow.position.set(X, VZ0 + r3Level(f) - (f.alt || 0) + .02, Z);
+    m.shadow.scale.setScalar(.9 * n); m.shadow.position.set(X, (MAP.vox ? r3Z(f) : VZ0 + r3Level(f) - (f.alt || 0)) + .02, Z);
     m.ghost.position.copy(m.body.position); m.ghost.rotation.copy(m.body.rotation);
     out.push({k, f, X, Y: z, Z, h, n, boss});
   });
@@ -296,10 +321,14 @@ R3.cellAt = function(e){
   const o = R3.ray.ray.origin, d = R3.ray.ray.direction, vh = r3Voxel(o, d, 1e9), hb = he || hits[0];
   if (hb && (hb === he || !vh || hb.distance <= vh.t)){ const f = fr.f[hb.object.userData.k]; R3.hit = {x: f.x, y: f.y, top: r3Z(f)}; return {x: f.x, y: f.y}; }
   if (!vh){ R3.hit = null; return null; }
-  const inObj = G.mode === 'attack' && isObjCell(vh.x, vh.y);   // удар по объекту — сама клетка стены, иначе — куб перед гранью
+  // удар по объекту — сама клетка стены (в режиме кубов — любой разрушимый блок: копать действием), иначе — куб перед гранью
+  const vm = R3.vox[vIdx(vh.x, vh.y, vh.z)], inObj = G.mode === 'attack' && (MAP.vox ? vm !== VM.PITF && vm !== VM.WATER && vm !== VM.LAVA && vm !== VM.ACID : isObjCell(vh.x, vh.y));
   const x = inObj ? vh.x : vh.x + vh.nx, y = inObj ? vh.y : vh.y + vh.ny;
   R3.hit = {x, y, top: inObj ? vh.z + 1 : vh.z + vh.nz};
-  return {x, y};
+  const c = {x, y};
+  if (MAP.vox && inObj) c.oz = vh.z;               // какой блок бить
+  else if (MAP.vox && vh.nz === 1) c.z = vh.z + 1;  // щёлкнули по верху блока: идти именно на эту высоту (тоннель или крыша)
+  return c;
 };
 function r3Voxel(o, d, maxT){
   // клетка луча в координатах карты: X -> x, Z -> y, Y -> z
@@ -412,7 +441,7 @@ R3.draw = function(now, t, tt){
   const fr = FR[curIdx]; if (!fr) return;
   const W = cvW(), H = cvH(), dp = R3.ren.getPixelRatio();
   if (R3.cv.width !== Math.round(W * dp) || R3.cv.height !== Math.round(H * dp)) R3.ren.setSize(W, H, false);
-  R3.syncDyn(fr); R3.syncFog();
+  R3.syncDyn(fr); R3.syncVox(); R3.syncFog();
   R3.U.uGrid.value = G.req && !G.busy && !G.over ? 1 : 0;   // сетка 5 фт — в свой ход
   const list = R3.syncFighters(fr, t);
   R3.camUpdate(list);

@@ -322,7 +322,7 @@ bool applyPrim0(World& w, int idx, TurnState& ts, const Prim& p, bool check, std
         case PR_MOVE: {
             if (check) {
                 if (p.x < 0 || p.y < 0 || p.x >= w.aw || p.y >= w.ah) return no("Туда нельзя: это за пределами арены.");
-                if (w.wall[p.y][p.x] || w.pit[p.y][p.x]) return no("Клетка непроходима (стена или ущелье).");
+                if (!w.vx && (w.wall[p.y][p.x] || w.pit[p.y][p.x])) return no("Клетка непроходима (стена или ущелье).");   // режим кубов: решает путь по кубам
                 if (ts.speed < 5) return no("Движения не осталось.");
                 // опутан, схвачен или парализован посреди хода (реакция, ловушка): бюджет хода уже выдан, но скорость — 0
                 if (speedOf(me) <= 0) return no("Вы не можете двигаться: опутаны, схвачены или парализованы.");
@@ -339,7 +339,7 @@ bool applyPrim0(World& w, int idx, TurnState& ts, const Prim& p, bool check, std
                 }
                 // каждое решение что-то тратит: шаг, который никуда не ведёт (своя клетка, путь сразу упирается во врага
                 // или не хватает скорости на первую клетку), не тратит скорость — его нет
-                if (p.x == me.x && p.y == me.y) return no("Вы уже стоите в этой клетке.");
+                if (p.x == me.x && p.y == me.y && !(w.vx && g_vxTz >= 0 && g_vxTz != me.z)) return no("Вы уже стоите в этой клетке.");   // режим кубов: вверх-вниз в своей клетке — можно
                 std::vector<PStep> path;
                 pathTo(w, me, p.x, p.y, path);
                 const int budget = p.a >= 0 ? std::min(ts.speed, p.a) : ts.speed;
@@ -348,7 +348,7 @@ bool applyPrim0(World& w, int idx, TurnState& ts, const Prim& p, bool check, std
                     const Fighter& g = w.f[i];
                     if (g.team != me.team && touchesAt(w, me, path[0].first, path[0].second, path[0].l, g) && isKnown(w, me.team, (int)i)) knownFoe = true;
                 }
-                if (path.empty() || knownFoe || stepCostL(w, me, me.x, me.y, me.up, path[0].first, path[0].second, path[0].l) > budget)
+                if (path.empty() || knownFoe || stepCostL(w, me, me.x, me.y, fL(w, me), path[0].first, path[0].second, path[0].l) > budget)
                     return no("Туда не сдвинуться: путь закрыт или не хватает скорости на первый шаг.");
             }
             const int budget = p.a >= 0 ? std::min(ts.speed, p.a) : ts.speed;
@@ -442,7 +442,7 @@ bool applyPrim0(World& w, int idx, TurnState& ts, const Prim& p, bool check, std
                 if (s.jump) ts.speed = std::max(0, ts.speed - distFC(w, me, p.x, p.y));   // прыжок (пакет атомов 2) — за движение
                 me.x = p.x;
                 me.y = p.y;
-                me.up = !nodeOK(w, me, me.x, me.y, 0) && w.deck[me.y][me.x] > 0;
+                if (!w.vx) me.up = !nodeOK(w, me, me.x, me.y, 0) && w.deck[me.y][me.x] > 0;
                 hazardHit(w, me);
                 paySpec(w, me, p.a, false);
                 g_act.type = "teleport";

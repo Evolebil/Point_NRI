@@ -13,7 +13,9 @@ struct Fighter {
     int hp = 1, maxHp = 1;
     int hazTurn = -1;   // номер хода (g_turnSerial), когда его уже задела опасная зона
     bool up = false;    // стоит на втором ярусе (мост, балкон, навес)
-    int alt = 0;        // высота полёта над землёй (настилом), уровней по 10 фт (v21)
+    int alt = 0;        // высота полёта над землёй (настилом), уровней по 5 фт (v21)
+    int z = 0;          // режим кубов (этап 1б): куб, где ноги (ярус up и высота alt тогда не используются)
+    int zCol = -1;      // режим кубов: клетка (y·W + x), где z проверен; другая — боец перенесён (толчок, телепорт)
     int lairLast = 0;   // прошлое действие логова (1 обвал, 2 трясина): подряд одно и то же нельзя
     // превращение (v21): в облике — тело шаблона со своим запасом хитов; свой облик (Boss) и хиты ждут возврата
     bool inForm = false;
@@ -126,6 +128,7 @@ thread_local long long g_castAtom[2][AT_N] = {};
 
 constexpr int MAXT = 64;   // команд в бою — технический предохранитель (v21: ограничения нет, только он)
 thread_local unsigned g_mapSerial = 0;   // версии карт (World::mapVer) — общие для потока, чтобы не совпадали у разных боёв
+struct VoxWorld;   // объёмный мир (vox.h): в режиме кубов путь, шаг и обзор идут по нему
 struct World {
     // diff — труднопроходимая местность, dark — тьма
     bool wall[W][W] = {};
@@ -170,7 +173,22 @@ struct World {
     // убитых врагов на счету команды (очки, если бой дошёл до предела раундов)
     int nTeams = 2, nLead = 2;
     mutable int kills[MAXT] = {};
+    VoxWorld* vx = nullptr;   // режим кубов (этап 1б, бой по ?3d=1): мир из кубов; nullptr — прежний бой по слоям
 };
+// Режим кубов (этап 1б): узел пути — (x, y, z), где z — куб ног; в функциях с ярусом l он передаётся вместо яруса.
+// Определения — в vox.h; прежний бой (w.vx == nullptr) их не вызывает.
+constexpr int VZ0 = 2;   // кубов под уровнем 0 карты: дно ущелья (как в клиенте web/js/55_render3d.js)
+inline bool vxStand(const World& w, const Fighter& f, int x, int y, int z);
+inline bool vxStep(const World& w, const Fighter& f, int x, int y, int z, int nx, int ny, int nz);
+inline int vxStepCost(const World& w, const Fighter& f, int x, int y, int z, int nx, int ny, int nz);
+inline int vxTopZ(const World& w, int x, int y);
+bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1);
+struct PStep;
+void vxPathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PStep>& path);
+inline void vxDig(World& w, Fighter& f);
+thread_local int g_vxTz = -1;   // режим кубов: куб, в который игрок щёлкнул (цель пути по высоте), −1 — любой в клетке
+// ярус бойца для функций с узлом (x, y, l): прежний бой — 0/1 (земля/настил), режим кубов — z
+inline int fL(const World& w, const Fighter& f) { return w.vx ? f.z : (f.up ? 1 : 0); }
 // ---- объекты и высота (v21, местность) ----
 // Уровень клетки — в единицах по 5 фт (ветка 3d; было 10 фт): земля (height) плюс вершина дерева, если существо на нём.
 // Расстояние между клетками — трёхмерное, как в PHB: 5 фт × наибольшее из смещений по x, y и высоте (уровень = клетка).
@@ -195,21 +213,21 @@ constexpr HazKind HAZ[] = {{"", 0, 0, true, false},
                            {"ядовитый дым", DT_POISON, CON, false, true}, {"ледяное поле", DT_COLD, CON, true, false},
                            {"грозовое поле", DT_LIGHTNING, DEX, false, false}, {"некротический туман", DT_NECROTIC, CON, false, true}};
 constexpr int HAZ_N = 7, HAZ_UP = 4;   // облако зоны — 20 фт над землёй
-inline int zAt(const World& w, int x, int y) { return w.height[y][x] + w.tree[y][x]; }
+inline int zAt(const World& w, int x, int y) { return w.vx ? vxTopZ(w, x, y) - VZ0 : w.height[y][x] + w.tree[y][x]; }
 // Второй ярус (2.5D): в клетке земля (height, дерево) и, если есть, верхний настил deck. Под настилом пройти можно,
 // если хватает высоты по росту (bodyZ: до среднего — 10 фт, большой — 20, огромный — 30, громадный — 40); настил, на
 // который не забраться, — просто потолок. Шаг между узлами (клетка, ярус): перепад до 10 фт — подъём (+5 фт за 10 фт),
 // больше — обрыв: только по лестнице, на дерево и с него, летуну — под открытым небом (не под настилом).
 constexpr int DECK_HP = 40;
 inline int sizeLv(const Fighter& f) { return f.b.size <= 2 ? 1 : f.b.size - 1; }
-inline int nodeZ(const World& w, int x, int y, int l) { return l ? w.deck[y][x] : zAt(w, x, y); }
-inline int zF(const World& w, const Fighter& f) { return nodeZ(w, f.x, f.y, f.up ? 1 : 0) + f.alt; }
+inline int nodeZ(const World& w, int x, int y, int l) { return w.vx ? l - VZ0 : (l ? w.deck[y][x] : zAt(w, x, y)); }
+inline int zF(const World& w, const Fighter& f) { return w.vx ? f.z - VZ0 : nodeZ(w, f.x, f.y, f.up ? 1 : 0) + f.alt; }
 // Высота полёта (v21): летун висит на alt уровней (по 5 фт) над землёй или настилом под собой — до ALT_MAX (60 фт), а под
 // настилом (потолком) — пока помещается по росту. Подняться или опуститься на уровень — 5 фт движения.
 constexpr int ALT_MAX = 12;
 inline bool canStayAloft(const Fighter& f);   // держится в воздухе (ниже)
 inline int maxAltAt(const World& w, const Fighter& f, int x, int y, int l) {
-    if (!f.b.fly) return 0;
+    if (!f.b.fly || w.vx) return 0;   // режим кубов: летун летит в узлы-кубы, высоты над землёй нет
     int m = ALT_MAX;
     const int n = sizeLv(f) > 1 ? sizeLv(f) : 1;
     for (int dy = 0; dy < n; dy++)
@@ -291,15 +309,17 @@ inline unsigned char fitInfo(const World& w, const Fighter& f, int x, int y, int
     return fitV[k] = (unsigned char)(m | (rough ? 8 : 0));
 }
 inline bool nodeOK(const World& w, const Fighter& f, int x, int y, int l) {
+    if (w.vx) return vxStand(w, f, x, y, l);
     return fpFull(f) == 1 ? nodeOK1(w, f, x, y, l) : (fitInfo(w, f, x, y, l) & 7) != 0;
 }
 // квадрат f, стоящего в узле: полный или (протиснулся) на размер меньше
 inline int fpAt(const World& w, const Fighter& f, int x, int y, int l) {
-    if (fpFull(f) == 1) return 1;
+    if (fpFull(f) == 1 || w.vx) return fpFull(f);   // режим кубов: без протискивания (этап 2)
     const int m = fitInfo(w, f, x, y, l) & 7;
     return m ? m : fpFull(f);
 }
 inline bool stepOK(const World& w, const Fighter& f, int x, int y, int l, int nx, int ny, int nl) {
+    if (w.vx) return vxStep(w, f, x, y, l, nx, ny, nl);
     if (!nodeOK(w, f, nx, ny, nl)) return false;
     // летун в воздухе держит высоту (zF — его высота сейчас): выше крыши — летит по крыше, а не ныряет под неё
     // (залететь внутрь — сначала снизиться); с крыши — в открытое небо
@@ -377,6 +397,7 @@ inline int distFC(const World& w, const Fighter& f, int x, int y) { return distF
 // Настил закрывает обзор сквозь себя: линия, пересекающая его уровень над этой клеткой (в том числе над своей и над клеткой
 // цели — стоящий под мостом не видит стоящего на нём), закрыта
 bool losZ(const World& w, int x0, int y0, int z0, int x1, int y1, int z1) {
+    if (w.vx) return vxLos(w, x0, y0, z0 + VZ0, x1, y1, z1 + VZ0);   // режим кубов: луч по кубам (z — уровни, куб ног = z + VZ0)
     int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx - dy,
         x = x0, y = y0;
     const double za = z0 + 1.0, zb = z1 + 1.0;   // глаза — на 5 фт выше ног
@@ -473,7 +494,7 @@ inline bool touchesAt(const World& w, const Fighter& f, int x, int y, int l, con
 // квадрат f, поставленный в (x, y), задевает чужой
 bool blockedAt(const World& w, const Fighter& f, int x, int y) {
     for (auto& g : w.f)
-        if (touchesAt(w, f, x, y, f.up ? 1 : 0, g)) return true;
+        if (touchesAt(w, f, x, y, fL(w, f), g)) return true;
     return false;
 }
 // все клетки квадрата f в (x, y) удовлетворяют ok(cx, cy) (и лежат на арене)
@@ -490,12 +511,28 @@ inline bool fpAll(const World& w, const Fighter& f, int x, int y, P&& ok) {
 // чужой квадрат, задетый квадратом f в (x, y) (для удара при столкновении); nullptr — нет
 Fighter* blockerAt(World& w, const Fighter& f, int x, int y) {
     for (auto& g : w.f)
-        if (touchesAt(w, f, x, y, f.up ? 1 : 0, g)) return &g;
+        if (touchesAt(w, f, x, y, fL(w, f), g)) return &g;
     return nullptr;
 }
 // не заканчивать ход в занятой клетке
 void nudge(const World& w, Fighter& f) {
     if (!blockedAt(w, f, f.x, f.y)) return;
+    if (w.vx) {   // режим кубов: ближайшая свободная клетка, где можно стоять — на её верхней опоре
+        for (int r = 1; r < 14; r++)
+            for (int dy = -r; dy <= r; dy++)
+                for (int dx = -r; dx <= r; dx++) {
+                    const int nx = f.x + dx, ny = f.y + dy;
+                    if (nx < 0 || ny < 0 || nx >= w.aw || ny >= w.ah) continue;
+                    const int nz = vxTopZ(w, nx, ny);
+                    if (!vxStand(w, f, nx, ny, nz) || blockedAt(w, f, nx, ny)) continue;
+                    f.x = nx;
+                    f.y = ny;
+                    f.z = nz;
+                    f.zCol = ny * W + nx;
+                    return;
+                }
+        return;
+    }
     for (int r = 1; r < 14; r++)
         for (int dy = -r; dy <= r; dy++)
             for (int dx = -r; dx <= r; dx++) {
@@ -522,6 +559,7 @@ thread_local int g_recIdx = -1;
 void recordMove(int idx, int x, int y, int budget);
 // цена шага в клетку (x, y) из (fx, fy): лазалка и труднопроходимая местность 10 фт, подъём +5 фт за уровень
 static int stepCostL(const World& w, const Fighter& f, int fx, int fy, int fl, int x, int y, int l) {
+    if (w.vx) return vxStepCost(w, f, fx, fy, fl, x, y, l);
     int cost = 5;
     if (!f.b.fly) {
         // лазалка или труднопроходимая местность хоть под одной клеткой квадрата
@@ -535,7 +573,7 @@ static int stepCostL(const World& w, const Fighter& f, int fx, int fy, int fl, i
     if (!l && w.door[y][x] == 1) cost += 5;   // закрытую дверь по пути открывают (взаимодействие с предметом)
     return cost;
 }
-static int stepCost(const World& w, const Fighter& f, int fx, int fy, int x, int y) { return stepCostL(w, f, fx, fy, f.up, x, y, f.up); }
+static int stepCost(const World& w, const Fighter& f, int fx, int fy, int x, int y) { return stepCostL(w, f, fx, fy, fL(w, f), x, y, fL(w, f)); }
 bool isKnown(const World& w, int team, int i);
 void revealTo(World& w, int team, int i);
 // путь f к клетке (tx, ty) — кратчайший по цене шага (лазалка, трудная местность, подъём), в обход стен, ущелий и
@@ -628,6 +666,7 @@ static void pathTree(const World& w, const Fighter& f, PathTree& T) {
 }
 static void pathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PStep>& path) {
     path.clear();
+    if (w.vx) { vxPathTo(w, f, tx, ty, path); return; }   // режим кубов: Дейкстра по узлам-кубам
     if (f.x == tx && f.y == ty) return;
     if (g_straight && fpFull(f) == 1 && tx >= 0 && ty >= 0 && tx < w.aw && ty < w.ah) {   // ход игрока: путь из дерева
         static thread_local PathTree T;
@@ -721,13 +760,13 @@ static void pathTo(const World& w, const Fighter& f, int tx, int ty, std::vector
 }
 static bool enemyAt(const World& w, const Fighter& f, int x, int y) {
     for (auto& g : w.f)
-        if (g.team != f.team && touchesAt(w, f, x, y, f.up ? 1 : 0, g)) return true;
+        if (g.team != f.team && touchesAt(w, f, x, y, fL(w, f), g)) return true;
     return false;
 }
 // Куда дойдёт f, если идёт к t, пока не окажется в desiredFt от него (и, если needLos, не увидит его), не дальше speed фт:
 // без провоцированных атак и реакций (их учитывает moveToCell). enterTarget — можно встать в саму клетку цели.
 std::pair<int, int> planStop(const World& w, const Fighter& f, const Fighter& t, int desiredFt, int speed, bool needLos, bool enterTarget) {
-    int px = f.x, py = f.y, pl = f.up;
+    int px = f.x, py = f.y, pl = fL(w, f);
     const int tz = zF(w, t);
     const int fn = fpN(f), tn = fpN(t);
     auto inPos = [&]() { return distFP(px, py, nodeZ(w, px, py, pl) + f.alt, fn, t.x, t.y, tz, tn) <= desiredFt && (!needLos || losFP(w, px, py, nodeZ(w, px, py, pl) + f.alt, fn, t.x, t.y, tz, tn)); };
@@ -760,12 +799,12 @@ static int nearestKnownFoe(const World& w, const Fighter& f) {
 int moveToCell(World& w, Fighter& f, int cx, int cy, int speed) {
     const int fi = (int)(&f - &w.f[0]);
     recordMove(fi, cx, cy, speed);
-    if (speed <= 0 || (f.x == cx && f.y == cy)) return 0;
+    if (speed <= 0 || (f.x == cx && f.y == cy && !(w.vx && g_vxTz >= 0 && g_vxTz != f.z))) return 0;   // режим кубов: вверх-вниз в своей клетке
     std::vector<PStep> path;
     pathTo(w, f, cx, cy, path);
     int left = speed;
     for (auto& c : path) {
-        const int cost = stepCostL(w, f, f.x, f.y, f.up, c.first, c.second, c.l);
+        const int cost = stepCostL(w, f, f.x, f.y, fL(w, f), c.first, c.second, c.l);
         if (left < cost) break;
         if (enemyAt(w, f, c.first, c.second)) {
             // упёрся в невидимого (неизвестного) врага: он становится известен команде, попытка стоит 5 фт
@@ -806,12 +845,20 @@ int moveToCell(World& w, Fighter& f, int cx, int cy, int speed) {
         const int fx0 = f.x, fy0 = f.y, fz0 = zF(w, f), up0 = f.up;
         const bool useMe = fi >= 0 && fi < 2;
         const int dBefore = useMe ? nearestKnownFoe(w, f) : 0;
+        if (w.vx) {   // режим кубов: узел — куб ног; копатель оставляет за собой ход (куб → воздух)
+            f.x = c.first;
+            f.y = c.second;
+            f.z = c.l;
+            f.zCol = f.y * W + f.x;
+            vxDig(w, f);
+        } else {
         if (!c.l && w.door[c.second][c.first] == 1) setDoor(w, c.first, c.second, 2);   // открыл дверь по пути
         f.x = c.first;
         f.y = c.second;
         f.up = c.l;
         if (f.b.fly && f.up != up0) f.alt = std::max(0, fz0 - nodeZ(w, f.x, f.y, f.up));   // летун сел на крышу или слетел с неё — та же высота
         f.alt = std::min(f.alt, maxAltAt(w, f, f.x, f.y, f.up));   // под настилом — ниже (бесплатно)
+        }
         left -= cost;
         hazardHit(w, f);
         if (f.hp <= 0) return speed - left;

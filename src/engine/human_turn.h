@@ -139,9 +139,9 @@ static std::string humanRequest(World& w, int idx, const TurnState& ts, const st
                 fd = false;
             }
     o += "]";
-    if (me.b.fly)   // летун: высота (уровни по 10 фт), потолок над ним, может ли сейчас держаться в воздухе
+    if (me.b.fly && !w.vx)   // летун: высота (уровни по 5 фт; режим кубов — летит ходом в куб), потолок над ним, может ли сейчас держаться в воздухе
         o += ",\"fly\":{\"alt\":" + std::to_string(me.alt) + ",\"max\":" + std::to_string(maxAltAt(w, me, me.x, me.y, me.up)) + ",\"can\":" + (canStayAloft(me) ? "1" : "0") + "}";
-    if (fpFull(me) == 1) o += pathTreeJson(w, me);   // пути под мышью
+    if (fpFull(me) == 1 && !w.vx) o += pathTreeJson(w, me);   // пути под мышью (режим кубов — пока без них)
     o += ",\"vis\":\"" + visMask(w, me.team) + "\",\"visW\":" + std::to_string(w.aw) + ",\"visH\":" + std::to_string(w.ah);   // туман войны на карте
     o += ",\"enemies\":[";
     bool first = true;
@@ -179,10 +179,12 @@ static void humanTurn(World& w, int idx) {
         const std::string c = ok ? cmd["c"].str() : "end";
         if (c == "end" || c.empty()) break;
         Prim p;
+        g_vxTz = -1;   // цель по высоте — только у этой команды хода (ошибка разбора не должна оставить её боту)
         if (c == "move") {
             p.kind = PR_MOVE;
             p.x = cmd["x"].num(-1);
             p.y = cmd["y"].num(-1);
+            g_vxTz = w.vx ? cmd["z"].num(-1) : -1;   // режим кубов: куб, в который щёлкнули (тоннель или крыша над ним)
             bool friendHere = false;
             for (auto& g : w.f)
                 if (g.hp > 0 && fpOverlap(g.x, g.y, fpN(g), p.x, p.y, fpN(me)) && &g != &me && g.team == me.team) friendHere = true;
@@ -231,6 +233,36 @@ static void humanTurn(World& w, int idx) {
             const char* why = nullptr;
             if (me.b.wN <= 0 || me.disarmed) { msg = "Нечем бить: нет оружия."; continue; }
             if (!cont && !canPay(me, ts, ab.cost, &why)) { msg = why ? why : "Нет действия."; continue; }
+            if (w.vx) {   // режим кубов: любой разрушимый куб (стена, дерево, земля — копать действием), КД и хиты — у материала
+                const int z = cmd["z"].num(-1);
+                VoxWorld& v = *w.vx;
+                if (!v.in(x, y, z) || MAT[v.at(x, y, z)].hp <= 0) { msg = "Этот блок не разрушить (или его нет)."; continue; }
+                const int h = bodyZ(sizeLv(me)), dz = std::max({0, z - (me.z + h - 1), me.z - z});
+                if (5 * std::max({fpGap(me.x, fpN(me), x, 1), fpGap(me.y, fpN(me), y, 1), dz}) > atkDist(me.b)) { msg = "Блок дальше дальности оружия."; continue; }
+                const int r = rollD20(), ac = v.acAt(x, y, z);
+                const bool crit = r == 20, hit = crit || (r != 1 && r + me.wAtk() >= ac);
+                g_act = ActInfo{};
+                g_act.type = "attack-object";
+                g_act.gx = x;
+                g_act.gy = y;
+                if (cont) ts.atkLeft--;
+                else {
+                    payEcon(ts, me, ab.cost.econ);
+                    ts.atkLeft = std::max(0, me.b.wAtt - 1);
+                }
+                ts.spent = ts.lastWasAttack = true;
+                me.hidden = false;
+                if (!hit) msg = "Промах по блоку (КД " + std::to_string(ac) + ").";
+                else {
+                    const int dmg = std::max(1, rollDice(me.b.wN * (crit ? 2 : 1), wDie(me.b)) + me.wMod());
+                    const std::string name = MAT[v.at(x, y, z)].name;
+                    const int res = damageVox(v, x, y, z, dmg, me.b.wType);
+                    if (res == 2) vxAfterBreak(w, x, y);
+                    msg = res == 2 ? "Блок «" + name + "» разрушен." : (res == 1 ? "Попали: −" + std::to_string(dmg) + ", у блока «" + name + "» осталось " + std::to_string(v.hpAt(x, y, z)) + " хитов." : "Такой урон блоку не вредит.");
+                }
+                if (g_human.emit) g_human.emit(g_curRound, idx, 0);
+                continue;
+            }
             if (!isObject(w, x, y) || w.ohp[y][x] <= 0) { msg = "В этой клетке нечего ломать (или объект неразрушим)."; continue; }
             // до объекта — до ближайшей его точки по высоте: дерево и стена стоят от земли клетки до верха (а не только верхушка)
             const int gz = w.height[y][x], top = gz + (w.tree[y][x] ? w.tree[y][x] : (w.wall[y][x] ? WALL_UP : 0)), mz = zF(w, me);
@@ -262,6 +294,7 @@ static void humanTurn(World& w, int idx) {
         g_straight = p.kind == PR_MOVE;   // путь игрока — по прямой из дерева путей (то же, что показано под мышью)
         const bool applied = applyPrim(w, idx, ts, p, true, &msg);
         g_straight = false;
+        g_vxTz = -1;
         if (!applied) continue;
         switch (p.kind) {
             case PR_MOVE:

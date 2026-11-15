@@ -440,7 +440,7 @@ void pullToward(World& w, Fighter& src, Fighter& t, int ft) {
         if (fpGap(t.x, fpN(t), src.x, fpN(src)) <= 1 && fpGap(t.y, fpN(t), src.y, fpN(src)) <= 1) break;
         const int nx = t.x + ((src.x > t.x) - (src.x < t.x)), ny = t.y + ((src.y > t.y) - (src.y < t.y));
         if (!fpAll(w, t, nx, ny, [&](int cx, int cy) { return !w.wall[cy][cx] && w.door[cy][cx] != 1 && !w.pit[cy][cx] && !w.tree[cy][cx]; }) || blockedAt(w, t, nx, ny)) break;
-        if (!stepOK(w, t, t.x, t.y, t.up, nx, ny, t.up)) break;   // по своему ярусу, без обрывов
+        if (!stepOK(w, t, t.x, t.y, fL(w, t), nx, ny, fL(w, t))) break;   // по своему ярусу, без обрывов
         t.x = nx;
         t.y = ny;
     }
@@ -613,6 +613,7 @@ void setDoor(World& w, int x, int y, int st) {
         if (w.dyn[i][0] == x && w.dyn[i][1] == y && (w.dyn[i][2] == 6 || w.dyn[i][2] == 7)) w.dyn.erase(w.dyn.begin() + i);
         else i++;
     dynAdd(w, x, y, st == 2 ? 6 : 7, -1);
+    vxResync(w, x, y);   // режим кубов: дверь — кубы проёма
     evPush(std::string("{\"k\":\"door\",\"x\":") + std::to_string(x) + ",\"y\":" + std::to_string(y) + ",\"open\":" + (st == 2 ? "1" : "0") + "}");
 }
 int placeWall(World& w, const Fighter& me, int cx, int cy, int n, int rounds) {
@@ -627,6 +628,7 @@ int placeWall(World& w, const Fighter& me, int cx, int cy, int n, int rounds) {
         const int x = cx + px * i, y = cy + py * i;
         if (x < 0 || y < 0 || x >= w.aw || y >= w.ah || w.wall[y][x] || w.pit[y][x] || occupied(w, x, y, nullptr)) continue;
         w.wall[y][x] = true;
+        vxResync(w, x, y);   // режим кубов: стена способности — кубы барьера
         w.mapVer = ++g_mapSerial;
         dynAdd(w, x, y, 1, rounds + 1);
         placed++;
@@ -639,7 +641,9 @@ void expireDyn(World& w) {
         auto& d = w.dyn[i];
         if (d[3] > 0 && --d[3] == 0) {
             if (d[2] == 1) w.wall[d[1]][d[0]] = false, w.mapVer = ++g_mapSerial;
+            const int ex = d[0], ey = d[1];
             w.dyn.erase(w.dyn.begin() + i);
+            vxResync(w, ex, ey);   // режим кубов: барьер исчез
         } else
             i++;
     }
@@ -652,6 +656,7 @@ bool hitObject(World& w, int x, int y, int dmg, int dtype) {
     if (w.door[y][x]) {   // выбитая дверь: пустой проём
         w.door[y][x] = 0;
         dynAdd(w, x, y, 8, -1);
+        vxResync(w, x, y);
         evPush("{\"k\":\"break\",\"x\":" + std::to_string(x) + ",\"y\":" + std::to_string(y) + "}");
         return true;
     }
@@ -659,6 +664,7 @@ bool hitObject(World& w, int x, int y, int dmg, int dtype) {
     w.mapVer = ++g_mapSerial;
     w.diff[y][x] = true, w.mapVer = ++g_mapSerial;
     dynAdd(w, x, y, 4, -1);
+    vxResync(w, x, y);   // режим кубов: обломки вместо объекта
     evPush("{\"k\":\"break\",\"x\":" + std::to_string(x) + ",\"y\":" + std::to_string(y) + "}");
     return true;
 }
@@ -672,6 +678,7 @@ bool hitDeck(World& w, int x, int y, int dmg, int dtype) {
     w.deck[y][x] = 0;
     w.mapVer = ++g_mapSerial;
     dynAdd(w, x, y, 5, -1);
+    vxResync(w, x, y);   // режим кубов: настила больше нет
     evPush("{\"k\":\"collapse\",\"x\":" + std::to_string(x) + ",\"y\":" + std::to_string(y) + "}");
     for (auto& f : w.f) {
         if (f.hp <= 0 || f.x != x || f.y != y) continue;
@@ -1053,7 +1060,7 @@ bool tryReact(World& w, int meIdx, int trig, int srcIdx, int prevDist) {
         if (tx >= 0) {
             me.x = tx;
             me.y = ty;
-            me.up = !nodeOK(w, me, me.x, me.y, 0) && w.deck[me.y][me.x] > 0;
+            if (!w.vx) me.up = !nodeOK(w, me, me.x, me.y, 0) && w.deck[me.y][me.x] > 0;   // режим кубов: высоту ставит vxFixAll
             hazardHit(w, me);
             paySpec(w, me, (int)k, false);
         } else
@@ -1118,6 +1125,36 @@ int speedOf(const Fighter& f);
 // парализован. Иначе падает: 1к6 дробящего за каждые 10 фт высоты (fallDice), сбит с ног
 inline bool canStayAloft(const Fighter& f) {
     return f.b.fly && !f.cond[C_PRONE] && !f.cond[C_RESTR] && !f.cond[C_GRAPPLE] && !f.cond[C_STUN] && !f.cond[C_PARAL] && f.hp > 0;
+}
+// Режим кубов (этап 1б): после действия каждый боец — на опоре. Перенесённый в другую клетку (толчок, телепорт, призыв),
+// если там, где он оказался, стоять нельзя, встаёт на верхнюю опору клетки; в своей клетке без опоры (пол разрушен, полёт
+// сбит) — падает до опоры: 1к6 за 10 фт, с 10 фт и выше — сбит с ног
+void vxFixAll(World& w) {
+    if (!w.vx) return;
+    for (size_t i = 0; i < w.f.size(); i++) {
+        Fighter& f = w.f[i];
+        const int col = f.y * W + f.x;
+        auto snapTop = [&]() {   // на верхнюю опору квадрата
+            int top = 1;
+            for (int dy = 0; dy < fpFull(f); dy++)
+                for (int dx = 0; dx < fpFull(f); dx++) top = std::max(top, vxTopZ(w, std::min(w.aw - 1, f.x + dx), std::min(w.ah - 1, f.y + dy)));
+            f.z = top;
+        };
+        if (f.zCol != col || !vxBodyFree(w, f, f.x, f.y, f.z)) {   // перенесён или застрял в твёрдом — встаёт наверх, без падения
+            if (!vxStand(w, f, f.x, f.y, f.z)) snapTop();
+            f.zCol = col;
+            continue;
+        }
+        const int z0 = f.z;
+        const bool aloft = f.b.fly && canStayAloft(f);
+        while (f.z > 1 && !vxStandEx(w, f, f.x, f.y, f.z, aloft) && vxBodyFree(w, f, f.x, f.y, f.z - 1)) f.z--;
+        const int drop = z0 - f.z;
+        if (drop <= 0 || f.hp <= 0) continue;
+        const int hp0 = f.hp;
+        if (fallDice(drop) > 0) hurt(f, rollDice(fallDice(drop), 6), DT_BLUDGEONING, false);
+        if (drop >= 2 && f.hp > 0) f.cond[C_PRONE] = std::max(f.cond[C_PRONE], 1);
+        evPush("{\"k\":\"fall\",\"who\":" + std::to_string((int)i) + ",\"ft\":" + std::to_string(5 * drop) + ",\"dmg\":" + std::to_string(hp0 - f.hp) + "}");
+    }
 }
 void fallCheck(Fighter& f) {
     if (f.alt <= 0 || canStayAloft(f)) return;
@@ -1187,6 +1224,8 @@ void summonFrom(World& w, int idx, int si) {
         g.x = me.x;
         g.y = me.y;
         g.up = me.up;
+        g.z = me.z;   // режим кубов: рядом с призывателем (nudge — на опору свободной клетки)
+        g.zCol = g.y * W + g.x;
         g.fresh = true;
         g.ai.seed(rng.next());
         // миньон действует сразу после своего босса

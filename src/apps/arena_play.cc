@@ -166,7 +166,8 @@ int main() {
             const Boss& B = side == 0 ? opp : me;
             const std::string myName = cmd["char"]["name"].str("Безымянный");
             // мозг соперника: нейросеть-боец (если веса загружены) или правило-бот по его ИНТ
-            const bool netBrain = cmd["opp"]["brain"].str("net") == "net" && anyFighterNet();
+            g_voxMode = cmd["vox"].flag(false);   // режим кубов (3D, этап 1б): против игрока — правило-бот (сеть переобучается позже, ТЗ №12)
+            const bool netBrain = !g_voxMode && cmd["opp"]["brain"].str("net") == "net" && anyFighterNet();
             g_forceNetMask = netBrain ? (1 << (1 - side)) : 0;
             const std::string enemyBrain = netBrain ? "нейросеть-боец (GRU)" : "правило-бот";
             std::vector<std::string> frames;
@@ -280,6 +281,7 @@ int main() {
             };
             g_human.seats = seat;
             g_human.multi = true;
+            g_voxMode = false;   // бой комнаты — пока по слоям (режим кубов — только одиночный бой по ?3d=1)
             g_human.idx = -1;
             for (size_t i = 0; i < seat.size(); i++)
                 if (seat[i] >= 0 && g_human.idx < 0) g_human.idx = (int)i;

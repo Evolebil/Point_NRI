@@ -173,3 +173,91 @@
           fmt("перевод %d, таблица %d, разреженно %d, разрушение %d, неразрушимое и яд %d, номера %d, много ударов %d (в списке %d)",
               conv, table, sparse, kill, immune, uniq, many, (int)v.dmg.size()));
     }
+    // T218: режим кубов (этап 1б): шаг и путь по узлам-кубам (уступ 10 фт — да, 15 — обрыв), обзор лучом (стена закрывает,
+    // листва — нет), копатель роет ход сквозь землю, разбить блок действием (стена кончилась — нет и в слоях), падение при
+    // разрушенном поле (1к6 за 10 фт), летун — вверх по кубу, застрявший в твёрдом встаёт наверх без урона
+    if (TB()) {
+        static World w;
+        std::memset(w.wall, 0, sizeof w.wall);
+        std::memset(w.strong, 0, sizeof w.strong);
+        std::memset(w.climb, 0, sizeof w.climb);
+        std::memset(w.tree, 0, sizeof w.tree);
+        std::memset(w.water, 0, sizeof w.water);
+        std::memset(w.diff, 0, sizeof w.diff);
+        std::memset(w.height, 0, sizeof w.height);
+        std::memset(w.door, 0, sizeof w.door);
+        std::memset(w.deck, 0, sizeof w.deck);
+        std::memset(w.pit, 0, sizeof w.pit);
+        std::memset(w.haz, 0, sizeof w.haz);
+        std::memset(w.ladder, 0, sizeof w.ladder);
+        w.aw = w.ah = 20;
+        w.theme = 0;
+        w.dyn.clear();
+        w.f.clear();
+        for (int y = 0; y < 20; y++)
+            for (int x = 0; x < 20; x++) w.height[y][x] = 4;   // земля 20 фт: под ней есть где рыть
+        for (int y = 0; y < 20; y++) w.wall[y][10] = true;   // стена 30 фт через всю арену по x = 10
+        w.height[2][2] = 6;   // уступ 10 фт
+        w.height[2][4] = 7;   // уступ 15 фт рядом с ровным (3, 2)
+        const int G = VZ0 + 4;   // куб ног на ровной земле
+        w.tree[15][5] = TREE_DEF;
+        initObjects(w);
+        static VoxWorld vw;
+        voxFromWorld(vw, w);
+        w.vx = &vw;
+        g_curW = &w;
+        Boss pb = plain(100, 1, 6, 5), bb = pb, fb = pb;
+        bb.burrowS = true;
+        fb.fly = true;
+        w.f.push_back(mk(pb, 0, 1, 2));   // пеший
+        w.f.push_back(mk(pb, 1, 18, 18));   // враг за стеной
+        for (auto& f : w.f) f.zCol = -1, f.z = 0;
+        vxFixAll(w);
+        Fighter& P = w.f[0];
+        // 1. шаг: на уступ 10 фт — да (+5 фт), с ровного на 15 фт — обрыв; узел ног — верх земли
+        const bool step = P.z == G && stepOK(w, P, 1, 2, G, 2, 2, G + 2) && stepCostL(w, P, 1, 2, G, 2, 2, G + 2) == 10 &&
+                          !stepOK(w, P, 3, 2, G, 4, 2, G + 3);
+        // 2. путь пешего к врагу за стеной во всю длину — не найден: идёт к стене как можно ближе
+        std::vector<PStep> path;
+        pathTo(w, P, 18, 18, path);
+        const bool wallPath = !path.empty() && path.back().first < 10;
+        // 3. обзор: стена закрывает, сквозь листву видно, над стеной (с высоты) — видно
+        const bool losWall = !losF(w, P, w.f[1]);
+        const bool losLeaf = losZ(w, 4, 15, 6, 6, 15, 6) && losZ(w, 8, 5, 10, 12, 5, 10);   // глаза в кроне; над стеной
+        // 4. копатель: путь под стеной — роет ход (кубы земли → воздух, события vox в правках)
+        Fighter B = mk(bb, 0, 9, 5);
+        B.z = 2;   // в земле под поверхностью
+        std::vector<PStep> bp;
+        pathTo(w, B, 11, 5, bp);
+        bool under = !bp.empty() && bp.back().first == 11;
+        for (auto& c : bp) under = under && c.l < G;   // весь ход — ниже поверхности, сквозь землю под стеной
+        B.x = 10; B.y = 5; B.z = 2;
+        const size_t ed0 = vw.edits.size();
+        vxDig(w, B);
+        const bool dug = vw.at(10, 5, 2) == VX_AIR && vw.at(10, 5, 3) == VX_AIR && vw.edits.size() == ed0 + 2 && vw.at(10, 5, G) == VX_STONE;
+        // 5. разбить блок: все кубы стены в клетке (10, 0) — объекта больше нет и в слоях
+        for (int z = G; z < G + WALL_UP; z++) damageVox(vw, 10, 0, z, 1000, DT_BLUDGEONING);
+        vxAfterBreak(w, 10, 0);
+        const bool broke = !w.wall[0][10] && vw.at(10, 0, G) == VX_AIR && w.wall[1][10];
+        // 6. пол разрушен под пешим (1, 2): два куба вниз — падение на 10 фт, 1к6, сбит с ног
+        const int hp0 = P.hp;
+        damageVox(vw, 1, 2, G - 1, 1000, DT_BLUDGEONING);
+        damageVox(vw, 1, 2, G - 2, 1000, DT_BLUDGEONING);
+        vxFixAll(w);
+        const bool fell = P.z == G - 2 && P.hp < hp0 && P.hp >= hp0 - 6 && P.cond[C_PRONE] > 0;
+        // 7. летун: вверх по кубу в своей клетке; пешему — нельзя
+        Fighter Fl = mk(fb, 0, 15, 10);
+        Fl.z = G;
+        const bool flyUp = stepOK(w, Fl, 15, 10, G, 15, 10, G + 1) && !stepOK(w, w.f[1], 18, 18, G, 18, 18, G + 1);
+        // 8. застрял в стене (перенесён в ту же клетку) — встаёт на верх стены без урона
+        w.f[1].x = 10; w.f[1].y = 10; w.f[1].z = G + 1; w.f[1].zCol = 10 * W + 10;
+        const int hp1 = w.f[1].hp;
+        vxFixAll(w);
+        const bool snap = w.f[1].z == G + WALL_UP && w.f[1].hp == hp1;
+        g_curW = nullptr;
+        w.vx = nullptr;
+        T("T218", "§1б режим кубов: шаг и путь по кубам, обзор лучом, копатель роет, блок разрушается действием, падение, летун, застрявший встаёт наверх",
+          step && wallPath && losWall && losLeaf && under && dug && broke && fell && flyUp && snap,
+          fmt("шаг %d, путь у стены %d, обзор: стена %d, листва и над стеной %d, копатель под стеной %d, ход %d, блок %d, падение %d (−%d), летун %d, наверх %d",
+              step, wallPath, losWall, losLeaf, under, dug, broke, fell, hp0 - P.hp, flyUp, snap));
+    }

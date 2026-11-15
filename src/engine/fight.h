@@ -177,6 +177,12 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
     w.chaseOn = false;
     w.chaseSeen = true;
     w.chasePrey = -1;
+    w.vx = nullptr;
+    if (g_voxMode) {   // режим кубов (этап 1б): мир из кубов по карте боя; путь, шаг и обзор — по нему
+        static thread_local VoxWorld vxw;
+        voxFromWorld(vxw, w);
+        w.vx = &vxw;
+    }
     if (mapJsonOut) *mapJsonOut = mapToJson(w);
     const Boss* src[2] = {&A, &B};
     std::vector<int> px(N), py(N);
@@ -265,6 +271,10 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
         }
         w.f.push_back(f);
     }
+    if (w.vx) {   // режим кубов: бойцы — на верхней опоре своих клеток
+        for (auto& f : w.f) f.zCol = -1, f.z = 0;
+        vxFixAll(w);
+    }
     for (auto& f : w.f) fireTrig(w, f, T_INIT, nullptr);   // «событие → эффект» (v21): в начале боя
     // «действует с начала боя» (пакет атомов 1): заранее наложенные способности на себя срабатывают до первого хода,
     // без действия; применение и ячейка тратятся как обычно. Раунд — уже 0: иначе отметка «применено в раунде» бралась
@@ -308,6 +318,7 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
     g_fightInfo.theme = w.theme;
     // кадр для просмотрщика: состояние после действия участника actor
     auto emitFrame = [&](int round, int actor, int legendary) {
+        vxFixAll(w);   // режим кубов: бойцы на опорах (до записи кадра; прежний бой — без изменений)
         if (!log) {
             g_evPending.clear();
             return;
