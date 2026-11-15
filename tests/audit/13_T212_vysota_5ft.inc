@@ -104,3 +104,72 @@
           n > 50 && bad == 0 && hi - lo >= 3 && diff == 0,
           fmt("деревьев %d, высоты %d–%d фт, вне 10–40 фт %d, отличий при повторе %d", n, 5 * lo, 5 * hi, bad, diff));
     }
+    // T217: объёмный мир (этап 1б): перевод карты в кубы, хиты и КД — у материала, повреждённый куб — в разреженном списке,
+    // разрушенный — воздух и событие для кадра; неразрушимое, яд, номера кубов через границы чанков
+    if (TB()) {
+        static World w;
+        std::memset(w.wall, 0, sizeof w.wall);
+        std::memset(w.strong, 0, sizeof w.strong);
+        std::memset(w.climb, 0, sizeof w.climb);
+        std::memset(w.tree, 0, sizeof w.tree);
+        std::memset(w.water, 0, sizeof w.water);
+        std::memset(w.height, 0, sizeof w.height);
+        std::memset(w.door, 0, sizeof w.door);
+        std::memset(w.deck, 0, sizeof w.deck);
+        std::memset(w.pit, 0, sizeof w.pit);
+        std::memset(w.haz, 0, sizeof w.haz);
+        w.aw = 40;
+        w.ah = 20;
+        w.theme = 0;
+        w.dyn.clear();
+        w.wall[2][2] = true;
+        w.wall[2][3] = true;
+        w.tree[5][5] = TREE_MAX;
+        w.deck[8][8] = 6;
+        w.pit[10][10] = true;
+        w.water[12][12] = true;
+        w.height[14][14] = 3;
+        w.dyn.push_back({3, 2, 4, -1});   // стена (3, 2) разрушена — обломки
+        static VoxWorld v;
+        voxFromWorld(v, w);
+        // 1. перевод: земля, стена 30 фт, дерево 40 фт, настил на 30 фт, ущелье, вода, уступ 15 фт, обломки
+        const bool conv = v.at(0, 0, 0) == VX_BEDROCK && v.at(0, 0, VZ0 - 1) == VX_GRASS && v.at(0, 0, VZ0) == VX_AIR &&
+                          v.at(2, 2, VZ0) == VX_STONE && v.at(2, 2, VZ0 + 5) == VX_STONE && v.at(2, 2, VZ0 + 6) == VX_AIR &&
+                          v.at(5, 5, VZ0 + 5) == VX_WOOD && v.at(5, 5, VZ0 + 7) == VX_LEAF && v.at(5, 5, VZ0 + 8) == VX_AIR &&
+                          v.at(8, 8, VZ0 + 5) == VX_PLANK && v.at(8, 8, VZ0) == VX_AIR && v.at(10, 10, VZ0 - 1) == VX_AIR &&
+                          v.at(10, 10, 0) == VX_BEDROCK && v.at(12, 12, VZ0 - 1) == VX_WATER && v.at(14, 14, VZ0 + 2) == VX_GRASS &&
+                          v.at(14, 14, VZ0 + 3) == VX_AIR && v.at(3, 2, VZ0) == VX_AIR && v.at(3, 2, VZ0 - 1) == VX_RUBBLE;
+        // 2. хиты и КД — из таблицы материала, повреждённых нет
+        const bool table = v.hpAt(2, 2, VZ0) == OBJ_WALL_HP && v.acAt(2, 2, VZ0) == 17 && v.acAt(5, 5, VZ0) == 15 && v.dmg.empty() && v.changes.empty();
+        // 3. удар по кубу стены: в списке один этот куб, соседний — целый, материал тот же
+        const unsigned ver0 = v.chunkVer[(size_t)(v.idx(2, 2, VZ0) / (VCH * VCH * VCH))];
+        const int r1 = damageVox(v, 2, 2, VZ0, 10, DT_BLUDGEONING);
+        const bool sparse = r1 == 1 && v.hpAt(2, 2, VZ0) == OBJ_WALL_HP - 10 && v.dmg.size() == 1 && v.hpAt(2, 2, VZ0 + 1) == OBJ_WALL_HP &&
+                            v.at(2, 2, VZ0) == VX_STONE && v.changes.empty();
+        // 4. добили: воздух, из списка ушёл, событие для кадра, версия чанка выросла
+        const int r2 = damageVox(v, 2, 2, VZ0, 100, DT_FIRE);
+        const bool kill = r2 == 2 && v.at(2, 2, VZ0) == VX_AIR && v.dmg.empty() && v.changes.size() == 1 && v.changes[0][2] == VZ0 &&
+                          v.changes[0][3] == VX_AIR && v.chunkVer[(size_t)(v.idx(2, 2, VZ0) / (VCH * VCH * VCH))] > ver0;
+        // 5. неразрушимое (дно мира, вода) и яд с психическим уроном — без эффекта
+        const bool immune = damageVox(v, 0, 0, 0, 999, DT_FIRE) == 0 && damageVox(v, 12, 12, VZ0 - 1, 999, DT_FIRE) == 0 &&
+                            damageVox(v, 2, 2, VZ0 + 1, 999, DT_POISON) == 0 && damageVox(v, 2, 2, VZ0 + 1, 999, DT_PSYCHIC) == 0 && v.at(2, 2, VZ0 + 1) == VX_STONE;
+        // 6. номера кубов различны и через границы чанков (мир 40×20×высота)
+        std::vector<char> seen(v.mat.size(), 0);
+        bool uniq = true;
+        for (int z = 0; z < v.sz && uniq; z++)
+            for (int y = 0; y < v.sy && uniq; y++)
+                for (int x = 0; x < v.sx; x++) {
+                    const int i = v.idx(x, y, z);
+                    if (i < 0 || (size_t)i >= seen.size() || seen[(size_t)i]) { uniq = false; break; }
+                    seen[(size_t)i] = 1;
+                }
+        // 7. много ударов по разным кубам: в списке ровно повреждённые, добитые оттуда уходят
+        int hurtN = 0;
+        for (int x = 0; x < 40; x++) hurtN += damageVox(v, x, 0, 1, 5, DT_SLASHING) == 1;
+        for (int x = 0; x < 20; x++) damageVox(v, x, 0, 1, 100, DT_SLASHING);
+        const bool many = hurtN == 40 && v.dmg.size() == 20 && v.at(5, 0, 1) == VX_AIR && v.at(25, 0, 1) == VX_GRASS;   // на ровной земле куб z = 1 — верхний, трава
+        T("T217", "§1б объёмный мир: перевод карты в кубы, хиты и КД у материала, повреждённые — разреженно, разрушенный — воздух и событие",
+          conv && table && sparse && kill && immune && uniq && many,
+          fmt("перевод %d, таблица %d, разреженно %d, разрушение %d, неразрушимое и яд %d, номера %d, много ударов %d (в списке %d)",
+              conv, table, sparse, kill, immune, uniq, many, (int)v.dmg.size()));
+    }

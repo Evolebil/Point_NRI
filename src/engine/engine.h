@@ -29,6 +29,7 @@
 #include "gen_spec.h"
 #include "gen_boss.h"
 #include "world.h"
+#include "vox.h"
 #include "rules.h"
 #include "eval.h"
 #include "actions.h"
