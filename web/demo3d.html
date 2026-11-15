@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Макет вида 3D</title>
+<style>
+/* Макет вида «как в Muck» (решение №15 в docs/TZ_3d.md): только для согласования стиля, в бой не встроен */
+:root{color-scheme:dark;--glass:rgba(17,20,21,.82);--line:rgba(255,255,255,.12);--text:#eef2ee;--muted:#a9b3ae;--hi:#62c7c2}
+html,body{margin:0;height:100%;overflow:hidden;background:#9fd3ee;font:14px/1.4 system-ui,sans-serif;color:var(--text)}
+canvas{display:block;touch-action:none}
+.hud{position:fixed;left:12px;top:12px;max-width:min(360px,calc(100vw - 24px));padding:12px 14px;border-radius:12px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(8px)}
+.hud h1{margin:0 0 4px;font-size:16px}
+.hud p{margin:0 0 8px;color:var(--muted);font-size:12.5px}
+.btns{display:flex;flex-wrap:wrap;gap:6px}
+.btns button{font:inherit;font-size:13px;color:var(--text);background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
+.btns button.on{background:#1e4f54;border-color:var(--hi)}
+.fps{position:fixed;left:12px;bottom:10px;font-size:11px;color:rgba(0,0,0,.6)}
+.lbl{position:fixed;transform:translate(-50%,-100%);font-weight:800;font-size:12px;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000;pointer-events:none;white-space:nowrap}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="hud">
+  <h1>Макет вида: как в Muck</h1>
+  <p>Тот же мир из кубов 5×5×5 фт, рельеф сглажен (Surface Nets), грани плоские. Стены — своей высоты и с острыми углами;
+     деревья 10–40 фт; в холме — тоннель. Перетаскивание — поворот, правая кнопка — сдвиг, колесо — приближение.</p>
+  <div class="btns">
+    <button id="bSmooth" class="on" type="button">Гладко</button>
+    <button id="bGrid" type="button">Сетка 5 фт и высоты</button>
+    <button id="bShadow" type="button">Тени</button>
+  </div>
+</div>
+<div class="fps" id="fps"></div>
+<div id="labels"></div>
+<script src="/vendor/three-r159.min.js"></script>
+<script>
+'use strict';
+const T = THREE;
+// ---- мир из кубов: X×Y×Z, клетка 5 фт; Y — высота ----
+const X = 72, Z = 72, Y = 30, WATER = 5;   // уровень моря — 5 кубов (25 фт)
+const M = {AIR:0, GRASS:1, DIRT:2, ROCK:3, SAND:4, WALL:5, PLANK:6};
+const vox = new Uint8Array(X * Y * Z), vi = (x, y, z) => x + X * (z + Z * y);
+const get = (x, y, z) => x < 0 || z < 0 || x >= X || z >= Z || y >= Y ? 0 : (y < 0 ? M.ROCK : vox[vi(x, y, z)]);
+// детерминированный шум (одно зерно — один мир)
+function h32(a, b, s){ let h = Math.imul(a, 374761393) ^ Math.imul(b, 668265263) ^ Math.imul(s, 1442695041); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function vnoise(x, z, s){ const xi = Math.floor(x), zi = Math.floor(z), fx = x - xi, fz = z - zi, u = fx * fx * (3 - 2 * fx), w = fz * fz * (3 - 2 * fz);
+  const a = h32(xi, zi, s), b = h32(xi + 1, zi, s), c = h32(xi, zi + 1, s), d = h32(xi + 1, zi + 1, s); return a + (b - a) * u + (c - a) * w + (a - b - c + d) * u * w; }
+const fbm = (x, z, s) => vnoise(x, z, s) * .55 + vnoise(x * 2.1, z * 2.1, s + 1) * .3 + vnoise(x * 4.3, z * 4.3, s + 2) * .15;
+let rs = 12345; const rnd = () => (rs = (Math.imul(rs, 1103515245) + 12345) >>> 0) / 4294967296;
+const HT = new Int16Array(X * Z);   // высота земли столбца (первый куб воздуха)
+for (let z = 0; z < Z; z++) for (let x = 0; x < X; x++){
+  const r = Math.hypot(x - X / 2, z - Z / 2) / (X / 2), isl = Math.max(0, 1 - r * r * 1.05);
+  const hill = 11 * Math.exp(-((x - 52) ** 2 + (z - 22) ** 2) / 90);
+  let h = 2 + isl * (6 + 9 * fbm(x / 13, z / 13, 7)) + hill * isl;
+  if (Math.hypot(x - 22, z - 46) < 7) h = 9;   // площадка под развалины башни
+  HT[x + X * z] = Math.max(1, Math.min(Y - 4, Math.round(h)));
+}
+for (let z = 0; z < Z; z++) for (let x = 0; x < X; x++){
+  const H = HT[x + X * z]; let slope = 0;
+  for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]){ const n = HT[Math.min(X - 1, Math.max(0, x + dx)) + X * Math.min(Z - 1, Math.max(0, z + dz))]; slope = Math.max(slope, Math.abs(n - H)); }
+  for (let y = 0; y < H; y++) vox[vi(x, y, z)] = y < H - 3 ? M.ROCK : (H <= WATER + 1 ? M.SAND : (slope >= 3 ? M.ROCK : (y === H - 1 ? M.GRASS : M.DIRT)));
+}
+// тоннель в холме: шары воздуха вдоль пути (копание = куб -> воздух)
+const TY = HT[35 + X * 33] + .3;   // вход на уровне земли, дальше ход уходит вниз под холм (свод — земля холма)
+for (let t = 0; t <= 1; t += .02){ const cx = 35 + 19 * t, cz = 33 - 11 * t, cy = Math.max(WATER + 2.3, TY - 7 * Math.min(1, t * 1.6));   // дно хода выше моря
+  for (let y = Math.floor(cy - 2); y <= cy + 2; y++) for (let z = Math.floor(cz - 2); z <= cz + 2; z++) for (let x = Math.floor(cx - 2); x <= cx + 2; x++)
+    if (x >= 0 && z >= 0 && x < X && z < Z && y >= 0 && (x - cx) ** 2 + ((y - cy) * 1.15) ** 2 + (z - cz) ** 2 < 3.2) vox[vi(x, y, z)] = 0; }
+// развалины башни: стены своей высоты (10–30 фт), проём двери, настил наверху
+const TW = [[17, 41], [27, 51]];
+for (let z = TW[0][1]; z <= TW[1][1]; z++) for (let x = TW[0][0]; x <= TW[1][0]; x++){
+  const edge = x === TW[0][0] || x === TW[1][0] || z === TW[0][1] || z === TW[1][1]; if (!edge) continue;
+  if (z === TW[1][1] && (x === 22 || x === 23)) continue;   // дверь
+  const hw = 2 + Math.floor(4 * fbm(x / 3, z / 3, 31) + (x < 21 ? 2 : 0));   // своя высота у каждого столба стены
+  for (let y = 9; y < 9 + Math.min(6, hw); y++) vox[vi(x, y, z)] = M.WALL;
+}
+for (let z = 41; z <= 45; z++) for (let x = 17; x <= 21; x++) vox[vi(x, 14, z)] = M.PLANK;   // настил на 25 фт — можно стоять
+const natural = m => m === M.GRASS || m === M.DIRT || m === M.ROCK || m === M.SAND;
+const built = m => m === M.WALL || m === M.PLANK;
+
+// ---- цвета (sRGB): яркая пастель как в Muck ----
+const COL = {grass: [0x7cc55a, 0x6fbb4f, 0x88cf62], dirt: [0x9a7550, 0x8d6a47], rock: [0x9a9a96, 0x8c8c8a, 0xa6a5a0], sand: [0xead8a0, 0xe2cf95], wall: [0xb6aea0, 0xa79f92, 0xc0b8aa], plank: [0xa77a4c, 0x9a6f43]};
+const pick = (arr, k) => arr[Math.floor(k * arr.length) % arr.length];
+// цвет грани: пятна по шуму (крупные, как в Muck) и едва заметная разница соседних треугольников
+const tint = (arr, x, z, j) => { const n = vnoise(x / 7, z / 7, 5), i = Math.min(arr.length - 1, Math.floor(n * arr.length)); return new T.Color(arr[i]).lerp(new T.Color(arr[(i + 1) % arr.length]), n * arr.length - i).multiplyScalar(.97 + j * .06); };
+
+// ---- шейдер сетки 5 фт по верхним граням (как в бою: только в свой ход / тактика) ----
+const U = {uGrid: {value: 0}};
+function withGrid(mat){
+  mat.onBeforeCompile = sh => {
+    sh.uniforms.uGrid = U.uGrid;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWp;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWp = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uGrid;\nvarying vec3 vWp;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        if (uGrid > .5){ vec3 n = normalize(cross(dFdx(vWp), dFdy(vWp))); if (abs(n.y) > .55){ vec2 g = abs(fract(vWp.xz) - .5); if (max(g.x, g.y) > .47) diffuseColor.rgb *= .55; } }`);
+  };
+  return mat;
+}
+const terrMat = withGrid(new T.MeshStandardMaterial({vertexColors: true, flatShading: true, roughness: 1, metalness: 0}));
+
+// ---- Surface Nets: гладкая поверхность природных кубов; рукотворные — кубами с острыми углами ----
+function surfaceNets(){
+  const SX = X + 1, SY = Y + 1, SZ = Z + 1, S = new Float32Array(SX * SY * SZ), si = (x, y, z) => x + SX * (z + SZ * y);
+  for (let y = 0; y < SY; y++) for (let z = 0; z < SZ; z++) for (let x = 0; x < SX; x++){
+    let s = 0; for (let k = 0; k < 8; k++) s += natural(get(x - 1 + (k & 1), y - 1 + ((k >> 1) & 1), z - 1 + (k >> 2))) ? 1 : 0;
+    S[si(x, y, z)] = s / 8;
+  }
+  const CV = new Int32Array(X * Y * Z).fill(-1), P = [], ci = (x, y, z) => x + X * (z + Z * y);
+  const E = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
+  for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) for (let x = 0; x < X; x++){
+    const c = []; for (let k = 0; k < 8; k++) c.push(S[si(x + (k & 1), y + ((k >> 1) & 1), z + (k >> 2))]);
+    let px = 0, py = 0, pz = 0, n = 0;
+    for (const [a, b] of E){ if ((c[a] >= .5) === (c[b] >= .5)) continue;
+      const t = (.5 - c[a]) / (c[b] - c[a]);
+      px += (a & 1) + t * ((b & 1) - (a & 1)); py += ((a >> 1) & 1) + t * (((b >> 1) & 1) - ((a >> 1) & 1)); pz += (a >> 2) + t * ((b >> 2) - (a >> 2)); n++; }
+    if (!n) continue;
+    CV[ci(x, y, z)] = P.length / 3; P.push(x + px / n, y + py / n, z + pz / n);
+  }
+  const pos = [], col = [], tmp = new T.Color(), A = new T.Vector3(), B = new T.Vector3(), C = new T.Vector3(), N = new T.Vector3();
+  const tri = (i0, i1, i2, out) => {   // треугольник, развёрнутый наружу; цвет — по материалу под гранью и крутизне
+    A.fromArray(P, 3 * i0); B.fromArray(P, 3 * i1); C.fromArray(P, 3 * i2);
+    N.subVectors(B, A).cross(C.clone().sub(A)); if (N.dot(out) < 0){ const t = B.clone(); B.copy(C); C.copy(t); N.negate(); }
+    N.normalize();
+    const cx = (A.x + B.x + C.x) / 3, cy = (A.y + B.y + C.y) / 3, cz = (A.z + B.z + C.z) / 3;
+    let m = get(Math.floor(cx - N.x * .5), Math.floor(cy - N.y * .5), Math.floor(cz - N.z * .5)); if (!natural(m)) m = M.DIRT;
+    const k = h32(Math.floor(cx * 7), Math.floor(cz * 7), Math.floor(cy * 3));
+    const sky = cy >= HT[Math.min(X - 1, Math.max(0, Math.floor(cx))) + X * Math.min(Z - 1, Math.max(0, Math.floor(cz)))] - 1.5;   // трава — только под открытым небом, не в пещере
+    const pal = m === M.SAND ? COL.sand : (N.y > .62 && m !== M.ROCK && sky ? COL.grass : (m === M.ROCK || N.y < .2 ? COL.rock : (m === M.GRASS && N.y > .4 && sky ? COL.grass : COL.dirt)));
+    tmp.copy(tint(pal, cx, cz, k));
+    for (const v of [A, B, C]){ pos.push(v.x, v.y, v.z); col.push(tmp.r, tmp.g, tmp.b); }
+  };
+  const quad = (a, b, c, d, out) => { if (a < 0 || b < 0 || c < 0 || d < 0) return; tri(a, b, c, out); tri(a, c, d, out); };
+  const O = new T.Vector3();
+  for (let y = 0; y < SY; y++) for (let z = 0; z < SZ; z++) for (let x = 0; x < SX; x++){
+    const s0 = S[si(x, y, z)] >= .5;
+    if (x + 1 < SX && s0 !== (S[si(x + 1, y, z)] >= .5) && y > 0 && z > 0 && y < Y && z < Z && x < X)
+      quad(CV[ci(x, y - 1, z - 1)], CV[ci(x, y, z - 1)], CV[ci(x, y, z)], CV[ci(x, y - 1, z)], O.set(s0 ? 1 : -1, 0, 0));
+    if (y + 1 < SY && s0 !== (S[si(x, y + 1, z)] >= .5) && x > 0 && z > 0 && x < X && z < Z && y < Y)
+      quad(CV[ci(x - 1, y, z - 1)], CV[ci(x, y, z - 1)], CV[ci(x, y, z)], CV[ci(x - 1, y, z)], O.set(0, s0 ? 1 : -1, 0));
+    if (z + 1 < SZ && s0 !== (S[si(x, y, z + 1)] >= .5) && x > 0 && y > 0 && x < X && y < Y && z < Z)
+      quad(CV[ci(x - 1, y - 1, z)], CV[ci(x, y - 1, z)], CV[ci(x, y, z)], CV[ci(x - 1, y, z)], O.set(0, 0, s0 ? 1 : -1));
+  }
+  return geo(pos, col);
+}
+// кубы (вид этапа 1а) — для сравнения на тех же данных; для рукотворного — всегда
+const FACES = [[[0,1,0],[[0,1,0],[0,1,1],[1,1,1],[1,1,0]]],[[0,-1,0],[[0,0,0],[1,0,0],[1,0,1],[0,0,1]]],[[1,0,0],[[1,0,0],[1,1,0],[1,1,1],[1,0,1]]],
+  [[-1,0,0],[[0,0,0],[0,0,1],[0,1,1],[0,1,0]]],[[0,0,1],[[0,0,1],[1,0,1],[1,1,1],[0,1,1]]],[[0,0,-1],[[0,0,0],[0,1,0],[1,1,0],[1,0,0]]]];
+function cubes(want){
+  const pos = [], col = [], c = new T.Color();
+  for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) for (let x = 0; x < X; x++){
+    const m = vox[vi(x, y, z)]; if (!m || !want(m)) continue;
+    const k = h32(x, z, y), top = !get(x, y + 1, z);
+    c.set(m === M.WALL ? pick(COL.wall, k) : m === M.PLANK ? pick(COL.plank, k) : m === M.SAND ? pick(COL.sand, k) : m === M.ROCK ? pick(COL.rock, k) : (m === M.GRASS && top ? pick(COL.grass, k) : pick(COL.dirt, k)));
+    for (const [[dx, dy, dz], q] of FACES){
+      const nb = get(x + dx, y + dy, z + dz); if (nb && (want(nb) || !built(m))) continue;
+      const g = m === M.GRASS && dy === 0 ? new T.Color(pick(COL.dirt, k)) : c;
+      const quadPts = q.map(([a, b, e]) => [x + a, y + b, z + e]);
+      for (const i of [0, 1, 2, 0, 2, 3]){ pos.push(...quadPts[i]); col.push(g.r, g.g, g.b); }
+    }
+  }
+  return geo(pos, col);
+}
+function geo(pos, col){ const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new T.Float32BufferAttribute(col, 3)); g.computeVertexNormals(); g.computeBoundingSphere(); return g; }
+
+// ---- сцена ----
+const cv = document.getElementById('cv'), coarse = matchMedia('(pointer: coarse)').matches;
+const ren = new T.WebGLRenderer({canvas: cv, antialias: !coarse});
+ren.setPixelRatio(Math.min(devicePixelRatio || 1, coarse ? 1.5 : 2));
+ren.shadowMap.type = T.PCFSoftShadowMap;
+const scene = new T.Scene(), HORIZON = 0xcfe9f6;
+scene.fog = new T.Fog(HORIZON, 90, 210);
+const camera = new T.PerspectiveCamera(45, 1, .1, 600);
+// небо: градиент на большой сфере
+scene.add(new T.Mesh(new T.SphereGeometry(400, 24, 12), new T.ShaderMaterial({side: T.BackSide, depthWrite: false, fog: false,
+  uniforms: {top: {value: new T.Color(0x4f9fe6)}, hor: {value: new T.Color(HORIZON)}},
+  vertexShader: 'varying float h; void main(){ h = normalize(position).y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: 'uniform vec3 top, hor; varying float h; void main(){ gl_FragColor = vec4(mix(hor, top, pow(clamp(h, 0.0, 1.0), .6)), 1.0); }'})));
+scene.add(new T.HemisphereLight(0xdff1ff, 0x6c7a48, 1.5));
+const sun = new T.DirectionalLight(0xfff0d8, 2.4); sun.position.set(X / 2 + 40, 70, Z / 2 + 25); sun.target.position.set(X / 2, 0, Z / 2);
+sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, {left: -60, right: 60, top: 60, bottom: -60, near: 10, far: 200}); sun.shadow.bias = -.0008; sun.shadow.normalBias = .04;
+scene.add(sun, sun.target);
+const smoothMesh = new T.Mesh(surfaceNets(), terrMat), cubeMesh = new T.Mesh(cubes(m => !built(m)), terrMat), builtMesh = new T.Mesh(cubes(built), terrMat);
+cubeMesh.visible = false;
+for (const m of [smoothMesh, cubeMesh, builtMesh]){ m.castShadow = m.receiveShadow = true; scene.add(m); }
+// вода: волны вершин, плоские грани
+const wGeo = new T.PlaneGeometry(260, 260, 90, 90).rotateX(-Math.PI / 2).toNonIndexed(), wBase = wGeo.attributes.position.array.slice();
+const water = new T.Mesh(wGeo, new T.MeshStandardMaterial({color: 0x48bfe0, transparent: true, opacity: .82, flatShading: true, roughness: .35, metalness: 0}));
+water.position.set(X / 2, WATER + .55, Z / 2); water.receiveShadow = true; scene.add(water);
+
+// ---- деревья 10–40 фт (2–8 кубов), камни, трава ----
+const flat = (hex, extra) => new T.MeshStandardMaterial(Object.assign({color: hex, flatShading: true, roughness: 1}, extra || {}));
+const barkM = flat(0x7a5232), leafMs = [0x5fb548, 0x4ea83f, 0x79c957, 0x3f9a45].map(c => flat(c)), rockM = flat(0x9b9a95);
+const trees = [], props = new T.Group(); scene.add(props);
+const free = (x, z) => { const m = vox[vi(x, HT[x + X * z] - 1, z)]; return m === M.GRASS && !(x >= 15 && x <= 29 && z >= 39 && z <= 53) && !(x > 34 && x < 56 && z > 18 && z < 33); };
+const flatAt = (x, z) => { const H = HT[x + X * z]; return [[1,0],[-1,0],[0,1],[0,-1]].every(([a, b]) => HT[Math.min(X - 1, x + a) + X * Math.min(Z - 1, Math.max(0, z + b))] === H); };
+function addTree(x, z, cells){
+  const g = new T.Group(), H = HT[x + X * z], k = h32(x, z, 99), leaf = leafMs[Math.floor(k * leafMs.length)];
+  const pine = cells >= 5 ? k < .6 : k < .2, rr = .4 + cells * .2, trunkH = pine ? cells * .25 : Math.max(cells * .3, cells - rr * 1.5);   // ствол входит в крону
+  const trunk = new T.Mesh(new T.CylinderGeometry(.09 + cells * .02, .14 + cells * .03, trunkH, 6), barkM); trunk.position.y = trunkH / 2; g.add(trunk);
+  if (pine){ const n = cells >= 6 ? 3 : 2, crown = cells - trunkH * .6;
+    for (let i = 0; i < n; i++){ const ch = crown / n * 1.35, r = (.5 + cells * .12) * (1 - i / (n + .6)); const c = new T.Mesh(new T.ConeGeometry(r, ch, 7), leaf); c.position.y = trunkH * .6 + i * crown / n * .78 + ch / 2; g.add(c); } }
+  else { const r = rr, b = new T.Mesh(new T.IcosahedronGeometry(r, 0), leaf); b.position.y = cells - r; b.rotation.set(k * 3, k * 7, 0); g.add(b);
+    if (cells >= 4){ const b2 = new T.Mesh(new T.IcosahedronGeometry(r * .7, 0), leaf); b2.position.set(r * .55, cells - r * 1.35, -r * .3); g.add(b2); } }
+  g.scale.y = cells / (g.children.reduce((h, c) => { c.geometry.computeBoundingBox(); return Math.max(h, c.position.y + c.geometry.boundingBox.max.y); }, 0));   // ровно cells кубов
+  g.position.set(x + .5, H, z + .5); g.rotation.y = k * 6.28;
+  g.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+  props.add(g); trees.push({g, cells, x: x + .5, y: H + cells, z: z + .5});
+}
+for (let n = 0, tries = 0; n < 46 && tries < 4000; tries++){
+  const x = 2 + Math.floor(rnd() * (X - 4)), z = 2 + Math.floor(rnd() * (Z - 4));
+  if (!free(x, z) || !flatAt(x, z) || trees.some(t => Math.hypot(t.x - x, t.z - z) < 2.6)) continue;
+  addTree(x, z, 2 + Math.floor(rnd() * 7)); n++;
+}
+for (let n = 0, tries = 0; n < 22 && tries < 3000; tries++){
+  const x = 1 + Math.floor(rnd() * (X - 2)), z = 1 + Math.floor(rnd() * (Z - 2)), H = HT[x + X * z]; if (H <= WATER || !vox[vi(x, H - 1, z)]) continue;
+  const r = .3 + rnd() * .9, m = new T.Mesh(new T.DodecahedronGeometry(r, 0), rockM); m.scale.set(1, .55 + rnd() * .4, .8 + rnd() * .4);
+  m.position.set(x + rnd(), H - .1, z + rnd()); m.rotation.set(rnd(), rnd() * 6, rnd()); m.castShadow = m.receiveShadow = true; props.add(m); n++;
+}
+// трава: пучки по ровной траве (один вызов отрисовки)
+const tuft = new T.ConeGeometry(.05, .38, 3).translate(0, .19, 0), grassN = coarse ? 1500 : 4000;
+const grass = new T.InstancedMesh(tuft, new T.MeshStandardMaterial({flatShading: true, roughness: 1}), grassN);
+{ const o = new T.Object3D(), c = new T.Color(); let n = 0;
+  for (let tries = 0; n < grassN && tries < grassN * 6; tries++){
+    const x = rnd() * X, z = rnd() * Z, ix = Math.floor(x), iz = Math.floor(z); if (!free(ix, iz) || !flatAt(ix, iz)) continue;
+    o.position.set(x, HT[ix + X * iz], z); o.rotation.set((rnd() - .5) * .5, rnd() * 6, (rnd() - .5) * .5); o.scale.setScalar(.6 + rnd() * .8); o.updateMatrix();
+    grass.setMatrixAt(n, o.matrix); grass.setColorAt(n, c.set(pick(COL.grass, rnd())).multiplyScalar(.85 + rnd() * .3)); n++; }
+  grass.count = n; }
+grass.receiveShadow = true; scene.add(grass);
+
+// ---- бойцы: низкополигональные фигурки (место будущих моделей Quaternius); рост — 1 куб на средний размер ----
+const skinM = flat(0xf0c8a0);
+function figure(color, size, weapon){
+  const g = new T.Group(), body = flat(color), dark = flat(new T.Color(color).multiplyScalar(.6));
+  const leg = new T.BoxGeometry(.12, .36, .14).translate(0, .18, 0);
+  for (const s of [-1, 1]){ const l = new T.Mesh(leg, dark); l.position.x = s * .09; g.add(l); }
+  const torso = new T.Mesh(new T.CylinderGeometry(.17, .23, .38, 6), body); torso.position.y = .55; g.add(torso);
+  const head = new T.Mesh(new T.IcosahedronGeometry(.15, 0), skinM); head.position.y = .86; g.add(head);
+  for (const s of [-1, 1]){ const a = new T.Mesh(new T.BoxGeometry(.09, .32, .09).translate(0, -.16, 0), body); a.position.set(s * .27, .72, 0); a.rotation.z = s * .18; g.add(a); g.userData[s < 0 ? 'armL' : 'armR'] = a; }
+  if (weapon === 'sword'){ const w = new T.Mesh(new T.BoxGeometry(.05, .5, .03).translate(0, -.4, 0), flat(0xd8dde4, {metalness: .3, roughness: .5})); g.userData.armR.add(w); }
+  else { const w = new T.Mesh(new T.CylinderGeometry(.025, .025, .9, 5).translate(0, -.25, 0), barkM); const o = new T.Mesh(new T.OctahedronGeometry(.08, 0), flat(0x9fe8ff, {emissive: 0x2a8aa8})); o.position.y = .22; w.add(o); g.userData.armR.add(w); }
+  g.scale.setScalar(size); g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  scene.add(g); return g;
+}
+const heroes = [
+  {g: figure(0x3d7cf0, 1, 'sword'), x: 23, z: 47, y: 9},       // в башне
+  {g: figure(0xe2463d, 1, 'staff'), x: 19, z: 43, y: 15},      // на настиле 25 фт
+  {g: figure(0x3d7cf0, 1, 'staff'), x: 40, z: 30, y: -1},      // в тоннеле
+  {g: figure(0xe2463d, 2, 'sword'), x: 45, z: 40, y: 0}        // крупный: 2×2×2 куба
+];
+heroes.forEach((h, i) => { if (h.y === -1){ h.y = HT[h.x + X * h.z] - 1; while (h.y > 0 && get(h.x, h.y, h.z)) h.y--; while (h.y > 0 && !get(h.x, h.y - 1, h.z)) h.y--; } if (!h.y) h.y = HT[h.x + X * h.z]; h.g.position.set(h.x + .5 * h.g.scale.x, h.y, h.z + .5 * h.g.scale.x); h.g.rotation.y = i * 1.7; });
+
+// ---- подписи высот деревьев (вместе с сеткой) ----
+const LB = document.getElementById('labels');
+trees.forEach(t => { const d = document.createElement('div'); d.className = 'lbl'; d.textContent = t.cells * 5 + ' фт'; d.hidden = true; LB.appendChild(d); t.el = d; });
+
+// ---- камера: та же схема, что в бою (поворот, наклон, сдвиг, приближение) ----
+const V = {tx: X / 2, ty: 6, tz: Z / 2 + 4, yaw: .9, pitch: .62, dist: 70};
+const P = new Map(); let last = null, pinch = 0;
+const up = e => { P.delete(e.pointerId); if (P.size < 2) pinch = 0; };
+cv.addEventListener('pointerdown', e => { try { cv.setPointerCapture(e.pointerId); } catch (er) {} P.set(e.pointerId, {x: e.clientX, y: e.clientY}); last = {b: e.button, sh: e.shiftKey}; if (P.size === 2){ const [a, b] = [...P.values()]; pinch = Math.hypot(a.x - b.x, a.y - b.y); } });
+cv.addEventListener('pointermove', e => {
+  if (!P.has(e.pointerId)) return; if (e.pointerType === 'mouse' && !e.buttons){ up(e); return; }
+  const pr = P.get(e.pointerId), dx = e.clientX - pr.x, dy = e.clientY - pr.y; P.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  if (P.size === 2){ const [a, b] = [...P.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch) zoom(pinch / Math.max(1, d)); pinch = d; pan(dx / 2, dy / 2); return; }
+  if (last.b === 2 || last.b === 1 || last.sh) pan(dx, dy); else { V.yaw -= dx * .008; V.pitch = Math.max(.12, Math.min(1.5, V.pitch + dy * .006)); }
+});
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up); cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', e => { e.preventDefault(); zoom(e.deltaY < 0 ? 1 / 1.12 : 1.12); }, {passive: false});
+function zoom(f){ V.dist = Math.max(4, Math.min(170, V.dist * f)); }
+function pan(dx, dy){ const k = V.dist * .0016, c = Math.cos(V.yaw), s = Math.sin(V.yaw); V.tx = Math.max(0, Math.min(X, V.tx - (dx * c + dy * s) * k)); V.tz = Math.max(0, Math.min(Z, V.tz - (-dx * s + dy * c) * k)); }
+
+// ---- кнопки ----
+const bS = document.getElementById('bSmooth'), bG = document.getElementById('bGrid'), bSh = document.getElementById('bShadow');
+bS.onclick = () => { const on = !smoothMesh.visible; smoothMesh.visible = on; cubeMesh.visible = !on; bS.classList.toggle('on', on); bS.textContent = on ? 'Гладко' : 'Кубы'; };
+bG.onclick = () => { U.uGrid.value = U.uGrid.value ? 0 : 1; bG.classList.toggle('on', !!U.uGrid.value); trees.forEach(t => { t.el.hidden = !U.uGrid.value; }); };
+bSh.onclick = () => { ren.shadowMap.enabled = sun.castShadow = !ren.shadowMap.enabled; bSh.classList.toggle('on', ren.shadowMap.enabled); scene.traverse(o => { if (o.material) [].concat(o.material).forEach(m => { m.needsUpdate = true; }); }); };
+
+// ---- кадр ----
+const fpsEl = document.getElementById('fps'), pv = new T.Vector3(); let fN = 0, fT = performance.now();
+function frame(now){
+  const W = innerWidth, H = innerHeight;
+  if (cv.width !== Math.round(W * ren.getPixelRatio())){ ren.setSize(W, H); camera.aspect = W / H; camera.updateProjectionMatrix(); }
+  const cp = Math.cos(V.pitch); camera.position.set(V.tx + V.dist * cp * Math.sin(V.yaw), V.ty + V.dist * Math.sin(V.pitch), V.tz + V.dist * cp * Math.cos(V.yaw)); camera.lookAt(V.tx, V.ty, V.tz);
+  const p = wGeo.attributes.position.array, t = now / 1000;   // волны
+  for (let i = 0; i < p.length; i += 3) p[i + 1] = wBase[i + 1] + Math.sin(wBase[i] * .35 + t * 1.3) * .07 + Math.cos(wBase[i + 2] * .3 + t) * .06;
+  wGeo.attributes.position.needsUpdate = true; wGeo.computeVertexNormals();
+  heroes.forEach((h, i) => { const b = Math.sin(t * 2 + i); h.g.userData.armL.rotation.x = b * .15; h.g.userData.armR.rotation.x = -b * .15 - .3; h.g.children[2].position.y = .55 + b * .008; });
+  ren.render(scene, camera);
+  if (U.uGrid.value) trees.forEach(tr => { pv.set(tr.x, tr.y + .4, tr.z).project(camera); const ok = pv.z < 1; tr.el.style.display = ok ? '' : 'none'; if (ok){ tr.el.style.left = (pv.x + 1) / 2 * W + 'px'; tr.el.style.top = (1 - pv.y) / 2 * H + 'px'; } });
+  fN++; if (now - fT > 1000){ fpsEl.textContent = `${Math.round(fN * 1000 / (now - fT))} к/с · треугольников ${ren.info.render.triangles}`; fN = 0; fT = now; }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

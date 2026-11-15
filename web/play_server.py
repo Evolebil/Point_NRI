@@ -718,6 +718,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, f.read(), "text/javascript; charset=utf-8", "public, max-age=31536000, immutable")
             except OSError:
                 self._send(404, "не найдено", "text/plain; charset=utf-8")
+        elif path == "/demo3d":   # макет вида 3D (решение №15 в docs/TZ_3d.md): в меню не показан, только для согласования стиля
+            try:
+                with open(os.path.join(WEB, "demo3d.html"), encoding="utf-8") as f:
+                    self._send(200, f.read(), "text/html; charset=utf-8")
+            except OSError:
+                self._send(404, "не найдено", "text/plain; charset=utf-8")
         elif path == "/sheet":
             try:
                 b = int(parse_qs(u.query).get("budget", ["800"])[0])
