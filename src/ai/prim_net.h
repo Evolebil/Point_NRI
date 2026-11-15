@@ -105,7 +105,7 @@ static void cellFeat(const World& w, const Fighter& me, const Fighter* e, int cx
         const bool adjNow = meleeWeapon(e->b) && distFt(me, *e) <= meleeReach(e->b);
         f[9] = adjNow && d > meleeReach(e->b) && !me.disengaged;                // уход из досягаемости: провоцированная атака
     }
-    f[10] = w.height[cy][cx] / 2.0f;
+    f[10] = w.height[cy][cx] / 4.0f;   // входы сети — в прежних уровнях по 10 фт (арена хранит по 5 фт): сеть не переобучалась
     f[11] = w.dark[cy][cx];
 }
 // клетки, куда можно дойти за budget фт (тот же поиск по цене шага, что pathTo движка; без провоцированных атак), не больше MAXC — равномерной
@@ -380,7 +380,7 @@ static void buildObs(World& w, int idx, const TurnState& ts, Obs& o) {
             m[base + 3] = w.water[cy][cx];
             m[base + 4] = w.pit[cy][cx];
             m[base + 5] = w.dark[cy][cx];
-            m[base + 6] = w.height[cy][cx] / 2.0f;
+            m[base + 6] = w.height[cy][cx] / 4.0f;
         }
     auto mark = [&](int fx, int fy, int layer) {
         const int dx = fx - me.x, dy = fy - me.y;
@@ -405,9 +405,9 @@ static void buildObs(World& w, int idx, const TurnState& ts, Obs& o) {
         for (size_t k = 0; k < me.b.abil.size(); k++) formReady = formReady || (me.b.abil[k].formTmpl >= 0 && abilReady(w, idx, ts, (int)k));
         g[0] = fpFull(me) / 4.0f;
         g[1] = squeezed(me);
-        g[2] = me.alt / 6.0f;
+        g[2] = me.alt / 12.0f;
         g[3] = me.b.fly && canStayAloft(me);
-        g[4] = maxAltAt(w, me, me.x, me.y, me.up) / 6.0f;
+        g[4] = maxAltAt(w, me, me.x, me.y, me.up) / 12.0f;
         g[5] = me.b.climbS;
         g[6] = me.b.swimS;
         g[7] = me.b.burrowS;
@@ -422,15 +422,15 @@ static void buildObs(World& w, int idx, const TurnState& ts, Obs& o) {
         g[16] = clampf(foes / 8.0);
         g[17] = w.day;
         g[18] = me.up;
-        g[19] = zAt(w, me.x, me.y) / 9.0f;
+        g[19] = zAt(w, me.x, me.y) / 18.0f;
         for (int j = 0; j < MAXE; j++) {
             float* f = o.ef[j] + FE + FEX;
             float* xe = x + OFF_X + GBX + j * FEX2;
             if (o.enemy[j] < 0) continue;
             const Fighter& e = w.f[o.enemy[j]];
             f[0] = fpFull(e) / 4.0f;
-            f[1] = clampf((zF(w, e) - zF(w, me)) / 6.0);
-            f[2] = e.alt / 6.0f;
+            f[1] = clampf((zF(w, e) - zF(w, me)) / 12.0);
+            f[2] = e.alt / 12.0f;
             f[3] = e.b.fly;
             f[4] = squeezed(e);
             f[5] = e.inForm;
@@ -445,8 +445,8 @@ static void buildObs(World& w, int idx, const TurnState& ts, Obs& o) {
                 if (cx < 0 || cy < 0 || cx >= W || cy >= W) continue;
                 m2[base + 0] = w.door[cy][cx] == 1;
                 m2[base + 1] = w.door[cy][cx] == 2;
-                m2[base + 2] = w.deck[cy][cx] / 9.0f;
-                m2[base + 3] = w.tree[cy][cx];
+                m2[base + 2] = w.deck[cy][cx] / 18.0f;
+                m2[base + 3] = w.tree[cy][cx] != 0;
                 m2[base + 4] = w.haz[cy][cx] > 0;
                 m2[base + 5] = w.ladder[cy][cx];
             }
@@ -553,8 +553,8 @@ static void buildObs(World& w, int idx, const TurnState& ts, Obs& o) {
     o.inMask[IN_ORDER] = o.typeMask[PR_ORDER];
     o.inMask[IN_DROPCONC] = o.typeMask[PR_DROPCONC];
     o.inMask[IN_SURGE] = o.typeMask[PR_SURGE];
-    // высота полёта (PN25): 10 фт движения за уровень, в пределах потолка
-    o.inMask[IN_ALTUP] = g_altOn && me.b.fly && canStayAloft(me) && speedOf(me) > 0 && ts.speed >= 10 && me.alt < maxAltAt(w, me, me.x, me.y, me.up);
+    // высота полёта (PN25): шаг сети — 10 фт (2 уровня по 5 фт, как при обучении), 10 фт движения, в пределах потолка
+    o.inMask[IN_ALTUP] = g_altOn && me.b.fly && canStayAloft(me) && speedOf(me) > 0 && ts.speed >= 10 && me.alt + 2 <= maxAltAt(w, me, me.x, me.y, me.up);
     o.inMask[IN_ALTDOWN] = g_altOn && me.alt > 0 && ts.speed >= 10;
     o.stMask[ST_MOVE] = o.typeMask[PR_MOVE];
     o.stMask[ST_APPLY] = o.catMask[CAT_ATTACK] || o.catMask[CAT_SPELL] || o.catMask[CAT_SUMMON] || o.catMask[CAT_MANEUVER];
@@ -1114,7 +1114,7 @@ static Prim decide(const PNet& N, World& w, int idx, const TurnState& ts, const 
         p.kind = PR_DROPCONC;
     else if (d.in == IN_ALTUP || d.in == IN_ALTDOWN) {
         p.kind = PR_ALT;
-        p.a = w.f[idx].alt + (d.in == IN_ALTUP ? 1 : -1);
+        p.a = std::max(0, w.f[idx].alt + (d.in == IN_ALTUP ? 2 : -2));
     } else
         p.kind = PR_SURGE;
     return p;

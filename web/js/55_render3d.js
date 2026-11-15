@@ -67,17 +67,17 @@ R3.init = function(){
 // ---- мир из кубов: столбец клетки (x, y) по слоям нынешней карты и изменениям арены ----
 const vIdx = (x, y, z) => (y * AW + x) * R3.H + z;
 function vGet(x, y, z){ return x < 0 || y < 0 || x >= AW || y >= AH || z >= R3.H ? 0 : (z < 0 ? VM.DIRT : R3.vox[vIdx(x, y, z)]); }
-const mapN = (L, x, y) => (MAP[L] && MAP[L][y] && +MAP[L][y][x]) || 0;
-// уровень (по 10 фт), на котором стоит боец: как zF в движке (земля, дерево, настил) + высота полёта
+const mapN = (L, x, y) => lv36(MAP[L], x, y);
+// уровень (по 5 фт = 1 куб), на котором стоит боец: как zF в движке (земля, вершина дерева, настил) + высота полёта
 function r3Level(f){
   const gone = R3.dynCells.get(f.x + ',' + f.y) || {};
-  return (f.up ? mapN('deck', f.x, f.y) : mapN('height', f.x, f.y) + (mapN('tree', f.x, f.y) && !gone[4] ? 2 : 0)) + (f.alt || 0);
+  return (f.up ? mapN('deck', f.x, f.y) : mapN('height', f.x, f.y) + (gone[4] ? 0 : mapN('tree', f.x, f.y))) + (f.alt || 0);
 }
-const r3Z = f => VZ0 + 2 * r3Level(f);   // куб, где ноги
+const r3Z = f => VZ0 + r3Level(f);   // куб, где ноги
 function r3Column(x, y){
   const V = R3.vox, i0 = vIdx(x, y, 0), H = R3.H, d = R3.dynCells.get(x + ',' + y) || {}, city = !!MAP.theme;
   for (let z = 0; z < H; z++) V[i0 + z] = 0;
-  const top = VZ0 + 2 * mapN('height', x, y);   // первый куб воздуха над землёй
+  const top = VZ0 + mapN('height', x, y);   // первый куб воздуха над землёй
   const put = (z0, z1, m) => { for (let z = Math.max(0, z0); z < Math.min(H, z1); z++) V[i0 + z] = m; };
   if (mapN('pit', x, y)) put(0, 1, VM.PITF);
   else {
@@ -90,7 +90,8 @@ function r3Column(x, y){
   }
   const broken = !!d[4];
   if (!broken && mapN('wall', x, y)) put(top, top + 6, mapN('strong', x, y) ? VM.STRONG : VM.STONE);   // стена 30 фт
-  if (!broken && mapN('tree', x, y)){ put(top, top + 2, VM.WOOD); put(top + 2, top + 4, VM.LEAF); }   // дерево 20 фт
+  const th = mapN('tree', x, y);   // дерево своей высоты (10–40 фт): ствол и крона в 2 куба (у куста — 1 и 1)
+  if (!broken && th){ const wd = Math.max(1, th - 2); put(top, top + wd, VM.WOOD); put(top + wd, top + th, VM.LEAF); }
   if (!broken && mapN('climb', x, y)) put(top, top + 1, VM.COVER);   // укрытие: низкий ящик (рисуется в полкуба)
   const d0 = mapN('door', x, y);
   if (d0){   // проём 10 фт, над ним перемычка до высоты стены; закрытая дверь — два куба
@@ -98,7 +99,7 @@ function r3Column(x, y){
     put(top + 2, top + 6, VM.STONE); if (!open && st !== 8) put(top, top + 2, VM.DOOR);
   }
   const dk = mapN('deck', x, y);
-  if (dk && !d[5] && VZ0 + 2 * dk - 1 >= top) put(VZ0 + 2 * dk - 1, VZ0 + 2 * dk, VM.PLANK);   // настил: стоять на его верху
+  if (dk && !d[5] && VZ0 + dk - 1 >= top) put(VZ0 + dk - 1, VZ0 + dk, VM.PLANK);   // настил: стоять на его верху
   if (d[1]) put(top, top + 4, VM.FORCE);   // временная стена способности
 }
 // изменения арены кадра: клетка -> {вид: 1}; двери — последнее состояние
@@ -113,7 +114,7 @@ R3.setMap = function(){
   R3.fm.forEach(m => { if (m){ R3.scene.remove(m.body, m.shadow, m.ghost); m.mat.dispose(); m.gmat.dispose(); } });
   R3.fm = []; R3.map = MAP; R3.dynFr = null; R3.fogKey = ''; R3.dynCells = r3DynMap(FR[curIdx] && FR[curIdx].dyn); R3.dynKey = JSON.stringify((FR[curIdx] && FR[curIdx].dyn) || []);
   let maxTop = 0;
-  for (let y = 0; y < AH; y++) for (let x = 0; x < AW; x++) maxTop = Math.max(maxTop, VZ0 + 2 * Math.max(mapN('height', x, y), mapN('deck', x, y)) + 6);
+  for (let y = 0; y < AH; y++) for (let x = 0; x < AW; x++) maxTop = Math.max(maxTop, VZ0 + Math.max(mapN('height', x, y) + Math.max(6, mapN('tree', x, y)), mapN('deck', x, y)));
   R3.H = Math.ceil((maxTop + 2) / VCH) * VCH;
   R3.vox = new Uint8Array(AW * AH * R3.H);
   R3.NX = Math.ceil(AW / VCH); R3.NY = Math.ceil(R3.H / VCH); R3.NZ = Math.ceil(AH / VCH);
@@ -185,7 +186,7 @@ R3.syncDyn = function(fr){
 };
 // туман войны: та же маска, что у 2D (бит на клетку из запроса хода)
 R3.syncFog = function(){
-  const q = G.req || G.lastReq, on = !!(q && q.vis && $('fogOn').checked && !G.over && q.visW === AW && q.visH === AH);
+  const q = G.req || G.lastReq, on = !!(q && q.vis && !G.over && q.visW === AW && q.visH === AH);
   R3.U.uFogOn.value = on ? 1 : 0; if (!on || q.vis === R3.fogKey) return;
   R3.fogKey = q.vis; const bin = atob(q.vis);
   for (let k = 0; k < AW * AH; k++) R3.fogData[4 * k] = ((bin.charCodeAt(k >> 3) >> (k & 7)) & 1) ? 255 : 0;
@@ -224,7 +225,7 @@ R3.syncFighters = function(fr, t){
     m.mat.emissive.set(act ? 0x6a5414 : 0x000000);
     if (f.hp <= 0){ m.body.rotation.set(0, 0, Math.PI / 2); m.body.position.set(X, z + .3 * n, Z); }   // павший лежит
     else { m.body.rotation.set(0, 0, 0); m.body.position.set(X, z + h / 2, Z); }
-    m.shadow.scale.setScalar(.9 * n); m.shadow.position.set(X, VZ0 + 2 * (r3Level(f) - (f.alt || 0)) + .02, Z);
+    m.shadow.scale.setScalar(.9 * n); m.shadow.position.set(X, VZ0 + r3Level(f) - (f.alt || 0) + .02, Z);
     m.ghost.position.copy(m.body.position); m.ghost.rotation.copy(m.body.rotation);
     out.push({k, f, X, Y: z, Z, h, n, boss});
   });
@@ -348,7 +349,7 @@ function r3Labels(list, fr){
     const q = Math.max(0, f.hp / f.maxHp); ctx.fillStyle = q > .5 ? '#5fd08a' : (q > .25 ? '#f2c14e' : '#ff5d5d'); ctx.fillRect(bx, by, bw * q, bh);
     if (f.temp){ ctx.fillStyle = '#c5cde2'; ctx.fillRect(bx + bw * q, by, Math.min(bw * (1 - q), bw * f.temp / f.maxHp), bh); }
     if (boss) r3Text(`${Math.max(0, f.hp)}/${f.maxHp}`, px, by - 5, '700 12px system-ui', '#fff', 3);
-    if (f.alt) r3Text('🪽 ' + f.alt * 10 + ' фт', px, by - 19, '800 12px system-ui', '#bfe3ff', 3);
+    if (f.alt) r3Text('🪽 ' + f.alt * 5 + ' фт', px, by - 19, '800 12px system-ui', '#bfe3ff', 3);
     if (boss && f.cond.length){ const g = r3P(o.X, o.Y, o.Z); if (g.ok) r3Text(f.cond.slice(0, 2).join(' · '), g.x, g.y + 18, '700 13px system-ui', '#fff'); }
   });
 }
@@ -369,8 +370,8 @@ function r3Fx(list, now){
         else { ctx.globalAlpha = .55; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(lerp(a.x, b.x, Math.max(0, u - .3)), lerp(a.y, b.y, Math.max(0, u - .3))); ctx.lineTo(lerp(a.x, b.x, u), lerp(a.y, b.y, u)); ctx.stroke(); ctx.globalAlpha = 1; ctx.shadowColor = e.col; ctx.shadowBlur = 18; ctx.beginPath(); ctx.arc(lerp(a.x, b.x, u), lerp(a.y, b.y, u), 8, 0, 7); ctx.fill(); }
       } }
     else if (e.kind === 'ring' && o){ ctx.globalAlpha = (1 - u) * .85; r3Circle(o.X, o.Y + .05, o.Z, e.r * (.3 + .7 * Math.min(1, u * 2.2)), e.col, e.col + '33', null, 4); }
-    else if (e.kind === 'cellbolt' && at(e.a)){ const a = mid(at(e.a)), Y = VZ0 + 2 * mapN('height', e.cx, e.cy), b = r3P(e.cx + .5, Y + .5, e.cy + .5); if (a.ok && b.ok){ ctx.fillStyle = e.col; ctx.shadowColor = e.col; ctx.shadowBlur = 18; ctx.beginPath(); ctx.arc(lerp(a.x, b.x, u), lerp(a.y, b.y, u), 8, 0, 7); ctx.fill(); } }
-    else if (e.kind === 'cellring'){ ctx.globalAlpha = (1 - u) * .85; r3Circle(e.cx + .5, VZ0 + 2 * mapN('height', e.cx, e.cy) + .05, e.cy + .5, e.r * (.3 + .7 * Math.min(1, u * 2.2)), e.col, e.col + '33', null, 4); }
+    else if (e.kind === 'cellbolt' && at(e.a)){ const a = mid(at(e.a)), Y = VZ0 + mapN('height', e.cx, e.cy), b = r3P(e.cx + .5, Y + .5, e.cy + .5); if (a.ok && b.ok){ ctx.fillStyle = e.col; ctx.shadowColor = e.col; ctx.shadowBlur = 18; ctx.beginPath(); ctx.arc(lerp(a.x, b.x, u), lerp(a.y, b.y, u), 8, 0, 7); ctx.fill(); } }
+    else if (e.kind === 'cellring'){ ctx.globalAlpha = (1 - u) * .85; r3Circle(e.cx + .5, VZ0 + mapN('height', e.cx, e.cy) + .05, e.cy + .5, e.r * (.3 + .7 * Math.min(1, u * 2.2)), e.col, e.col + '33', null, 4); }
     else if ((e.kind === 'aura' || e.kind === 'spawn' || e.kind === 'flash') && (o || e.from)){
       const X = o ? o.X : e.from.x + .5, Z = o ? o.Z : e.from.y + .5, Y = o ? o.Y : r3Z(e.from);
       ctx.globalAlpha = (1 - u) * .8; r3Circle(X, Y + .05, Z, (o ? o.n : 1) * (e.kind === 'spawn' ? 1.4 - u * .7 : .7 + u * .6), e.kind === 'spawn' ? '#d6a8ff' : (e.col || '#fff'), null, null, 4);
@@ -399,9 +400,11 @@ function r3Turn(list, now){
       for (let i = -Math.floor((ga.wallLen - 1) / 2); i <= Math.floor(ga.wallLen / 2); i++){ const x = h.x + px * i, y = h.y + py * i; if (x < 0 || y < 0 || x >= AW || y >= AH) continue; r3Square(x, y, h.top, 1, '#d6c4ff', 'rgba(190,160,255,.45)'); }
     }
   }
+  const path = G.mode === 'move' ? pathPreview(q, h.x, h.y) : null;   // путь под мышью (как в 2D)
+  if (path){ const pts = [r3P(me.X, me.Y + .08, me.Z), ...path.cells.map(c => r3P(c.x + .5, r3Z(c) + .08, c.y + .5))]; if (pts.every(p => p.ok)) pathStroke(pts, path.cells, q.speedLeft); }
   r3Square(h.x, h.y, h.top, 1, 'rgba(255,255,255,.95)', 'rgba(255,255,255,.12)');
-  const n = me.n, gap = (a, b) => Math.max(0, b - (a + n - 1), a - b), d = 5 * Math.max(gap(me.f.x, h.x), gap(me.f.y, h.y)), p = r3P(h.x + 1, h.top, h.y);
-  if (p.ok){ ctx.save(); ctx.textAlign = 'left'; r3Text(d + ' фт', p.x + 22, p.y, '700 13px system-ui', '#fff'); ctx.restore(); }
+  const n = me.n, gap = (a, b) => Math.max(0, b - (a + n - 1), a - b), d = path ? pathLabel(path, q.speedLeft) : 5 * Math.max(gap(me.f.x, h.x), gap(me.f.y, h.y)) + ' фт', p = r3P(h.x + 1, h.top, h.y);
+  if (p.ok){ ctx.save(); ctx.textAlign = 'left'; r3Text(d, p.x + 22, p.y, '700 13px system-ui', '#fff'); ctx.restore(); }
 }
 // кадр 3D: из render() (viewer_template.html) вместо 2D-рисования
 R3.draw = function(now, t, tt){
@@ -424,6 +427,7 @@ R3.draw = function(now, t, tt){
   r3Turn(list, now);
   r3Labels(list, fr);
   r3Fx(list, now);
+  if (typeof ptrDraw === 'function') ptrDraw(now);   // указки игроков комнаты
   R3.fpsN++; if (now - R3.fpsT0 >= 1000){ R3.fps = Math.round(R3.fpsN * 1000 / (now - R3.fpsT0)); R3.fpsN = 0; R3.fpsT0 = now; }
   ctx.save(); ctx.font = '700 11px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText(`3D · ${R3.fps} к/с${R3.low ? ' · телефон' : ''}`, 8, H - 6); ctx.restore();
 };

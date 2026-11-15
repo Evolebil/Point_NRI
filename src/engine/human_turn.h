@@ -41,7 +41,8 @@ static std::string specTitle(const Spec& s);   // replay_export.h
 std::string describe(const Spec& s);
 
 // Туман войны на карте (для показа): клетки, которые видит хоть один боец стороны, — те же правила, что canSee + линия
-// обзора, только к клетке: слепое зрение в радиусе, тьма — лишь тёмным или истинным зрением на нужную дальность.
+// обзора, только к клетке: слепое зрение в радиусе, тьма — лишь тёмным или истинным зрением на нужную дальность, дым и
+// туман зон закрывают (и саму клетку в облаке), ночью неосвещённое без тёмного зрения — лишь на 30 фт.
 // Битовая маска по строкам арены в base64.
 static std::string visMask(const World& w, int team) {
     std::vector<unsigned char> bits((w.aw * w.ah + 7) / 8, 0);
@@ -54,7 +55,8 @@ static std::string visMask(const World& w, int team) {
                 const int d = distFC(w, v, x, y);
                 bool ok = v.b.blindsight >= d;
                 if (!ok && !v.cond[C_BLIND] && losFC(w, v, x, y))
-                    ok = !w.dark[y][x] || v.b.dv >= d || v.b.truesight >= d;
+                    ok = (!w.dark[y][x] || v.b.dv >= d || v.b.truesight >= d) && !fogLine(w, v.x, v.y, zF(w, v), x, y, zAt(w, x, y)) &&
+                         (w.day || d <= 30 || v.b.dv >= d || v.b.truesight >= d || litCell(w, x, y));
                 if (ok) bits[k >> 3] |= (unsigned char)(1 << (k & 7));
             }
     }
@@ -68,6 +70,33 @@ static std::string visMask(const World& w, int team) {
         s += i + 2 < bits.size() ? B[n & 63] : '=';
     }
     return s;
+}
+
+// Дерево путей игрока (PathTree) для показа пути под мышью: по 3 символа base64 на узел — предок (0 нет; иначе 1 + сдвиг
+// к предку 0–7 по порядку dy, dx от −1 до 1 без (0, 0), + 8 — предок на настиле) и футы пути / 5 двумя символами. Узлы земли
+// по строкам, затем (ptL = 2) — узлы настила
+static std::string pathTreeJson(const World& w, const Fighter& me) {
+    static const char* B = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    static thread_local PathTree T;
+    pathTree(w, me, T);
+    const int N = w.aw * w.ah;
+    bool deck = false;
+    for (int y = 0; y < w.ah && !deck; y++)
+        for (int x = 0; x < w.aw && !deck; x++) deck = w.deck[y][x] > 0;
+    std::string s;
+    s.reserve(3 * N * (deck ? 2 : 1));
+    for (int k = 0; k < N * (deck ? 2 : 1); k++) {
+        const int p = T.par[k], ft = T.ft[k] < 0 ? 0 : std::min(4095, T.ft[k] / 5);
+        int code = 0;
+        if (p >= 0) {
+            const int dx = p % N % w.aw - k % N % w.aw, dy = p % N / w.aw - k % N / w.aw, d = (dy + 1) * 3 + dx + 1;
+            code = 1 + (d < 4 ? d : d - 1) + (p >= N ? 8 : 0);
+        }
+        s += B[code];
+        s += B[ft >> 6];
+        s += B[ft & 63];
+    }
+    return ",\"pt\":\"" + s + "\",\"ptL\":" + (deck ? "2" : "1");
 }
 
 static std::string humanRequest(World& w, int idx, const TurnState& ts, const std::string& msg) {
@@ -112,6 +141,7 @@ static std::string humanRequest(World& w, int idx, const TurnState& ts, const st
     o += "]";
     if (me.b.fly)   // летун: высота (уровни по 10 фт), потолок над ним, может ли сейчас держаться в воздухе
         o += ",\"fly\":{\"alt\":" + std::to_string(me.alt) + ",\"max\":" + std::to_string(maxAltAt(w, me, me.x, me.y, me.up)) + ",\"can\":" + (canStayAloft(me) ? "1" : "0") + "}";
+    if (fpFull(me) == 1) o += pathTreeJson(w, me);   // пути под мышью
     o += ",\"vis\":\"" + visMask(w, me.team) + "\",\"visW\":" + std::to_string(w.aw) + ",\"visH\":" + std::to_string(w.ah);   // туман войны на карте
     o += ",\"enemies\":[";
     bool first = true;
@@ -177,7 +207,7 @@ static void humanTurn(World& w, int idx) {
         else if (c == "surge") p.kind = PR_SURGE;
         else if (c == "dropconc") p.kind = PR_DROPCONC;
         else if (c == "swap") { p.kind = PR_SWAP; p.a = cmd["k"].num(-1); }
-        else if (c == "alt") { p.kind = PR_ALT; p.a = me.alt + (cmd["dir"].num(0) > 0 ? 1 : -1); }   // выше / ниже на 10 фт
+        else if (c == "alt") { p.kind = PR_ALT; p.a = me.alt + (cmd["dir"].num(0) > 0 ? 1 : -1); }   // выше / ниже на 5 фт
         else if (c == "door") {   // дверь рядом: открыть или закрыть
             const int x = cmd["x"].num(-1), y = cmd["y"].num(-1);
             if (x < 0 || y < 0 || x >= w.aw || y >= w.ah || !w.door[y][x] || std::max(fpGap(x, 1, me.x, fpN(me)), fpGap(y, 1, me.y, fpN(me))) != 1) { msg = "Рядом нет такой двери."; continue; }
@@ -203,7 +233,7 @@ static void humanTurn(World& w, int idx) {
             if (!cont && !canPay(me, ts, ab.cost, &why)) { msg = why ? why : "Нет действия."; continue; }
             if (!isObject(w, x, y) || w.ohp[y][x] <= 0) { msg = "В этой клетке нечего ломать (или объект неразрушим)."; continue; }
             // до объекта — до ближайшей его точки по высоте: дерево и стена стоят от земли клетки до верха (а не только верхушка)
-            const int gz = w.height[y][x], top = gz + (w.tree[y][x] ? TREE_UP : (w.wall[y][x] ? WALL_UP : 0)), mz = zF(w, me);
+            const int gz = w.height[y][x], top = gz + (w.tree[y][x] ? w.tree[y][x] : (w.wall[y][x] ? WALL_UP : 0)), mz = zF(w, me);
             if (distFP(me.x, me.y, mz, fpN(me), x, y, std::clamp(mz, gz, top), 1) > atkDist(me.b)) { msg = "Объект дальше дальности оружия."; continue; }
             const int r = rollD20(), ac = objAC(w, x, y);
             const bool crit = r == 20, hit = crit || (r != 1 && r + me.wAtk() >= ac);
@@ -229,14 +259,17 @@ static void humanTurn(World& w, int idx) {
         }
         else { msg = "Неизвестная команда."; continue; }
         const int ox = me.x, oy = me.y;
-        if (!applyPrim(w, idx, ts, p, true, &msg)) continue;
+        g_straight = p.kind == PR_MOVE;   // путь игрока — по прямой из дерева путей (то же, что показано под мышью)
+        const bool applied = applyPrim(w, idx, ts, p, true, &msg);
+        g_straight = false;
+        if (!applied) continue;
         switch (p.kind) {
             case PR_MOVE:
                 if (me.x == ox && me.y == oy) msg = "Не удалось пройти: путь закрыт или слишком далеко.";
                 else if ((me.x != p.x || me.y != p.y) && !occupied(w, p.x, p.y, &me)) msg = "Дошли не до конца: не хватило движения или путь закрыт.";
                 break;
             case PR_DASH: msg = "Рывок: движения стало вдвое больше."; break;
-            case PR_ALT: msg = me.alt > 0 ? "Высота " + std::to_string(10 * me.alt) + " фт." : (me.b.fly && canStayAloft(me) ? "Вы на земле." : "Вы упали."); break;
+            case PR_ALT: msg = me.alt > 0 ? "Высота " + std::to_string(5 * me.alt) + " фт." : (me.b.fly && canStayAloft(me) ? "Вы на земле." : "Вы упали."); break;
             case PR_DODGE: msg = "Уклонение: атаки по вам идут с помехой до вашего следующего хода."; break;
             case PR_DISENGAGE: msg = "Отход: движение не провоцирует атак."; break;
             case PR_HELP: msg = "Помощь: первая атака союзника по этому врагу — с преимуществом."; break;

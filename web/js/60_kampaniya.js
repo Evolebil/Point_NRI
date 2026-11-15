@@ -205,7 +205,7 @@ function kmpTabMap(v, s, M, heroes){
     <div class="small" id="kmSum" style="min-height:1.3em">${kmSumText()}</div>
     <div style="position:relative;max-width:1000px">
       <canvas id="kMap" style="width:100%;height:560px;display:block;border-radius:8px;cursor:grab;background:#1b2a3a;touch-action:none"></canvas>
-      <div style="position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:4px">
+      <div data-hud="Масштаб" style="position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:4px;padding-top:26px">
         <button id="kmIn" title="Ближе (колесо мыши)">＋</button><button id="kmOut" title="Дальше">－</button>
         <button id="kmHome" title="Весь мир">⤢</button>${s.pos ? '<button id="kmParty" title="К отряду">◎</button>' : ''}</div>
       <div id="kmScale" style="position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.55);color:#fff;padding:3px 8px;border-radius:6px;font-size:12px"></div></div>

@@ -423,7 +423,7 @@ void hazardHit(World& w, Fighter& f) {
         for (int dx = 0; dx < fpN(f) && !k; dx++)
             if (f.x + dx < W && f.y + dy < W) k = w.haz[f.y + dy][f.x + dx];
     // летун над землёй не касается жидкостей и льда, а с 20 фт и выше — никаких зон
-    if (!k || f.hp <= 0 || ((f.b.fly || f.up) && HAZ[k].flySafe) || f.alt >= 2 || f.hazTurn == g_turnSerial) return;
+    if (!k || f.hp <= 0 || ((f.b.fly || f.up) && HAZ[k].flySafe) || f.alt >= 4 || f.hazTurn == g_turnSerial) return;   // летун на 20 фт и выше — над зоной
     f.hazTurn = g_turnSerial;
     int dmg = rollDice(w.hazN, 10);
     const bool ok = saveOK(f, HAZ[k].save, w.hazDC);
@@ -461,7 +461,7 @@ void pushAway(World& w, Fighter& src, Fighter& t, int ft, int collN = 0) {
             break;
         }
         if (!out && t.up) {   // по настилу: дальше только по настилу
-            if (w.wall[ny][nx] || blockedAt(w, t, nx, ny) || std::abs(w.deck[ny][nx] - w.deck[t.y][t.x]) > 1) break;
+            if (w.wall[ny][nx] || blockedAt(w, t, nx, ny) || std::abs(w.deck[ny][nx] - w.deck[t.y][t.x]) > 2) break;
             t.x = nx;
             t.y = ny;
             continue;
@@ -480,10 +480,10 @@ void pushAway(World& w, Fighter& src, Fighter& t, int ft, int collN = 0) {
         t.x = nx;
         t.y = ny;
     }
-    // сброс с возвышенности или настила: падение, по 1к6 за уровень (10 фт) и сбит с ног
+    // сброс с возвышенности или настила: падение, по 1к6 за 10 фт и сбит с ног
     const int drop = h0 - zF(w, t);
     if (drop > 0 && t.hp > 0) {
-        hurt(t, rollDice(drop, 6), DT_BLUDGEONING, false);
+        if (fallDice(drop) > 0) hurt(t, rollDice(fallDice(drop), 6), DT_BLUDGEONING, false);
         if (t.hp > 0) applyCond(t, C_PRONE, 1, -1, 0, false);
     }
     hazardHit(w, t);
@@ -678,7 +678,7 @@ bool hitDeck(World& w, int x, int y, int dmg, int dtype) {
         if (f.up) {
             f.up = false;
             const int drop = top - zAt(w, x, y);
-            if (drop > 0) hurt(f, rollDice(drop, 6), DT_BLUDGEONING, false);
+            if (fallDice(drop) > 0) hurt(f, rollDice(fallDice(drop), 6), DT_BLUDGEONING, false);
             if (f.hp > 0) applyCond(f, C_PRONE, 1, -1, 0, false);
         } else {
             int d = rollDice(2, 10);
@@ -1115,7 +1115,7 @@ void endOfTurn(Fighter& me) {
 }
 int speedOf(const Fighter& f);
 // летун держится в воздухе, пока может двигаться (PHB): не сбит с ног, не опутан и не схвачен (скорость 0), не оглушён и не
-// парализован. Иначе падает: 1к6 дробящего за каждые 10 фт высоты, сбит с ног
+// парализован. Иначе падает: 1к6 дробящего за каждые 10 фт высоты (fallDice), сбит с ног
 inline bool canStayAloft(const Fighter& f) {
     return f.b.fly && !f.cond[C_PRONE] && !f.cond[C_RESTR] && !f.cond[C_GRAPPLE] && !f.cond[C_STUN] && !f.cond[C_PARAL] && f.hp > 0;
 }
@@ -1125,9 +1125,9 @@ void fallCheck(Fighter& f) {
     f.alt = 0;
     if (f.hp <= 0) return;
     const int hp0 = f.hp;
-    hurt(f, rollDice(h, 6), DT_BLUDGEONING, false);
+    if (fallDice(h) > 0) hurt(f, rollDice(fallDice(h), 6), DT_BLUDGEONING, false);
     f.cond[C_PRONE] = std::max(f.cond[C_PRONE], 1);
-    if (g_curW) evPush("{\"k\":\"fall\",\"who\":" + std::to_string((int)(&f - &g_curW->f[0])) + ",\"ft\":" + std::to_string(10 * h) + ",\"dmg\":" + std::to_string(hp0 - f.hp) + "}");
+    if (g_curW) evPush("{\"k\":\"fall\",\"who\":" + std::to_string((int)(&f - &g_curW->f[0])) + ",\"ft\":" + std::to_string(5 * h) + ",\"dmg\":" + std::to_string(hp0 - f.hp) + "}");
 }
 int speedOf(const Fighter& f) {
     int sp = f.b.speed;

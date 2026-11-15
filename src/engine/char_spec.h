@@ -439,7 +439,7 @@ static bool bossFromJson(const Json& j, Boss& b, long long& budget, int& hpWante
     b.dv = p["dv"].num(0);
     b.blindsight = p["blindsight"].num(0);
     b.truesight = p["truesight"].num(0);   // истинное зрение (v21)
-    if (b.truesight != 0 && b.truesight != 10 && b.truesight != 30 && b.truesight != 60 && b.truesight != 120) { err = "истинное зрение: 0, 10, 30, 60 или 120 фт"; return false; }
+    if (!senseOK(b.truesight, SENSE_TS)) { err = "истинное зрение: от 0 до 120 фт, шаг 5 фт"; return false; }
     b.ignDiff = p["ignDiff"].flag();
     b.climbS = p["climbS"].flag();   // скорости лазания, плавания, копания (v21)
     b.swimS = p["swimS"].flag();
@@ -453,8 +453,8 @@ static bool bossFromJson(const Json& j, Boss& b, long long& budget, int& hpWante
         !inRange(b.surge, 0, MAX_COUNT, "всплеск действий", err))
         return false;
     if (b.speed % 5) { err = "скорость покупается шагами по 5 фт (с нуля)"; return false; }
-    if (b.dv != 0 && b.dv != 30 && b.dv != 60 && b.dv != 120) { err = "тёмное зрение: 0, 30, 60 или 120 фт"; return false; }
-    if (b.blindsight != 0 && b.blindsight != 10 && b.blindsight != 30 && b.blindsight != 60) { err = "слепое зрение: 0, 10, 30 или 60 фт"; return false; }
+    if (!senseOK(b.dv, SENSE_DV)) { err = "тёмное зрение: от 0 до 120 фт, шаг 5 фт"; return false; }
+    if (!senseOK(b.blindsight, SENSE_BS)) { err = "слепое зрение: от 0 до 60 фт, шаг 5 фт"; return false; }
     for (int L = 1; L < 10; L++)
         if (!inRange(b.slots[L], 0, MAX_COUNT, "ячейки заклинаний", err)) return false;
     // способность с ячейкой без подходящих ячеек не сработает ни разу — это ошибка сборки, а не тихая трата очков

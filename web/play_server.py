@@ -6,7 +6,7 @@
 API:      POST /api, JSON. У каждого браузера свой id (sid): свой бой (start/step), свои запросы цен.
           Комнаты (v21, бои нескольких команд): room_create, room_join, room_set (персонаж, команда), room_bot (бот в команду),
           room_npc (противник из карточки персонажа — кампания),
-          room_kick, room_start (хозяин), room_poll (состояние, кадры, мой ход), room_step (ход игрока своего места).
+          room_kick, room_start (хозяин), room_poll (состояние, кадры, мой ход), room_step (ход игрока своего места), room_ptr (указка).
 """
 import base64
 import gzip
@@ -31,6 +31,7 @@ VENDOR = {"/vendor/three-r159.min.js": "three-r159.min.js"}   # путь в ад
 STATE = os.path.join(HERE, "state")   # игроки и журналы — не в git
 os.makedirs(STATE, exist_ok=True)
 ENGINE = os.path.join(HERE, "build", "arena_play")
+PTR_TTL = 4   # сек: указка без обновления гаснет (игрок отпустил клавишу, а сообщение не дошло)
 TURN_TIMEOUT = 300   # сек: после пяти минут без ответа ход завершается за игрока
 ROOM_IDLE = 3 * 3600  # сек: заброшенная комната удаляется
 # предохранители сервера наружу (аудит кода, раздел Д, шаг 4)
@@ -184,6 +185,27 @@ def solo(sid):
         return s
 
 
+def fog_frames(frames, team):
+    """Туман войны в бою нескольких игроков: кадр движка общий, у бойца — список команд, которые его не видят (hT).
+    Каждому участнику — своя копия: скрытый от его команды боец помечен hid (не рисуется, его действия не в журнале)."""
+    out = []
+    for fr in frames:
+        fs = fr.get("f") if isinstance(fr, dict) else None
+        if not fs or not any("hT" in f for f in fs):
+            out.append(fr)
+            continue
+        nf = []
+        for f in fs:
+            if "hT" in f:
+                hidden = team is not None and team in f["hT"]
+                f = {k: v for k, v in f.items() if k != "hT"}
+                if hidden:
+                    f["hid"] = 1
+            nf.append(f)
+        out.append(dict(fr, f=nf))
+    return out
+
+
 class Room:
     def __init__(self, code, host):
         self.code, self.host = code, host
@@ -219,8 +241,10 @@ class Room:
                 "members": [{"name": m["name"], "team": m["team"], "bot": m["bot"], "brain": m.get("brain", "rules"), "npc": bool(m.get("npc")), "me": m["sid"] == sid, "host": m["sid"] == self.host, "selected": bool(m.get("char")), "ready": bool(m.get("ready")) or m["bot"] is not None,
                              "i": i} for i, m in enumerate(self.members)],
                 "seat": self.seats.get(sid, -1), "init": self.init if self.init and since == 0 else None,
-                "frames": self.frames[since:], "nframes": len(self.frames), "req": mine["req"] if mine else None,
-                "waiting": who, "end": self.end, "opts": self.opts, "ver": self.ver}
+                "frames": fog_frames(self.frames[since:], next((m["team"] for m in self.members if m["sid"] == sid), None)), "nframes": len(self.frames), "req": mine["req"] if mine else None,
+                "waiting": who, "end": self.end, "opts": self.opts, "ver": self.ver,
+                "ptrs": [{"name": m["name"], "team": m["team"], "x": m["ptr"][0], "y": m["ptr"][1]} for m in self.members
+                         if m.get("ptr") and m["sid"] != sid and time.time() - m["ptr"][2] < PTR_TTL]}
 
     def feed(self, out):
         """Ответ движка: кадры, чей ход или итог."""
@@ -445,6 +469,12 @@ def room_cmd1(msg, sid):
             except Exception as e:  # noqa: BLE001
                 log("комната", r.code, "ошибка:", repr(e))
                 r.status, r.err = "lobby", "ошибка движка (подробности — в журнале сервера)"
+        elif cmd == "room_ptr":   # указка (как в Owlbear): игрок держит клавишу — остальные видят точку на карте
+            if me is not None:
+                try:
+                    me["ptr"] = [float(msg.get("x", 0)), float(msg.get("y", 0)), time.time()] if msg.get("on") else None
+                except (TypeError, ValueError):
+                    me["ptr"] = None
         elif cmd == "room_leave":   # в лобби — ушёл; в бою — его ходы завершаются сами, после боя он уходит
             if me is not None:
                 player_set(me["name"], room="")

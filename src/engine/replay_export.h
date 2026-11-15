@@ -190,9 +190,9 @@ static std::vector<BuyItem> bossItems(const Boss& b, const Coef& C, double budge
     if (b.surge) cp("passive", "Всплеск действий", "×" + std::to_string(b.surge), P(AT_SURGE, b.surge));
     for (int L = 1; L < 10; L++)
         if (b.slots[L]) cp("passive", "Ячейки заклинаний " + std::to_string(L) + " ур.", "×" + std::to_string(b.slots[L]), C[AT_SLOT] * L * b.slots[L]);
-    if (b.dv) cp("passive", "Тёмное зрение", std::to_string(b.dv) + " фт", P(AT_DARKV, b.dv == 30 ? 1 : (b.dv == 60 ? 2 : 3)));
-    if (b.truesight) cp("passive", "Истинное зрение", std::to_string(b.truesight) + " фт: видит невидимых и сквозь тьму", P(AT_TRUESIGHT, b.truesight <= 10 ? 1 : (b.truesight <= 30 ? 2 : (b.truesight <= 60 ? 3 : 4))));
-    if (b.blindsight) cp("passive", "Слепое зрение", std::to_string(b.blindsight) + " фт", P(AT_BLINDS, b.blindsight == 10 ? 1 : (b.blindsight == 30 ? 2 : 3)));
+    if (b.dv) cp("passive", "Тёмное зрение", std::to_string(b.dv) + " фт", P(AT_DARKV, senseMul(b.dv, SENSE_DV)));
+    if (b.truesight) cp("passive", "Истинное зрение", std::to_string(b.truesight) + " фт: видит невидимых и сквозь тьму", P(AT_TRUESIGHT, senseMul(b.truesight, SENSE_TS)));
+    if (b.blindsight) cp("passive", "Слепое зрение", std::to_string(b.blindsight) + " фт", P(AT_BLINDS, senseMul(b.blindsight, SENSE_BS)));
     if (b.ignDiff) cp("passive", "Лёгкая поступь", "игнорирует труднопроходимую местность", P(AT_IGNTERR));
     if (b.climbS) cp("passive", "Скорость лазания", "лазалка и подъём без надбавки, обрывы — как по лестнице", P(AT_CLIMB));
     if (b.swimS) cp("passive", "Скорость плавания", "вода не труднопроходима", P(AT_SWIM));

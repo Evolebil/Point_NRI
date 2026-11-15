@@ -7,16 +7,21 @@ let ME = null, meTool = 'wall', meCS = 20, mePainting = 0;
 const TOOLS = [['wall','Стена','#3b404d'],['pit','Ущелье','#07080c'],['water','Ручей','#2d6fa3'],['h','Высота земли (уровень)','#6f9a6f'],['ladder','Лестница','#c9a46a'],['deck','Настил / потолок (уровень)','#96703c'],['diff','Грязь','#56401e'],['climb','Укрытие','#7d7568'],['tree','Дерево','#2f6a33'],['doorC','Дверь (закрыта)','#6b4423'],['doorO','Дверь (открыта)','#a07040'],['strong','Крепкая стена','#17191f'],['z1','Лава','#e2572a'],['z2','Кислота','#7ccf2e'],['z3','Ядовитый дым','#7e8f57'],['z4','Ледяное поле','#9fd8ff'],['z5','Грозовое поле','#5868d8'],['z6','Некротический туман','#4b3a63'],['dark','Тьма','#1a1d3a'],['startA','Старт A','#2f7de1'],['startB','Старт B','#e0553f'],['erase','Ластик','#999']];
 const TOOL_GROUPS = [['Рельеф',['wall','pit','water','h','ladder','deck','diff']],['Объекты',['climb','tree','doorC','doorO','strong']],['Опасное',['z1','z2','z3','z4','z5','z6','dark']],['Старт и ластик',['startA','startB','erase']]];
 function meNew(aw, ah, theme = 0){ const L = {}; LAYERS.forEach(k => L[k] = new Uint8Array(aw * ah)); return {name: ME ? ME.name : 'Моя арена', aw, ah, theme, L, starts: [null, null]}; }
+// Высота, настил и дерево — в уровнях по 5 фт, символ клетки — цифра или буква (0–9, a–z = 10–35); карта с "hz":5.
+// Старые карты (уровни по 10 фт, дерево «1») переводятся при чтении: высота и настил ×2, дерево — 20 фт
+const HZ_LAYERS = ['height', 'deck', 'tree'];
 function meFromJson(j, name){
-  const m = meNew(j.aw, j.ah, j.theme || 0); if (name) m.name = name;
-  LAYERS.forEach(k => { for (let y = 0; y < j.ah; y++){ const row = (j[k] || [])[y] || ''; for (let x = 0; x < j.aw; x++) m.L[k][y * j.aw + x] = Math.max(0, +(row[x] || 0)) || 0; } });
+  const m = meNew(j.aw, j.ah, j.theme || 0), old = j.hz !== 5; if (name) m.name = name;
+  LAYERS.forEach(k => { for (let y = 0; y < j.ah; y++){ const row = (j[k] || [])[y] || ''; for (let x = 0; x < j.aw; x++){
+    const v = Math.max(0, parseInt(row[x] || '0', 36) || 0);
+    m.L[k][y * j.aw + x] = !old || !HZ_LAYERS.includes(k) ? v : (k === 'tree' ? (v ? 4 : 0) : 2 * v); } } });
   m.starts = [j.starts && j.starts[0] ? j.starts[0].slice() : null, j.starts && j.starts[1] ? j.starts[1].slice() : null];
   if (!(m.starts[0] && m.starts[1])) m.starts = [null, null];
   return m;
 }
 function meToJson(m = ME){
-  const o = {aw: m.aw, ah: m.ah, theme: m.theme};
-  LAYERS.forEach(k => { o[k] = []; for (let y = 0; y < m.ah; y++){ let r = ''; for (let x = 0; x < m.aw; x++) r += m.L[k][y * m.aw + x]; o[k].push(r); } });
+  const o = {aw: m.aw, ah: m.ah, theme: m.theme, hz: 5};
+  LAYERS.forEach(k => { o[k] = []; for (let y = 0; y < m.ah; y++){ let r = ''; for (let x = 0; x < m.aw; x++) r += m.L[k][y * m.aw + x].toString(36); o[k].push(r); } });
   if (m.starts[0] && m.starts[1]) o.starts = m.starts;
   return o;
 }
@@ -90,20 +95,21 @@ function paintMap(c, m, meCS){
   const city = m.theme === 1, g = city ? [74,78,90] : [58,92,60];
   for (let y = 0; y < m.ah; y++) for (let x = 0; x < m.aw; x++){
     const i = y * m.aw + x, h = m.L.height[i], px = x * meCS, py = y * meCS, n = ((x * 7 + y * 13) % 5) * 2;
-    c.fillStyle = `rgb(${g[0] + h * 18 + n},${g[1] + h * 18 + n},${g[2] + h * 18 + n})`; c.fillRect(px, py, meCS, meCS);
+    c.fillStyle = `rgb(${g[0] + h * 9 + n},${g[1] + h * 9 + n},${g[2] + h * 9 + n})`; c.fillRect(px, py, meCS, meCS);
     if (m.L.diff[i]){ c.fillStyle = 'rgba(86,62,30,.5)'; c.fillRect(px, py, meCS, meCS); }
     if (m.L.water[i]){ c.fillStyle = '#2d6fa3'; c.fillRect(px, py, meCS, meCS); }
     if (m.L.pit[i]){ c.fillStyle = '#07080c'; c.fillRect(px, py, meCS, meCS); }
     if (m.L.wall[i]){ c.fillStyle = '#2a2d36'; c.fillRect(px, py, meCS, meCS); c.fillStyle = '#4a4f5e'; c.fillRect(px, py, meCS, Math.max(2, meCS * .3)); }
     if (m.L.climb[i]){ c.fillStyle = '#7d7568'; c.beginPath(); c.arc(px + meCS / 2, py + meCS / 2, meCS * .36, 0, 7); c.fill(); }
-    if (m.L.tree[i]){ c.fillStyle = '#2f6a33'; c.beginPath(); c.arc(px + meCS / 2, py + meCS / 2, meCS * .46, 0, 7); c.fill(); c.strokeStyle = 'rgba(0,0,0,.4)'; c.lineWidth = 1; c.stroke(); }
+    if (m.L.tree[i]){ c.fillStyle = '#2f6a33'; c.beginPath(); c.arc(px + meCS / 2, py + meCS / 2, meCS * (.3 + .02 * m.L.tree[i]), 0, 7); c.fill(); c.strokeStyle = 'rgba(0,0,0,.4)'; c.lineWidth = 1; c.stroke();
+      if (meCS >= 16){ c.fillStyle = 'rgba(255,255,255,.85)'; c.font = `700 ${Math.round(meCS * .32)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(m.L.tree[i] * 5, px + meCS / 2, py + meCS / 2); } }   // высота дерева в футах
     if (m.L.haz[i]){ c.fillStyle = ['', '#e2572a', '#7ccf2e', '#7e8f57', '#9fd8ff', '#5868d8', '#4b3a63'][m.L.haz[i]]; c.globalAlpha = .75; c.fillRect(px, py, meCS, meCS); c.globalAlpha = 1; }
     if (m.L.dark[i]){ c.fillStyle = 'rgba(6,8,28,.5)'; c.fillRect(px, py, meCS, meCS); }
-    if (h){ c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 1; c.strokeRect(px + .5, py + .5, meCS - 1, meCS - 1); if (meCS >= 16){ c.fillStyle = 'rgba(255,255,255,.7)'; c.font = `700 ${Math.round(meCS * .38)}px system-ui`; c.textAlign = 'right'; c.textBaseline = 'top'; c.fillText(h, px + meCS - 2, py + 1); } }
+    if (h){ c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 1; c.strokeRect(px + .5, py + .5, meCS - 1, meCS - 1); if (meCS >= 16){ c.fillStyle = 'rgba(255,255,255,.7)'; c.font = `700 ${Math.round(meCS * .38)}px system-ui`; c.textAlign = 'right'; c.textBaseline = 'top'; c.fillText(h * 5, px + meCS - 2, py + 1); } }
     if (m.L.door[i]){ c.fillStyle = m.L.door[i] === 1 ? '#6b4423' : 'rgba(160,112,64,.55)'; c.fillRect(px + meCS * .2, py + meCS * .2, meCS * .6, meCS * .6); }
     if (m.L.strong[i]){ c.fillStyle = '#17191f'; c.fillRect(px, py, meCS, meCS); c.fillStyle = '#565c6c'; c.fillRect(px, py, meCS, Math.max(2, meCS * .3)); }
     if (m.L.ladder[i]){ c.strokeStyle = '#c9a46a'; c.lineWidth = 2; c.beginPath(); c.moveTo(px + meCS * .3, py + 2); c.lineTo(px + meCS * .3, py + meCS - 2); c.moveTo(px + meCS * .7, py + 2); c.lineTo(px + meCS * .7, py + meCS - 2); for (let k = 1; k <= 3; k++){ c.moveTo(px + meCS * .3, py + meCS * k / 4); c.lineTo(px + meCS * .7, py + meCS * k / 4); } c.stroke(); }
-    if (m.L.deck[i]){ c.fillStyle = 'rgba(150,112,60,.5)'; c.fillRect(px, py, meCS, meCS); c.strokeStyle = 'rgba(240,200,120,.9)'; c.lineWidth = 1; c.strokeRect(px + 1.5, py + 1.5, meCS - 3, meCS - 3); if (meCS >= 16){ c.fillStyle = '#ffe2a0'; c.font = `700 ${Math.round(meCS * .34)}px system-ui`; c.textAlign = 'left'; c.textBaseline = 'bottom'; c.fillText('▲' + m.L.deck[i], px + 2, py + meCS - 1); } }
+    if (m.L.deck[i]){ c.fillStyle = 'rgba(150,112,60,.5)'; c.fillRect(px, py, meCS, meCS); c.strokeStyle = 'rgba(240,200,120,.9)'; c.lineWidth = 1; c.strokeRect(px + 1.5, py + 1.5, meCS - 3, meCS - 3); if (meCS >= 16){ c.fillStyle = '#ffe2a0'; c.font = `700 ${Math.round(meCS * .34)}px system-ui`; c.textAlign = 'left'; c.textBaseline = 'bottom'; c.fillText('▲' + m.L.deck[i] * 5, px + 2, py + meCS - 1); } }
   }
   if (meCS >= 10){ c.strokeStyle = 'rgba(255,255,255,.07)'; c.beginPath(); for (let x = 0; x <= m.aw; x++){ c.moveTo(x * meCS + .5, 0); c.lineTo(x * meCS + .5, m.ah * meCS); } for (let y = 0; y <= m.ah; y++){ c.moveTo(0, y * meCS + .5); c.lineTo(m.aw * meCS, y * meCS + .5); } c.stroke(); }
   [['A', '#2f7de1'], ['B', '#e0553f']].forEach(([l, col], k) => { const st = m.starts[k]; if (!st) return; c.fillStyle = col; c.beginPath(); c.arc((st[0] + .5) * meCS, (st[1] + .5) * meCS, Math.max(5, meCS * .42), 0, 7); c.fill(); c.strokeStyle = '#fff'; c.lineWidth = 2; c.stroke(); c.fillStyle = '#fff'; c.font = `800 ${Math.max(9, meCS * .5)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(l, (st[0] + .5) * meCS, (st[1] + .5) * meCS + 1); });
@@ -125,7 +131,7 @@ function mePaint(e, erase){
     if (t === 'deck'){ if (erase) L.deck[i] = 0; else if (!L.wall[i] && lv > L.height[i]) L.deck[i] = lv; continue; }
     if (erase){ L[t][i] = 0; continue; }
     if (t === 'wall'){ L.wall[i] = 1; L.pit[i] = 0; L.water[i] = 0; L.climb[i] = 0; L.height[i] = 0; L.tree[i] = 0; }
-    else if (t === 'tree'){ if (!L.wall[i] && !L.pit[i] && !L.water[i]){ L.tree[i] = 1; L.climb[i] = 0; } }
+    else if (t === 'tree'){ if (!L.wall[i] && !L.pit[i] && !L.water[i]){ L.tree[i] = +$('meTreeH').value || 4; L.climb[i] = 0; } }   // высота дерева — из списка (10–40 фт)
     else if (t === 'pit'){ L.pit[i] = 1; L.wall[i] = 0; L.water[i] = 0; L.height[i] = 0; L.climb[i] = 0; }
     else if (t === 'water'){ L.water[i] = 1; L.wall[i] = 0; L.pit[i] = 0; }
     else if (t === 'climb'){ if (!L.wall[i] && !L.pit[i]){ L.climb[i] = 1; L.tree[i] = 0; } }

@@ -52,7 +52,7 @@ void lairAction(World& w, int i) {
     g_srcIdx = i;
     for (auto& t : w.f) {
         if (t.hp <= 0 || t.team == me.team) continue;
-        if (std::max(fpGap(t.x, fpN(t), cx, 1), fpGap(t.y, fpN(t), cy, 1)) > 2 || 10 * t.alt > 10) continue;
+        if (std::max(fpGap(t.x, fpN(t), cx, 1), fpGap(t.y, fpN(t), cy, 1)) > 2 || 5 * t.alt > 10) continue;
         int dmg = rollDice(2 * me.b.lair, 10);
         const bool ok = saveOK(t, DEX, me.dc()), evade = t.b.evasion && !t.cond[C_STUN] && !t.cond[C_PARAL];
         if (ok || evade) dmg = ok && evade ? 0 : dmg / 2;
@@ -331,6 +331,12 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
             const int ht = g_human.ask && g_human.idx >= 0 && g_human.idx < (int)w.f.size() ? w.f[g_human.idx].team : g_fogTeam;
             const int kind = duel ? ((int)k < 2 ? (int)k : 2 + w.f[k].team) : ((int)k < N ? w.f[k].team % 2 : 2 + w.f[k].team % 2);   // команды: цвет — по team
             std::string fj = fighterJson(w.f[k], kind, !g_human.multi && ht >= 0 && w.f[k].team != ht && !isKnown(w, ht, (int)k));
+            if (g_human.multi && w.f[k].hp > 0) {   // несколько игроков: кадр общий — команды, от которых боец скрыт (сервер ставит hid каждому)
+                std::string ht2;
+                for (int t = 0; t < nT; t++)
+                    if (t != w.f[k].team && !isKnown(w, t, (int)k)) ht2 += (ht2.empty() ? "" : ",") + std::to_string(t);
+                if (!ht2.empty()) fj.insert(fj.size() - 1, ",\"hT\":[" + ht2 + "]");
+            }
             if (!duel) fj.insert(fj.size() - 1, ",\"lead\":" + std::to_string((int)k < N ? (int)k : w.f[k].summoner) + ",\"ld\":" + ((int)k < N ? "1" : "0"));   // команды: чей это боец
             fr += fj;
         }

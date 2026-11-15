@@ -289,6 +289,7 @@ bool canSee(const World& w, const Fighter& v, const Fighter& t) {
     const bool ts = v.b.truesight >= d && !v.cond[C_BLIND];   // истинное зрение (v21): невидимых и сквозь тьму
     if (v.cond[C_BLIND] || t.hidden || (t.invisRounds > 0 && !ts)) return false;
     if (w.dark[t.y][t.x] && v.b.dv < d && !ts) return false;
+    if (fogLine(w, v.x, v.y, zF(w, v), t.x, t.y, zF(w, t))) return false;   // дым или туман между ними (или вокруг одного)
     // ночь (пакет атомов 2, свет): без тёмного зрения неосвещённое видно не дальше 30 фт
     if (!w.day && d > 30 && v.b.dv < d && !ts && !litAt(w, t)) return false;
     return true;
@@ -299,6 +300,15 @@ inline bool litAt(const World& w, const Fighter& t) {
         if (g.hp <= 0 || g.banished > 0) continue;
         const int r = std::max(g.b.lightR, g.lightRounds > 0 ? g.lightR : 0);
         if (r > 0 && distFt(g, t) <= r) return true;
+    }
+    return false;
+}
+// клетка освещена (туман войны на карте ночью): тот же свет, что у litAt
+inline bool litCell(const World& w, int x, int y) {
+    for (auto& g : w.f) {
+        if (g.hp <= 0 || g.banished > 0) continue;
+        const int r = std::max(g.b.lightR, g.lightRounds > 0 ? g.lightR : 0);
+        if (r > 0 && distFC(w, g, x, y) <= r) return true;
     }
     return false;
 }

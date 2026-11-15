@@ -142,12 +142,13 @@
     <div class="size-line"><input type="number" id="meW" min="5" max="100" value="20" aria-label="Ширина"><span>×</span><input type="number" id="meH" min="5" max="100" value="14" aria-label="Высота"><button class="btn" id="meResize" type="button">OK</button></div>
     <select id="meTheme" aria-label="Тема карты"><option value="0">дикая местность</option><option value="1">город</option></select>
     <div class="size-line"><select id="meBrush" aria-label="Размер кисти"><option value="1">кисть 1</option><option value="2">кисть 2</option><option value="3">кисть 3</option><option value="5">кисть 5</option></select>
-      <select id="meLevel" aria-label="Уровень высоты"><option value="0">уровень 0 (0 фт)</option><option value="1" selected>уровень 1 (10 фт)</option><option value="2">уровень 2 (20 фт)</option><option value="3">уровень 3 (30 фт)</option><option value="4">уровень 4 (40 фт)</option><option value="5">уровень 5 (50 фт)</option><option value="6">уровень 6 (60 фт)</option><option value="7">уровень 7 (70 фт)</option><option value="8">уровень 8 (80 фт)</option><option value="9">уровень 9 (90 фт)</option></select></div>
+      <select id="meLevel" aria-label="Высота (земля, настил)"><option value="0">высота 0 фт</option><option value="1">высота 5 фт</option><option value="2" selected>высота 10 фт</option><option value="3">высота 15 фт</option><option value="4">высота 20 фт</option><option value="5">высота 25 фт</option><option value="6">высота 30 фт</option><option value="7">высота 35 фт</option><option value="8">высота 40 фт</option><option value="9">высота 45 фт</option><option value="10">высота 50 фт</option><option value="11">высота 55 фт</option><option value="12">высота 60 фт</option><option value="13">высота 65 фт</option><option value="14">высота 70 фт</option><option value="15">высота 75 фт</option><option value="16">высота 80 фт</option><option value="17">высота 85 фт</option><option value="18">высота 90 фт</option></select></div>
+    <select id="meTreeH" aria-label="Высота дерева"><option value="2">дерево 10 фт</option><option value="3">дерево 15 фт</option><option value="4" selected>дерево 20 фт</option><option value="5">дерево 25 фт</option><option value="6">дерево 30 фт</option><option value="7">дерево 35 фт</option><option value="8">дерево 40 фт</option></select>
     <button class="btn wide" id="meRandom" type="button">Случайная заготовка</button>
     <button class="btn wide" id="meBorder" type="button">Рамка из стен</button>
     <button class="btn wide" id="meClear" type="button">Очистить</button>
     <div id="meMsg"></div>
-    <details class="ws-help"><summary>Как рисовать</summary><p class="small muted">ЛКМ — рисовать, ПКМ — стереть слой. Все свободные клетки должны быть связаны. Высота: перепад в 1 уровень — подъём, больше — обрыв (только по лестнице). Настил — второй ярус над землёй.</p><div class="legend2" id="meLegend"></div></details>
+    <details class="ws-help"><summary>Как рисовать</summary><p class="small muted">ЛКМ — рисовать, ПКМ — стереть слой. Все свободные клетки должны быть связаны. Высота — шагами по 5 фт: перепад до 10 фт — подъём, больше — обрыв (только по лестнице). Дерево — своей высоты (10–40 фт), на него можно залезть. Настил — второй ярус над землёй.</p><div class="legend2" id="meLegend"></div></details>
   </aside>
   <div class="ws-bottom glass">
     <select id="meList" aria-label="Сохранённые карты"></select>
@@ -273,7 +274,7 @@
       <button class="btn btn-sm" id="camBtn" type="button">Камера: следить</button>
       <button class="btn btn-sm" id="fullBtn" type="button">Во весь экран</button>
       <button class="btn btn-sm" id="view3dBtn" type="button" hidden>Вид: 3D</button>
-      <label class="small"><input type="checkbox" id="fogOn" checked> туман войны</label>
+      <span class="small" id="ptrHint" hidden title="Как в Owlbear: точку под мышью видят все в комнате">Держите Q — указка</span>
     </div>
   </div>
 </section>

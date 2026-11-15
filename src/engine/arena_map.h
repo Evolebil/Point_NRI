@@ -15,11 +15,12 @@ inline void putWorldCell(World& w, int x, int y, const wg::Cell& c) {
     w.diff[y][x] = c.diff || c.water;
     w.dark[y][x] = c.dark;
     w.pit[y][x] = c.pit && !c.wall;
-    w.height[y][x] = c.height;
-    w.tree[y][x] = c.tree && !c.wall && !c.pit && !c.water;
+    w.height[y][x] = (unsigned char)(2 * c.height);   // мир хранит уровни по 10 фт, арена — по 5 фт
+    w.tree[y][x] = (unsigned char)(c.tree && !c.wall && !c.pit && !c.water ? (c.treeH ? c.treeH : TREE_DEF) : 0);   // дерево своей высоты (10–40 фт)
     w.haz[y][x] = c.wall || c.pit ? 0 : c.haz;
+    if (w.haz[y][x] && HAZ[w.haz[y][x]].obscure) w.fogAny = true;
     w.ladder[y][x] = c.ladder && !c.wall && !c.pit;
-    w.deck[y][x] = !c.wall && c.deck > c.height ? c.deck : 0;
+    w.deck[y][x] = (unsigned char)(!c.wall && c.deck > c.height ? 2 * c.deck : 0);
     w.door[y][x] = c.wall ? 0 : c.door;
     w.strong[y][x] = c.strong && c.wall;
 }

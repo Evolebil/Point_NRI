@@ -267,6 +267,48 @@ class TestRoomWithEngine(unittest.TestCase):
         self.assertEqual(v["end"]["who"], ["Аня", "Бот 1"])
         self.assertTrue(all(m["sid"] != "s1" or m["name"] == "Аня" for m in ps.ROOMS[code].members))
 
+    def test_pointer(self):
+        """Указка (Q): точку игрока видят другие (не он сам); отпустил — гаснет; без обновления — гаснет сама."""
+        code = ps.room_cmd1({"cmd": "room_create", "name": "Аня"}, "s1")["code"]
+        ps.room_cmd1({"cmd": "room_join", "code": code, "name": "Боря"}, "s2")
+        ps.room_cmd1({"cmd": "room_ptr", "code": code, "on": True, "x": 3, "y": 4}, "s1")
+        self.assertEqual(ps.room_cmd1({"cmd": "room_poll", "code": code}, "s2")["ptrs"], [{"name": "Аня", "team": 0, "x": 3.0, "y": 4.0}])
+        self.assertEqual(ps.room_cmd1({"cmd": "room_poll", "code": code}, "s1")["ptrs"], [])
+        ps.ROOMS[code].members[0]["ptr"][2] -= ps.PTR_TTL + 1
+        self.assertEqual(ps.room_cmd1({"cmd": "room_poll", "code": code}, "s2")["ptrs"], [])
+        ps.room_cmd1({"cmd": "room_ptr", "code": code, "on": True, "x": "мусор"}, "s1")
+        ps.room_cmd1({"cmd": "room_ptr", "code": code, "on": False}, "s1")
+        self.assertEqual(ps.room_cmd1({"cmd": "room_poll", "code": code}, "s2")["ptrs"], [])
+
+    def test_fog_two_players(self):
+        """Туман войны в бою двух людей: кадр общий, но каждому — своя копия; скрытый от его команды боец помечен hid."""
+        frames = [{"f": [{"x": 1, "team": 0}, {"x": 9, "team": 1, "hT": [0]}]}, {"f": [{"x": 2, "team": 0}]}]
+        a, b, spect = ps.fog_frames(frames, 0), ps.fog_frames(frames, 1), ps.fog_frames(frames, None)
+        self.assertEqual(a[0]["f"][1], {"x": 9, "team": 1, "hid": 1})
+        self.assertEqual(b[0]["f"][1], {"x": 9, "team": 1})
+        self.assertEqual(spect[0]["f"][1], {"x": 9, "team": 1})
+        self.assertIn("hT", frames[0]["f"][1])                 # общий кадр комнаты не испорчен
+        self.assertIs(a[1], frames[1])                         # кадр без скрытых — без копии
+        code = ps.room_cmd1({"cmd": "room_create", "name": "Аня"}, "s1")["code"]
+        ps.room_cmd1({"cmd": "room_join", "code": code, "name": "Боря"}, "s2")
+        ps.room_cmd1({"cmd": "room_set", "code": code, "char": KNIGHT}, "s1")
+        ps.room_cmd1({"cmd": "room_set", "code": code, "char": KNIGHT}, "s2")
+        mp = {"aw": 20, "ah": 14, "dark": ["1" * 20] * 14}   # вся арена во тьме: без тёмного зрения врага не видно
+        v = ps.room_cmd1({"cmd": "room_start", "code": code, "seed": 3, "map": mp}, "s1")
+        self.assertEqual(v["err"], "")
+        r = ps.ROOMS[code]
+        for _ in range(8):   # стоят на месте: где враг стоял в начале боя, через раунд уже не известно
+            if r.status != "fight" or not r.pending:
+                break
+            sid = next(s for s, k in r.seats.items() if k == r.pending["seat"])
+            ps.room_cmd1({"cmd": "room_step", "code": code, "c": "end"}, sid)
+        team = {m["sid"]: m["team"] for m in r.members}
+        for sid in ("s1", "s2"):
+            last = ps.room_cmd1({"cmd": "room_poll", "code": code}, sid)["frames"][-1]["f"]
+            for f in last:
+                self.assertNotIn("hT", f)
+                self.assertEqual(bool(f.get("hid")), f["team"] != team[sid], (sid, f))   # свой виден, чужой во тьме — нет
+
 
 if __name__ == "__main__":
     unittest.main()

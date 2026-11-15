@@ -30,6 +30,10 @@ function onInput(e){
       if (!Number.isFinite(v) || v < (CAT.minBudget || 20) || v > (CAT.maxBudget || 100000) || v === S.budget) return;
       S.budget = v; loadCatalog().then(() => { syncForm(); queuePrice(); }); save(); return;
     }
+    if (/(^|\.)(dv|blindsight|truesight)$/.test(el.dataset.p)){   // зрение: шаг 5 фт в пределах поля — по выходу из поля, а не на каждой цифре
+      if (e.type !== 'change') return;
+      v = Math.max(+el.min || 0, Math.min(+el.max || 120, 5 * Math.round(v / 5))); el.value = v;
+    }
     setPath(S, el.dataset.p, v);
     if (el.dataset.p.endsWith('_kind') || /^abilities\.\d+\.(ground|shape)$/.test(el.dataset.p)) renderAbilities();
     if (/^passives\.rules\.\d+\.(when|what)$/.test(el.dataset.p)) renderRules();

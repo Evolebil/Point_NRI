@@ -258,7 +258,18 @@ async function renderCharacters(){
   });
 }
 ROUTE_ENTER.characters = renderCharacters;
-function budgetField(id, def){ return `<label class="field">Сумма очков<select id="${id}">${BUDGETS.map(n => `<option value="${n}" ${n === def ? 'selected' : ''}>${n} очков</option>`).join('')}</select></label>`; }
+// сумма очков персонажа — любое целое (подсказки — ступени быстрого боя: только на них ищется соперник)
+const BUD_MIN = () => (CAT && CAT.minBudget) || 20, BUD_MAX = () => (CAT && CAT.maxBudget) || 100000;
+function budgetField(id, def){
+  return `<label class="field">Сумма очков<input type="number" id="${id}" value="${def}" min="${BUD_MIN()}" max="${BUD_MAX()}" step="1" list="${id}L" style="width:100%"><datalist id="${id}L">${BUDGETS.map(n => `<option value="${n}"></option>`).join('')}</datalist></label>
+    <p class="small muted">Любое целое от ${BUD_MIN()} до ${BUD_MAX()}. Быстрый бой ищет соперника только на ${BUDGETS.join(', ')} очков; для комнат, кампании и мастерской подходит любая сумма.</p>`;
+}
+// введённая сумма или null (с подсказкой), если вне пределов
+function budgetOf(el){
+  const v = Math.round(+el.value);
+  if (!Number.isFinite(v) || v < BUD_MIN() || v > BUD_MAX()){ toast(`Сумма очков — целое от ${BUD_MIN()} до ${BUD_MAX()}`, 4000, true); el.focus(); return null; }
+  return v;
+}
 function createCharacter(budget, from, presetK){
   const c = clone(DEFAULT_CHAR); c.budget = budget; c.name = 'Новый персонаж';
   const list = readProfiles(), p = {id: newId(), name: c.name, budget, character: c}; list.push(p); writeProfiles(list);
@@ -267,13 +278,13 @@ function createCharacter(budget, from, presetK){
 }
 $('charCreate').onclick = () => {
   const m = modal('Создать персонажа', budgetField('ncBudget', Q.budget), '<button data-close>Отмена</button><button class="primary" id="ncOk">Создать</button>');
-  m.q('#ncOk').onclick = () => { const b = +m.q('#ncBudget').value; m.close(); createCharacter(b, 'characters'); };
+  m.q('#ncOk').onclick = () => { const b = budgetOf(m.q('#ncBudget')); if (b == null) return; m.close(); createCharacter(b, 'characters'); };
 };
 $('charTemplate').onclick = async () => {
   await siteReady;
   const m = modal('Выбрать готового', `<label class="field">Шаблон<select id="tpK">${templates().map(t => `<option value="${t.k}">${esc(t.name)}</option>`).join('')}</select></label>${budgetField('tpB', Q.budget)}`,
     '<button data-close>Отмена</button><button class="primary" id="tpOk">Создать</button>');
-  m.q('#tpOk').onclick = () => { const k = +m.q('#tpK').value, b = +m.q('#tpB').value; m.close(); createCharacter(b, 'characters', k); };
+  m.q('#tpOk').onclick = () => { const k = +m.q('#tpK').value, b = budgetOf(m.q('#tpB')); if (b == null) return; m.close(); createCharacter(b, 'characters', k); };
 };
 $('charUpload').onclick = () => $('charFile').click();
 $('charFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importCharacterFile(f); };
@@ -367,16 +378,16 @@ $('edPortraitFile').onchange = async e => {
   finally { $('edPortraitBtn').disabled = false; }
 };
 // персонаж в комнату: один — сразу, несколько — выбор
-function pickRoomCharacter(){
+// персонаж для комнаты: выпадающий список своих персонажей в лобби (51_room.js); выбранный сразу уходит в комнату
+function roomCharOptions(cur, chosen){
   const list = readProfiles();
-  const pack = p => { const old = S; S = fullChar(p.character); const c = toChar(); S = old; if (p.portrait) c.portrait = p.portrait; return c; };
-  if (!list.length){ toast('Сначала создайте персонажа в «Мои персонажи»', 5000, true); return Promise.resolve(null); }
-  if (list.length === 1) return Promise.resolve(pack(list[0]));
-  return new Promise(res => {
-    const m = modal('Персонаж для комнаты', `<label class="field">Персонаж<select id="rcSel">${list.map(p => `<option value="${esc(p.id)}" ${p.id === activeId() ? 'selected' : ''}>${esc(p.name)} · ${+p.budget || 0} оч.</option>`).join('')}</select></label>`,
-      '<button data-close>Отмена</button><button class="primary" id="rcOk">Выбрать</button>', {onClose: () => res(null)});
-    m.q('#rcOk').onclick = () => { const p = list.find(x => x.id === m.q('#rcSel').value); res(p ? pack(p) : null); m.close(); };
-  });
+  if (!list.length) return '<option value="">нет персонажей — создайте в «Мои персонажи»</option>';
+  return `<option value="" disabled ${list.some(p => p.id === cur) ? '' : 'selected'}>${chosen ? 'выбран — сменить на…' : '— выберите персонажа —'}</option>` +
+    list.map(p => `<option value="${esc(p.id)}" ${p.id === cur ? 'selected' : ''}>${esc(p.name)} · ${+p.budget || 0} оч.</option>`).join('');
+}
+function roomCharPack(id){
+  const p = readProfiles().find(x => x.id === id); if (!p) return null;
+  const old = S; S = fullChar(p.character); const c = toChar(); S = old; if (p.portrait) c.portrait = p.portrait; return c;
 }
 
 // ---- настройки ----
@@ -443,14 +454,16 @@ function wdFromInputs(){
   return {id: 'world-' + Date.now().toString(36), name, seed: String(seed), cells, theme: +$('wdTheme').value || 0};
 }
 ROUTE_ENTER.worlds = () => { wdList(); if (!WD.cur){ const l = readWorlds(); if (l[0]) wdOpen(l[0]); else { const w = wdFromInputs(); if (w){ w.id = ''; wdOpen(w); } } } else requestAnimationFrame(wdDraw); };
+// выход из миров — туда, откуда пришли (комната выбирает участок здесь), иначе в меню
+const wdLeave = () => { const r = WD.ret || 'home'; WD.ret = ''; go(r); };
 ROUTE_BACK.worlds = async () => {
   if (wdDirty()){
     const m = modal('Сохранить мир?', '<p>Есть несохранённые изменения участка.</p>', '<button data-close>Отмена</button><button id="wdNo">Не сохранять</button><button class="primary" id="wdYes">Сохранить</button>');
-    m.q('#wdNo').onclick = () => { m.close(); WD.snap = wdState(); go('home'); };
-    m.q('#wdYes').onclick = () => { m.close(); wdSave(); go('home'); };
+    m.q('#wdNo').onclick = () => { m.close(); WD.snap = wdState(); wdLeave(); };
+    m.q('#wdYes').onclick = () => { m.close(); wdSave(); wdLeave(); };
     return;
   }
-  go('home');
+  wdLeave();
 };
 function wdSave(){
   if (!WD.cur) return;
@@ -499,13 +512,19 @@ $('wdCv').addEventListener('pointermove', e => {
   wdDraw();
 });
 ['pointerup', 'pointercancel'].forEach(ev => $('wdCv').addEventListener(ev, () => { WD.drag = null; }));
+// участок мира f -> карта в формате редактора (местность — по клетке мира в середине участка); wm — карта мира, если уже есть
+async function worldPieceMap(w, f, wm){
+  if (!wm){ wm = await api({cmd:'worldmap', seed: String(w.seed), size: Math.max(1000, w.cells * 10)}); if (wm.type !== 'worldmap') return wm; }
+  const n = wm.n, k = n / w.cells, cx = Math.max(0, Math.min(n - 1, Math.floor((f.x + f.w / 2) * k))), cy = Math.max(0, Math.min(n - 1, Math.floor((f.y + f.h / 2) * k)));
+  const bi = wm.biome[cy][cx], level = +wm.height[cy][cx];
+  const terrain = {a:'тундра', b:'тайга', c:'ледник', d:'степь', e:'лес', f:'болото', g:'пустыня', h:'саванна', i:'джунгли'}[bi] || 'лес';
+  return api({cmd:'regionmap', cell: {terrain, level, river: bi === '~', road: bi === '=' ? 'NESW' : '', settle: bi === '#' ? 'город' : bi === '+' ? 'деревня' : '', seed: `${w.seed}:${cx}:${cy}`}, w: f.w, h: f.h});
+}
 $('wdOpen').onclick = async () => {
   if (!WD.map || !WD.cur) return;
-  const f = WD.frame, n = WD.map.n, k = n / WD.cur.cells, cx = Math.max(0, Math.min(n - 1, Math.floor((f.x + f.w / 2) * k))), cy = Math.max(0, Math.min(n - 1, Math.floor((f.y + f.h / 2) * k)));
-  const bi = WD.map.biome[cy][cx], level = +WD.map.height[cy][cx];
-  const terrain = {a:'тундра', b:'тайга', c:'ледник', d:'степь', e:'лес', f:'болото', g:'пустыня', h:'саванна', i:'джунгли'}[bi] || 'лес';
+  const f = WD.frame;
   $('wdOpen').disabled = true;
-  const r = await api({cmd:'regionmap', cell: {terrain, level, river: bi === '~', road: bi === '=' ? 'NESW' : '', settle: bi === '#' ? 'город' : bi === '+' ? 'деревня' : '', seed: `${WD.cur.seed}:${cx}:${cy}`}, w: f.w, h: f.h});
+  const r = await worldPieceMap(WD.cur, f, WD.map);
   $('wdOpen').disabled = false;
   if (r.type !== 'map'){ toast(r.err || 'Не удалось открыть участок', 5000, true); return; }
   if (typeof meDirty === 'function' && meDirty() && !(await confirmBox('В редакторе карт есть несохранённая карта. Заменить её участком мира?', 'Заменить'))) return;

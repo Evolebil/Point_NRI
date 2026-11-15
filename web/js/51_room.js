@@ -99,15 +99,18 @@ function roomLobby(v){
     <div class="room-cols"><div>
       <div class="panel"><h2>Участники</h2>${rows}${v.status === 'lobby' ? '<div class="member-free">Свободное место — ждём друзей</div>' : ''}</div>
       <div class="panel room-tools">
-        <button id="rmMine" type="button">${mine && mine.selected ? 'Сменить персонажа' : 'Взять моего персонажа'}</button>
+        <select id="rmChar" ${mine && v.status === 'lobby' ? '' : 'disabled'} aria-label="Мой персонаж">${roomCharOptions(ROOM.charId, mine && mine.selected)}</select>
         ${mine && mine.selected ? `<button id="rmReady" type="button" class="${mine.ready ? '' : 'primary'}">${mine.ready ? 'Не готов' : 'Готов'}</button>` : ''}
         ${host && v.status === 'lobby' ? `<span class="sep"></span><span class="muted">Бот:</span><div class="seg" id="rmBotSeg"><button type="button" data-brain="rules">Алгоритм</button><button type="button" data-brain="net" class="on">Нейросеть</button></div>
         <span class="muted">бюджет</span><input type="number" id="rmBotB" value="${(lastPrice && lastPrice.ok && S.budget) || 1600}" min="20" max="100000" aria-label="Бюджет бота"><button id="rmBot" type="button">+ Добавить бота</button>` : ''}
       </div></div>
       <div class="panel room-map"><h2>Карта</h2>
-        <div class="seg"><button type="button" data-rmmap="gen" class="${ROOM.mapKind !== 'own' ? 'on' : ''}">Сгенерированная</button><button type="button" data-rmmap="own" class="${ROOM.mapKind === 'own' ? 'on' : ''}">Своя</button></div>
+        <div class="seg">${[['gen', 'Сгенерированная'], ['world', 'Участок мира'], ['own', 'Своя']].map(([k, n]) => `<button type="button" data-rmmap="${k}" class="${ROOM.mapKind === k ? 'on' : ''}" ${host ? '' : 'disabled'}>${n}</button>`).join('')}</div>
         <canvas id="rmMapCv" width="640" height="372" aria-label="Предпросмотр карты"></canvas>
-        <div class="room-line"${ROOM.mapKind === 'own' ? ' hidden' : ''}><span>Код карты (зерно)</span><input type="number" id="rmSeed" min="1" max="99999" value="${ROOM.seed}" ${host ? '' : 'disabled'} aria-label="Зерно карты"><button id="rmSeedDice" type="button" ${host ? '' : 'disabled'}>Случайная</button></div>
+        <div class="room-line"${ROOM.mapKind === 'gen' ? '' : ' hidden'}><span>Код карты (зерно)</span><input type="number" id="rmSeed" min="1" max="99999" value="${ROOM.seed}" ${host ? '' : 'disabled'} aria-label="Зерно карты"><button id="rmSeedDice" type="button" ${host ? '' : 'disabled'}>Случайная</button></div>
+        <div class="room-line"${ROOM.mapKind === 'gen' ? '' : ' hidden'}><span>Размер</span><input type="number" id="rmGenW" min="5" max="100" style="width:72px;flex:none" value="${ROOM.genW}" ${host ? '' : 'disabled'} aria-label="Ширина карты"><span>×</span><input type="number" id="rmGenH" min="5" max="100" style="width:72px;flex:none" value="${ROOM.genH}" ${host ? '' : 'disabled'} aria-label="Высота карты">
+          <select id="rmTheme" ${host ? '' : 'disabled'} aria-label="Местность"><option value="0" ${ROOM.theme ? '' : 'selected'}>дикая местность</option><option value="1" ${ROOM.theme ? 'selected' : ''}>город</option></select></div>
+        <div class="room-line"${ROOM.mapKind === 'world' ? '' : ' hidden'}><span>Мир</span><select id="rmWorld" ${host ? '' : 'disabled'} aria-label="Мир">${roomWorldOptions()}</select><button id="rmWorldPick" type="button" ${host && roomWorld() ? '' : 'disabled'}>Выбрать участок…</button></div>
         <div class="room-line"${ROOM.mapKind === 'own' ? '' : ' hidden'}><span>Своя карта</span><select id="rmOwn" ${host ? '' : 'disabled'} aria-label="Своя карта">${roomOwnOptions()}</select></div>
         <hr><div class="room-line"><span>Предел раундов</span><select id="rmRounds" ${host ? '' : 'disabled'} aria-label="Предел раундов">${[10, 20, 50, 0].map(n => `<option value="${n}" ${n === ROOM.rounds ? 'selected' : ''}>${n || 'без предела'}</option>`).join('')}</select></div>
       </div></div>
@@ -125,7 +128,20 @@ function roomLobby(v){
   if (ROUTE === 'coop') go('coop');   // надпись «Выйти из комнаты» на кнопке назад
 }
 // выбор карты комнаты: своя (из мастерской) или сгенерированная по зерну; предпросмотр — та же карта, что пойдёт в бой
-Object.assign(ROOM, {mapKind: 'gen', seed: 1 + Math.floor(Math.random() * 99999), own: '', rounds: 50, botBrain: 'net', genMap: null, genKey: ''});
+// сгенерированная — по зерну, размеру и местности; участок мира — рамка, сохранённая в «Мирах» (выбрать — кнопкой, оттуда назад в комнату)
+Object.assign(ROOM, {mapKind: 'gen', seed: 1 + Math.floor(Math.random() * 99999), genW: 32, genH: 20, theme: 0, world: '', own: '', rounds: 50, botBrain: 'net', genMap: null, genKey: '', charId: ''});
+const roomWorld = () => readWorlds().find(w => w.id === ROOM.world) || null;
+function roomWorldOptions(){
+  const l = readWorlds();
+  if (!l.length) return '<option value="">нет миров — создайте в Мастерской → Миры</option>';
+  if (!l.some(w => w.id === ROOM.world)) ROOM.world = l[0].id;
+  return l.map(w => { const f = Object.assign(wdCenter(w.cells), w.frame || {}); return `<option value="${esc(w.id)}" ${w.id === ROOM.world ? 'selected' : ''}>${esc(w.name)} · участок ${f.w}×${f.h}</option>`; }).join('');
+}
+// ключ карты для предпросмотра и боя: та же карта, что показана
+function roomMapKey(){
+  if (ROOM.mapKind === 'gen') return `g:${ROOM.seed}:${ROOM.genW}:${ROOM.genH}:${ROOM.theme}`;
+  const w = roomWorld(); return w ? `w:${w.seed}:${w.cells}:${JSON.stringify(Object.assign(wdCenter(w.cells), w.frame || {}))}` : '';
+}
 function roomOwnOptions(){
   const names = Object.keys(MAPS);
   if (!names.length) return '<option value="">нет сохранённых карт — нарисуйте в Мастерской</option>';
@@ -137,17 +153,25 @@ async function roomMapPreview(){
   let m = null;
   if (ROOM.mapKind === 'own') m = MAPS[ROOM.own] || null;
   else {
-    const key = String(ROOM.seed);
-    if (ROOM.genKey !== key){ ROOM.genKey = key; ROOM.genMap = null; const r = await api({cmd:'genmap', seed: ROOM.seed, w: 32, h: 20, theme: 0}); if (ROOM.genKey === key && r.type === 'map') ROOM.genMap = r.map; }
-    m = ROOM.genMap;
+    const key = roomMapKey(), w = roomWorld();
+    if (key && ROOM.genKey !== key){
+      ROOM.genKey = key; ROOM.genMap = null; roomMapDraw(null);
+      const r = ROOM.mapKind === 'gen' ? await api({cmd:'genmap', seed: ROOM.seed, w: ROOM.genW, h: ROOM.genH, theme: ROOM.theme}) : await worldPieceMap(w, Object.assign(wdCenter(w.cells), w.frame || {}));
+      if (ROOM.genKey !== key) return;
+      if (r.type === 'map') ROOM.genMap = r.map; else { ROOM.genKey = ''; toast(r.err || 'Не удалось построить карту', 5000, true); }
+    }
+    m = key ? ROOM.genMap : null;
   }
+  roomMapDraw(m);
+}
+function roomMapDraw(m){
   const c = $('rmMapCv'); if (!c) return;
   if (!m){ const x = c.getContext('2d'); x.clearRect(0, 0, c.width, c.height); return; }
   drawMapFit(c, meFromJson(m));
 }
 function roomMapPayload(){
   if (ROOM.mapKind === 'own') return MAPS[ROOM.own] ? {map: MAPS[ROOM.own]} : {};
-  return ROOM.genMap && ROOM.genKey === String(ROOM.seed) ? {map: ROOM.genMap} : {};
+  return ROOM.genMap && ROOM.genKey && ROOM.genKey === roomMapKey() ? {map: ROOM.genMap} : {};
 }
 $('rmCreate').onclick = async () => {
   const name = $('rmName').value.trim(); if (!name || name.length > 24){ toast('Введите имя игрока (1–24 символа)', 4000, true); return; }
@@ -169,7 +193,6 @@ $('rmBox').addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b || b.disabled) return;
   if (b.id === 'rmCopy'){ (navigator.clipboard ? navigator.clipboard.writeText(ROOM.code) : Promise.reject()).then(() => toast('Код скопирован: ' + ROOM.code), () => toast('Код комнаты: ' + ROOM.code)); return; }
   if (b.id === 'rmBack'){ G.room = ''; ROOM.n = 0; await roomCall({cmd:'room_poll'}); return; }
-  if (b.id === 'rmMine'){ const char = await pickRoomCharacter(); if (char) await roomCall({cmd:'room_set', char, name: playerName() || S.name}); return; }
   if (b.id === 'rmReady'){ const me = ROOM.v.members.find(m => m.me); await roomCall({cmd:'room_set', ready: !(me && me.ready)}); return; }
   if (b.dataset.brain){ ROOM.botBrain = b.dataset.brain; b.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); return; }
   if (b.id === 'rmBot'){
@@ -180,9 +203,12 @@ $('rmBox').addEventListener('click', async e => {
   if (b.dataset.rmkick){ const member = ROOM.v.members[+b.dataset.rmkick]; if (!(await confirmBox(`Убрать из комнаты «${member ? member.name : 'игрока'}»?`, 'Убрать', true))) return; await roomCall({cmd:'room_kick', i: +b.dataset.rmkick}); return; }
   if (b.dataset.rmmap){ ROOM.mapKind = b.dataset.rmmap; ROOM.lobbyHtml = ''; roomLobby(ROOM.v); return; }
   if (b.id === 'rmSeedDice'){ ROOM.seed = 1 + Math.floor(Math.random() * 99999); $('rmSeed').value = ROOM.seed; roomMapPreview(); return; }
+  if (b.id === 'rmWorldPick'){ const w = roomWorld(); if (!w) return; WD.ret = 'coop'; go('worlds'); wdOpen(w); toast('Выберите рамкой участок и нажмите «Сохранить мир», затем «← Выйти» — вернётесь в комнату', 7000); return; }
   if (b.id === 'rmStart'){
     if (ROOM.mapKind === 'own' && !MAPS[ROOM.own]){ toast('Выберите свою карту или сгенерированную', 4000, true); return; }
-    if (ROOM.mapKind === 'gen' && !(ROOM.genMap && ROOM.genKey === String(ROOM.seed))) await roomMapPreview();
+    if (ROOM.mapKind === 'world' && !roomWorld()){ toast('Нет мира: создайте его в Мастерской → Миры', 4000, true); return; }
+    if (ROOM.mapKind !== 'own' && !roomMapPayload().map) await roomMapPreview();
+    if (ROOM.mapKind !== 'own' && !roomMapPayload().map){ toast('Карта ещё не построена — попробуйте снова', 4000, true); return; }
     b.disabled = true;
     ROOM.n = 0; G.room = ''; await roomCall(Object.assign({cmd:'room_start', rounds: ROOM.rounds, seed: ROOM.seed}, roomMapPayload()));
   }
@@ -191,6 +217,10 @@ $('rmBox').addEventListener('change', async e => {
   const t = e.target;
   if (t.id === 'rmSeed'){ ROOM.seed = Math.max(1, Math.min(99999, Math.trunc(+t.value) || 1)); t.value = ROOM.seed; roomMapPreview(); return; }
   if (t.id === 'rmOwn'){ ROOM.own = t.value; roomMapPreview(); return; }
+  if (t.id === 'rmGenW' || t.id === 'rmGenH'){ const v = Math.max(5, Math.min(100, Math.trunc(+t.value) || 5)); t.value = v; ROOM[t.id === 'rmGenW' ? 'genW' : 'genH'] = v; roomMapPreview(); return; }
+  if (t.id === 'rmTheme'){ ROOM.theme = +t.value; roomMapPreview(); return; }
+  if (t.id === 'rmWorld'){ ROOM.world = t.value; ROOM.lobbyHtml = ''; roomLobby(ROOM.v); return; }
+  if (t.id === 'rmChar'){ const char = roomCharPack(t.value); if (!char) return; ROOM.charId = t.value; await roomCall({cmd:'room_set', char, name: playerName() || S.name}); return; }
   if (t.id === 'rmRounds'){ ROOM.rounds = +t.value; return; }
   if (t.dataset.rmbrain){ await roomCall({cmd:'room_set', i: +t.dataset.rmbrain, brain: t.value}); return; }
   if (!t.dataset.rmteam) return;
@@ -282,7 +312,7 @@ function showEnd(r){
 // высота считается в расстояние (10 фт за уровень): объяснить, почему цель «далеко», когда летун высоко
 function altHint(q){
   const me = FR[curIdx] && FR[curIdx].f[q.me];
-  return me && me.alt && /дальше дальности/.test(q.msg || '') ? ` Вы на высоте ${me.alt * 10} фт — высота тоже входит в расстояние до цели, спуститесь ниже.` : '';
+  return me && me.alt && /дальше дальности/.test(q.msg || '') ? ` Вы на высоте ${me.alt * 5} фт — высота тоже входит в расстояние до цели, спуститесь ниже.` : '';
 }
 function fightBroken(err){
   G.over = true; G.busy = true; G.req = null; clearInterval(turnTimer);
@@ -302,4 +332,42 @@ async function leaveFight(){
 }
 ROUTE_BACK.battle = leaveFight;
 ROUTE_BACK.coop = async () => { if (!ROOM.code) return go('home'); if (await confirmBox('Выйти из комнаты?' + (v0().status === 'fight' ? ' Ваш герой останется в бою, его ходы будут завершаться сами.' : ''), 'Выйти', true)) await roomLeave(); };
-ROUTE_ENTER.coop = () => { if (!ROOM.code){ $('rmJoin').hidden = false; $('rmBox').innerHTML = ''; ROOM.lobbyHtml = ''; } const n = playerName(); if (n && !$('rmName').value) $('rmName').value = n; roomJoinValidity(); };
+ROUTE_ENTER.coop = prev => { if (prev === 'worlds' && ROOM.v && ROOM.v.status === 'lobby' && !G.room){ ROOM.lobbyHtml = ''; roomLobby(ROOM.v); } if (!ROOM.code){ $('rmJoin').hidden = false; $('rmBox').innerHTML = ''; ROOM.lobbyHtml = ''; } const n = playerName(); if (n && !$('rmName').value) $('rmName').value = n; roomJoinValidity(); };
+// ---- указка (как в Owlbear): пока игрок держит Q, остальные в комнате видят точку под его мышью ----
+const PTR = {on: false, x: -1, y: -1, sent: 0, got: 0};
+function ptrSend(on){
+  if (!G.room || !ROOM.code) return;
+  PTR.sent = performance.now();
+  api({cmd:'room_ptr', code: ROOM.code, on, x: PTR.x, y: PTR.y}).catch(() => {});   // ответ не нужен: точки других приходят опросом
+}
+function ptrMove(){
+  if (!PTR.on) return;
+  const c = R3.on ? R3.hit : hover; if (!c || c.x < 0 || c.y < 0 || c.x >= AW || c.y >= AH) return;
+  const moved = c.x !== PTR.x || c.y !== PTR.y; PTR.x = c.x; PTR.y = c.y;
+  if ((moved && performance.now() - PTR.sent > 120) || performance.now() - PTR.sent > 2000) ptrSend(true);   // не чаще 8 раз в секунду; стоит — раз в 2 с
+}
+addEventListener('keydown', e => {
+  if (e.code !== 'KeyQ' || e.repeat || !G.room || !viewActive() || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  PTR.on = true; PTR.x = -1; ptrMove();
+});
+addEventListener('keyup', e => { if (e.code === 'KeyQ' && PTR.on){ PTR.on = false; ptrSend(false); } });
+addEventListener('blur', () => { if (PTR.on){ PTR.on = false; ptrSend(false); } });
+cv.addEventListener('mousemove', () => ptrMove());
+setInterval(() => { if (PTR.on) ptrMove(); }, 500);
+// рисование: свои и чужие указки — пульсирующая точка цвета команды с именем (2D и 3D)
+function ptrDraw(now){
+  const ph = $('ptrHint'); if (ph.hidden === !!G.room) ph.hidden = !G.room;   // подсказка — только в бою комнаты
+  if (!G.room || !G.active) return;
+  const v = ROOM.v || {}, list = (v.ptrs || []).slice();
+  if (PTR.on && PTR.x >= 0){ const me = (v.members || []).find(m => m.me); list.push({name: me ? me.name : 'вы', team: me ? me.team : 0, x: PTR.x, y: PTR.y}); }
+  list.forEach(p => {
+    if (p.x < 0 || p.y < 0 || p.x >= AW || p.y >= AH) return;
+    const s = R3.on ? r3P(p.x + .5, VZ0 + mapN('height', p.x, p.y) + .1, p.y + .5) : {x: PX(p.x + .5), y: PY(p.y + .5), ok: true};
+    if (!s.ok) return;
+    const col = teamCol(p.team), u = (now % 900) / 900;
+    ctx.save(); ctx.globalAlpha = 1 - u; ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(s.x, s.y, 8 + u * 22, 0, 7); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.fillStyle = col; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(s.x, s.y, 7, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.font = '800 13px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.strokeText(p.name, s.x + 12, s.y - 12); ctx.fillStyle = '#fff'; ctx.fillText(p.name, s.x + 12, s.y - 12);
+    ctx.restore();
+  });
+}

@@ -136,9 +136,10 @@ struct World {
     int aw = W, ah = W, theme = 0;
     bool pit[W][W] = {};                  // ущелье: пешком не пройти, обзор не закрывает, мост — обычные клетки в нём
     bool water[W][W] = {};                // ручей (труднопроходим: diff); отдельный слой нужен для рисунка и описания
-    unsigned char height[W][W] = {};      // возвышенность: 0, 1, 2 (по 10 фт); подъём +5 фт движения за уровень, сброс вниз — падение
-    bool tree[W][W] = {};                 // дерево (высокий предмет): обзор закрывает, внизу не пройти — только залезть (вершина на TREE_UP выше)
+    unsigned char height[W][W] = {};      // возвышенность: уровень по 5 фт (0–35); подъём +5 фт движения за 10 фт, сброс вниз — падение
+    unsigned char tree[W][W] = {};        // дерево: его высота в уровнях по 5 фт (TREE_MIN–TREE_MAX), 0 — нет; обзор закрывает, внизу не пройти — только залезть на вершину
     unsigned char haz[W][W] = {};         // опасная зона: вид (HAZ), 0 — нет
+    bool fogAny = false;                  // есть зона дыма или тумана (HAZ obscure) — иначе обзор не проверяет облака
     bool ladder[W][W] = {};               // лестница: с неё и на неё — любой перепад высоты (лезть: +5 фт за уровень)
     unsigned char deck[W][W] = {};        // второй ярус (мост, балкон, навес, потолок): уровень его верха, 0 — нет
     short dhp[W][W] = {};                 // хиты второго яруса (обрушить)
@@ -171,32 +172,41 @@ struct World {
     mutable int kills[MAXT] = {};
 };
 // ---- объекты и высота (v21, местность) ----
-// Уровень клетки — в единицах по 10 фт: земля (height) плюс вершина дерева, если существо на нём. Расстояние между
-// клетками — трёхмерное, как в PHB: 5 фт × наибольшее из смещений по x, y и высоте (уровень = 2 клетки).
+// Уровень клетки — в единицах по 5 фт (ветка 3d; было 10 фт): земля (height) плюс вершина дерева, если существо на нём.
+// Расстояние между клетками — трёхмерное, как в PHB: 5 фт × наибольшее из смещений по x, y и высоте (уровень = клетка).
 // Объекты — стена, дерево, укрытие — имеют КД и хиты (DMG «Объекты»: дерево КД 15, камень КД 17; иммунитет к яду и
 // психическому урону). Разрушенный объект оставляет обломки — труднопроходимую местность.
-constexpr int TREE_UP = 2, WALL_UP = 3;   // дерево — 20 фт, стена — 30 фт над землёй
+constexpr int WALL_UP = 6;   // стена — 30 фт над землёй
+// дерево своей высоты: 10–40 фт; дерево старых карт и генератора без высоты — 20 фт
+constexpr int TREE_MIN = 2, TREE_MAX = 8, TREE_DEF = 4;
+// рост (уровни по 5 фт, как у настила): до среднего — 10 фт, большой — 20, огромный — 30, громадный — 40
+inline int bodyZ(int sizeLvl) { return 2 * sizeLvl; }
+// падение (PHB): 1к6 за каждые 10 фт, не больше 20к6; подъём по уступу, лестнице, на дерево: +5 фт движения за каждые 10 фт
+inline int fallDice(int dz) { return std::min(20, std::max(0, dz) / 2); }
+inline int climbFt(int dz) { return dz > 0 ? 5 * ((dz + 1) / 2) : 0; }
 constexpr int OBJ_WALL_HP = 54, OBJ_TREE_HP = 27, OBJ_CLIMB_HP = 27, OBJ_STRONG_HP = 120, OBJ_DOOR_HP = 18;
 // Опасные зоны (v21, местность): вещество задаёт только тип урона и спасбросок. Как в DMG: урон, когда существо впервые
 // за ход входит в зону или начинает в ней ход; спасбросок — половина. Летун не касается жидкостей и льда, но не облаков.
-struct HazKind { const char* name; int dtype, save; bool flySafe; };
-constexpr HazKind HAZ[] = {{"", 0, 0, true},
-                           {"лава", DT_FIRE, DEX, true},          {"кислота", DT_ACID, DEX, true},
-                           {"ядовитый дым", DT_POISON, CON, false}, {"ледяное поле", DT_COLD, CON, true},
-                           {"грозовое поле", DT_LIGHTNING, DEX, false}, {"некротический туман", DT_NECROTIC, CON, false}};
-constexpr int HAZ_N = 7;
-inline int zAt(const World& w, int x, int y) { return w.height[y][x] + (w.tree[y][x] ? TREE_UP : 0); }
+// Дым и туман (obscure) — сильно заслонённая местность (PHB): стоящего в облаке не видно, сквозь облако не видно; облако —
+// HAZ_UP над землёй (летун выше — над ним, как и над уроном зоны); видит сквозь него только слепое зрение
+struct HazKind { const char* name; int dtype, save; bool flySafe, obscure; };
+constexpr HazKind HAZ[] = {{"", 0, 0, true, false},
+                           {"лава", DT_FIRE, DEX, true, false},          {"кислота", DT_ACID, DEX, true, false},
+                           {"ядовитый дым", DT_POISON, CON, false, true}, {"ледяное поле", DT_COLD, CON, true, false},
+                           {"грозовое поле", DT_LIGHTNING, DEX, false, false}, {"некротический туман", DT_NECROTIC, CON, false, true}};
+constexpr int HAZ_N = 7, HAZ_UP = 4;   // облако зоны — 20 фт над землёй
+inline int zAt(const World& w, int x, int y) { return w.height[y][x] + w.tree[y][x]; }
 // Второй ярус (2.5D): в клетке земля (height, дерево) и, если есть, верхний настил deck. Под настилом пройти можно,
-// если хватает высоты по росту (рост: до среднего — 1 уровень, большой — 2, огромный — 3, громадный — 4); настил, на
-// который не забраться, — просто потолок. Шаг между узлами (клетка, ярус): перепад до 1 уровня — подъём (+5 фт за
-// уровень), больше — обрыв: только по лестнице, на дерево и с него, летуну — под открытым небом (не под настилом).
+// если хватает высоты по росту (bodyZ: до среднего — 10 фт, большой — 20, огромный — 30, громадный — 40); настил, на
+// который не забраться, — просто потолок. Шаг между узлами (клетка, ярус): перепад до 10 фт — подъём (+5 фт за 10 фт),
+// больше — обрыв: только по лестнице, на дерево и с него, летуну — под открытым небом (не под настилом).
 constexpr int DECK_HP = 40;
 inline int sizeLv(const Fighter& f) { return f.b.size <= 2 ? 1 : f.b.size - 1; }
 inline int nodeZ(const World& w, int x, int y, int l) { return l ? w.deck[y][x] : zAt(w, x, y); }
 inline int zF(const World& w, const Fighter& f) { return nodeZ(w, f.x, f.y, f.up ? 1 : 0) + f.alt; }
-// Высота полёта (v21): летун висит на alt уровней (по 10 фт) над землёй или настилом под собой — до ALT_MAX, а под настилом
-// (потолком) — пока помещается по росту. Подняться или опуститься на уровень — 10 фт движения.
-constexpr int ALT_MAX = 6;
+// Высота полёта (v21): летун висит на alt уровней (по 5 фт) над землёй или настилом под собой — до ALT_MAX (60 фт), а под
+// настилом (потолком) — пока помещается по росту. Подняться или опуститься на уровень — 5 фт движения.
+constexpr int ALT_MAX = 12;
 inline bool canStayAloft(const Fighter& f);   // держится в воздухе (ниже)
 inline int maxAltAt(const World& w, const Fighter& f, int x, int y, int l) {
     if (!f.b.fly) return 0;
@@ -206,11 +216,11 @@ inline int maxAltAt(const World& w, const Fighter& f, int x, int y, int l) {
         for (int dx = 0; dx < n; dx++) {
             const int cx = x + dx, cy = y + dy;
             if (cx >= W || cy >= W || l || !w.deck[cy][cx]) continue;
-            m = std::min(m, std::max(0, w.deck[cy][cx] - zAt(w, cx, cy) - sizeLv(f)));
+            m = std::min(m, std::max(0, w.deck[cy][cx] - zAt(w, cx, cy) - bodyZ(sizeLv(f))));
         }
     return m;
 }
-inline int dist3(int x0, int y0, int z0, int x1, int y1, int z1) { return 5 * std::max({std::abs(x1 - x0), std::abs(y1 - y0), 2 * std::abs(z1 - z0)}); }
+inline int dist3(int x0, int y0, int z0, int x1, int y1, int z1) { return 5 * std::max({std::abs(x1 - x0), std::abs(y1 - y0), std::abs(z1 - z0)}); }
 // Клетки по размеру (PHB): до среднего — 1 клетка, большой — 2×2, огромный — 3×3, громадный — 4×4. Позиция бойца (x, y) —
 // левая верхняя клетка его квадрата. Расстояние — между ближайшими клетками квадратов, обзор — от любой клетки до любой,
 // область задевает, если накрыла хоть одну клетку
@@ -218,16 +228,16 @@ inline int fpFull(const Fighter& f) { return sizeLv(f); }
 int fpN(const Fighter& f);   // занятый квадрат с учётом протискивания (ниже)
 inline int fpGap(int a0, int an, int b0, int bn) { return std::max({0, b0 - (a0 + an - 1), a0 - (b0 + bn - 1)}); }
 inline int distFP(int ax, int ay, int az, int an, int bx, int by, int bz, int bn) {
-    return 5 * std::max({fpGap(ax, an, bx, bn), fpGap(ay, an, by, bn), 2 * std::abs(az - bz)});
+    return 5 * std::max({fpGap(ax, an, bx, bn), fpGap(ay, an, by, bn), std::abs(az - bz)});
 }
 inline bool fpOverlap(int ax, int ay, int an, int bx, int by, int bn) { return ax < bx + bn && bx < ax + an && ay < by + bn && by < ay + an; }
 inline bool nodeOK1(const World& w, const Fighter& f, int x, int y, int l) {
     if (x < 0 || y < 0 || x >= w.aw || y >= w.ah || w.wall[y][x]) return false;
     if (l) return w.deck[y][x] > 0;
-    return (!w.pit[y][x] || f.b.burrowS) && (!w.deck[y][x] || w.deck[y][x] - zAt(w, x, y) >= sizeLv(f));   // копатель — и под ущельем
+    return (!w.pit[y][x] || f.b.burrowS) && (!w.deck[y][x] || w.deck[y][x] - zAt(w, x, y) >= bodyZ(sizeLv(f)));   // копатель — и под ущельем
 }
 // квадрат n×n в узле (клетка, ярус): весь на арене, без стен и ям, без деревьев (крупный на дерево не лезет), перепад
-// внутри квадрата не больше уровня
+// внутри квадрата не больше 10 фт
 inline bool nodeOKn(const World& w, const Fighter& f, int x, int y, int l, int n) {
     if (n == 1) return nodeOK1(w, f, x, y, l);
     if (!nodeOK1(w, f, x, y, l)) return false;
@@ -235,7 +245,7 @@ inline bool nodeOKn(const World& w, const Fighter& f, int x, int y, int l, int n
     for (int dy = 0; dy < n; dy++)
         for (int dx = 0; dx < n; dx++) {
             const int cx = x + dx, cy = y + dy;
-            if (!nodeOK1(w, f, cx, cy, l) || (!l && w.tree[cy][cx]) || std::abs((l ? w.deck[cy][cx] : zAt(w, cx, cy)) - z0) > 1) return false;
+            if (!nodeOK1(w, f, cx, cy, l) || (!l && w.tree[cy][cx]) || std::abs((l ? w.deck[cy][cx] : zAt(w, cx, cy)) - z0) > 2) return false;
         }
     return true;
 }
@@ -300,15 +310,15 @@ inline bool stepOK(const World& w, const Fighter& f, int x, int y, int l, int nx
         if (l && !nl && !w.deck[ny][nx]) return true;
     }
     const int dz = std::abs(nodeZ(w, nx, ny, nl) - nodeZ(w, x, y, l));
-    if (dz <= 1 || w.ladder[y][x] || w.ladder[ny][nx]) return true;
+    if (dz <= 2 || w.ladder[y][x] || w.ladder[ny][nx]) return true;   // до 10 фт — подъём
     if (!l && !nl && (f.b.climbS || f.b.burrowS)) return true;   // лазун — по скале, копатель — сквозь землю
-    if (!l && !nl && (w.tree[y][x] || w.tree[ny][nx]) && dz <= TREE_UP + 1) return true;
+    if (!l && !nl && (w.tree[y][x] || w.tree[ny][nx]) && dz <= std::max(w.tree[y][x], w.tree[ny][nx]) + 2) return true;   // на дерево и с него: его высота и ещё 10 фт уступа
     return f.b.fly && !w.deck[y][x] && !w.deck[ny][nx];
 }
 inline bool isObject(const World& w, int x, int y) { return x >= 0 && y >= 0 && x < w.aw && y < w.ah && (w.wall[y][x] || w.tree[y][x] || w.climb[y][x] || w.door[y][x]); }
 inline int objAC(const World& w, int x, int y) { return w.wall[y][x] ? 17 : ((w.tree[y][x] || w.door[y][x]) ? 15 : 17); }
 inline int cellDist(const World* w, int x0, int y0, int x1, int y1) {
-    const int dz = w ? 2 * std::abs(zAt(*w, x0, y0) - zAt(*w, x1, y1)) : 0;
+    const int dz = w ? std::abs(zAt(*w, x0, y0) - zAt(*w, x1, y1)) : 0;
     return 5 * std::max({std::abs(x1 - x0), std::abs(y1 - y0), dz});
 }
 void hazardHit(World& w, Fighter& f);   // опасная зона под бойцом (ниже)
@@ -363,13 +373,13 @@ int distFt(const Fighter& a, const Fighter& b) {
 // от бойца до клетки (земля клетки): от ближайшей клетки его квадрата
 inline int distFC(const World& w, const Fighter& f, int x, int y) { return distFP(f.x, f.y, zF(w, f), fpN(f), x, y, zAt(w, x, y), 1); }
 // прямая видимость: линия от глаз (уровень клетки + 5 фт) до глаз; закрывают стена (на WALL_UP выше земли), дерево (на
-// TREE_UP) и земля клетки, если линия проходит ниже их верха. На ровной арене — как раньше: закрывают стены и деревья
+// свою высоту) и земля клетки, если линия проходит ниже их верха. На ровной арене — как раньше: закрывают стены и деревья
 // Настил закрывает обзор сквозь себя: линия, пересекающая его уровень над этой клеткой (в том числе над своей и над клеткой
 // цели — стоящий под мостом не видит стоящего на нём), закрыта
 bool losZ(const World& w, int x0, int y0, int z0, int x1, int y1, int z1) {
     int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx - dy,
         x = x0, y = y0;
-    const double za = z0 + 0.5, zb = z1 + 0.5;
+    const double za = z0 + 1.0, zb = z1 + 1.0;   // глаза — на 5 фт выше ног
     const int n = std::max(dx, dy);
     auto slab = [&](int cx, int cy, double lo, double hi) { const int d = w.deck[cy][cx]; return d > 0 && std::min(lo, hi) < d && std::max(lo, hi) > d; };
     if (n == 0) return !slab(x0, y0, za, zb);   // одна клетка: стоящий на настиле и стоящий под ним
@@ -389,7 +399,7 @@ bool losZ(const World& w, int x0, int y0, int z0, int x1, int y1, int z1) {
         if (x == x1 && y == y1) break;
         const double zl = za + (zb - za) * i / n;
         const bool shut = w.wall[y][x] || w.door[y][x] == 1;
-        const int top = w.height[y][x] + (shut ? WALL_UP : (w.tree[y][x] ? TREE_UP : 0));
+        const int top = w.height[y][x] + (shut ? WALL_UP : w.tree[y][x]);
         if ((shut || w.tree[y][x] || w.height[y][x] > 0) && top > zl) return false;
         if (slab(x, y, za + (zb - za) * (i - 0.5) / n, za + (zb - za) * (i + 0.5) / n)) return false;
     }
@@ -410,8 +420,36 @@ bool losFP(const World& w, int ax, int ay, int az, int an, int bx, int by, int b
 // видимость между бойцами (с их ярусом) и от бойца до клетки (земля клетки)
 bool losF(const World& w, const Fighter& a, const Fighter& b) { return losFP(w, a.x, a.y, zF(w, a), fpN(a), b.x, b.y, zF(w, b), fpN(b)); }
 bool losFC(const World& w, const Fighter& a, int x, int y) { return losFP(w, a.x, a.y, zF(w, a), fpN(a), x, y, zAt(w, x, y), 1); }
+// облако дыма или тумана (HAZ obscure) в клетке на уровне z: сильно заслонено
+inline bool fogCell(const World& w, int x, int y, double z) {
+    const int k = w.haz[y][x];
+    return k && HAZ[k].obscure && z < w.height[y][x] + HAZ_UP;
+}
+// взгляд от глаз в (x0, y0, z0) к глазам в (x1, y1, z1) идёт сквозь облако; клетки обоих концов тоже считаются: из облака
+// не видно наружу, в облако — внутрь
+bool fogLine(const World& w, int x0, int y0, int z0, int x1, int y1, int z1) {
+    if (!w.fogAny) return false;
+    int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx - dy,
+        x = x0, y = y0, i = 0;
+    const double za = z0 + 1.0, zb = z1 + 1.0;   // глаза — на 5 фт выше ног
+    const int n = std::max(1, std::max(dx, dy));
+    for (;;) {
+        if (fogCell(w, x, y, za + (zb - za) * i / n)) return true;
+        if (x == x1 && y == y1) return false;
+        const int e2 = 2 * err;
+        if (e2 > -dy) {
+            err -= dy;
+            x += sx;
+        }
+        if (e2 < dx) {
+            err += dx;
+            y += sy;
+        }
+        i++;
+    }
+}
 bool inShapeF(int shape, int size, int ox, int oy, int cx, int cy, const Fighter& e) {
-    if (10 * e.alt > std::max(size, 5)) return false;   // летун выше области (она — от земли на свой размер)
+    if (5 * e.alt > std::max(size, 5)) return false;   // летун выше области (она — от земли на свой размер)
     const int n = fpN(e);
     for (int dy = 0; dy < n; dy++)
         for (int dx = 0; dx < n; dx++)
@@ -426,7 +464,7 @@ bool occupied(const World& w, int x, int y, const Fighter* self) {
 }
 // Бойцы мешают друг другу, только если их объёмы пересекаются: квадрат и высота — от уровня ног на рост (средний 10 фт,
 // большой 20, огромный 30, громадный 40). Под стоящим на мосту, под летуном выше роста — пройти можно (v21)
-inline bool vOverlap(int za, const Fighter& a, int zb, const Fighter& b) { return za < zb + sizeLv(b) && zb < za + sizeLv(a); }
+inline bool vOverlap(int za, const Fighter& a, int zb, const Fighter& b) { return za < zb + bodyZ(sizeLv(b)) && zb < za + bodyZ(sizeLv(a)); }
 // f, поставленный в узел (x, y, l) на своей высоте, задевает g
 inline bool touchesAt(const World& w, const Fighter& f, int x, int y, int l, const Fighter& g) {
     return &g != &f && g.hp > 0 && fpOverlap(g.x, g.y, fpN(g), x, y, fpAt(w, f, x, y, l)) &&
@@ -490,8 +528,8 @@ static int stepCostL(const World& w, const Fighter& f, int fx, int fy, int fl, i
         const bool rough = fpFull(f) == 1 ? roughCell(w, f, x, y, l) : (fitInfo(w, f, x, y, l) & 8) != 0;
         if (rough)
             cost = 10;
-        const int up = nodeZ(w, x, y, l) - nodeZ(w, fx, fy, fl);   // подъём (лестница, дерево, на настил): +5 фт за уровень
-        if (up > 0 && !f.b.climbS && !f.b.burrowS) cost += 5 * up;   // лазун и копатель — без надбавки
+        const int up = nodeZ(w, x, y, l) - nodeZ(w, fx, fy, fl);   // подъём (лестница, дерево, на настил): +5 фт за 10 фт
+        if (up > 0 && !f.b.climbS && !f.b.burrowS) cost += climbFt(up);   // лазун и копатель — без надбавки
     }
     if (fpFull(f) > 1 && (fitInfo(w, f, x, y, l) & 7) < fpFull(f)) cost *= 2;   // протискивается: движение вдвое дороже
     if (!l && w.door[y][x] == 1) cost += 5;   // закрытую дверь по пути открывают (взаимодействие с предметом)
@@ -508,9 +546,99 @@ struct PStep {   // шаг пути: клетка и ярус (0 — земля,
     int first, second, l;
 };
 static thread_local int pdCost[2 * W * W], pdPrev[2 * W * W], pdStamp[2 * W * W], pdFoe[W * W], pdCur = 0;
+// Путь игрока (ветка 3d): дерево кратчайших путей от f ко всем клеткам — та же цена шага, обход известных врагов и зон, что
+// у pathTo, но из равных по цене предков берётся ближайший к прямой «старт → клетка»: путь идёт по прямой, а не уходит
+// «лесенкой» в сторону (при нехватке скорости игрок вставал не там, куда шёл). Дерево уходит игроку (путь под мышью), и по
+// нему же идёт его ход: что показано, то и пройдено. Только боец в одну клетку; узел — y·aw + x + ярус·aw·ah.
+struct PathTree {
+    int aw = 0, ah = 0;
+    std::vector<int> par, ft, cost;   // предок (−1 нет), футы пути (−1 — не дойти), цена поиска (футы × 64 + клетки зон)
+};
+thread_local bool g_straight = false;   // ход игрока: pathTo берёт путь из PathTree
+static void pathTree(const World& w, const Fighter& f, PathTree& T) {
+    const int N = w.aw * w.ah, from = f.y * W + f.x + (f.up ? W * W : 0);
+    T.aw = w.aw;
+    T.ah = w.ah;
+    T.par.assign(2 * N, -1);
+    T.ft.assign(2 * N, -1);
+    T.cost.assign(2 * N, -1);
+    const int st = ++pdCur, fi = (int)(&f - &w.f[0]);
+    const bool inWorld = fi >= 0 && fi < (int)w.f.size();
+    std::vector<int> foes;
+    for (size_t i = 0; i < w.f.size(); i++) {
+        const Fighter& g = w.f[i];
+        if (g.hp > 0 && g.team != f.team && (!inWorld || isKnown(w, f.team, (int)i)) && (foes.push_back((int)i), true))
+            for (int dy = 0; dy < fpN(g); dy++)
+                for (int dx = 0; dx < fpN(g); dx++)
+                    if (g.x + dx < W && g.y + dy < W) pdFoe[(g.y + dy) * W + g.x + dx] = st;
+    }
+    auto foeUnder = [&](int x, int y, int l) {
+        if (pdFoe[y * W + x] != st) return false;
+        for (int i : foes)
+            if (touchesAt(w, f, x, y, l, w.f[i])) return true;
+        return false;
+    };
+    auto hazIn = [&](int x, int y, int l) { return !l && w.haz[y][x] && !(f.b.fly && HAZ[w.haz[y][x]].flySafe) ? 1 : 0; };
+    std::vector<std::pair<int, int>> q;
+    std::vector<int> ord;   // узлы в порядке выхода из очереди (цена не убывает)
+    pdStamp[from] = st;
+    pdCost[from] = 0;
+    q.push_back({0, from});
+    while (!q.empty()) {
+        std::pop_heap(q.begin(), q.end(), std::greater<>());
+        const auto [v, c] = q.back();
+        q.pop_back();
+        if (v != pdCost[c]) continue;
+        ord.push_back(c);
+        const int l = c / (W * W), x = c % W, y = (c % (W * W)) / W;
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++)
+                for (int nl = 0; nl < 2; nl++) {
+                    const int nx = x + dx, ny = y + dy, n = ny * W + nx + nl * W * W;
+                    if ((!dx && !dy) || !stepOK(w, f, x, y, l, nx, ny, nl) || foeUnder(nx, ny, nl)) continue;
+                    const int nv = v + 64 * stepCostL(w, f, x, y, l, nx, ny, nl) + hazIn(nx, ny, nl);
+                    if (pdStamp[n] != st || nv < pdCost[n]) {
+                        pdStamp[n] = st;
+                        pdCost[n] = nv;
+                        q.push_back({nv, n});
+                        std::push_heap(q.begin(), q.end(), std::greater<>());
+                    }
+                }
+    }
+    auto ti = [&](int c) { return (c % (W * W)) / W * w.aw + c % W + c / (W * W) * N; };
+    T.ft[ti(from)] = 0;
+    T.cost[ti(from)] = 0;
+    for (size_t k = 1; k < ord.size(); k++) {   // предок — из равных по цене ближайший к прямой «старт → узел»
+        const int c = ord[k], l = c / (W * W), x = c % W, y = (c % (W * W)) / W;
+        int best = -1, bestDev = 1 << 30;
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++)
+                for (int pl = 0; pl < 2; pl++) {
+                    const int px = x + dx, py = y + dy, p = py * W + px + pl * W * W;
+                    if ((!dx && !dy) || px < 0 || py < 0 || px >= w.aw || py >= w.ah || pdStamp[p] != st || T.ft[ti(p)] < 0) continue;
+                    if (!stepOK(w, f, px, py, pl, x, y, l) || pdCost[p] + 64 * stepCostL(w, f, px, py, pl, x, y, l) + hazIn(x, y, l) != pdCost[c]) continue;
+                    const int dev = std::abs((x - f.x) * (py - f.y) - (y - f.y) * (px - f.x));
+                    if (dev < bestDev) best = p, bestDev = dev;
+                }
+        if (best < 0) continue;   // не бывает: у узла кратчайшего пути есть предок той же цены
+        T.par[ti(c)] = ti(best);
+        T.ft[ti(c)] = T.ft[ti(best)] + stepCostL(w, f, best % W, (best % (W * W)) / W, best / (W * W), x, y, l);
+        T.cost[ti(c)] = pdCost[c];
+    }
+}
 static void pathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PStep>& path) {
     path.clear();
     if (f.x == tx && f.y == ty) return;
+    if (g_straight && fpFull(f) == 1 && tx >= 0 && ty >= 0 && tx < w.aw && ty < w.ah) {   // ход игрока: путь из дерева
+        static thread_local PathTree T;
+        pathTree(w, f, T);
+        const int N = w.aw * w.ah, k0 = ty * w.aw + tx, k = T.ft[k0 + N] >= 0 && (T.ft[k0] < 0 || T.ft[k0 + N] < T.ft[k0]) ? k0 + N : k0;   // ярус — короче (поровну — земля), так же и у игрока
+        if (T.ft[k] >= 0) {
+            for (int c = k; T.par[c] >= 0; c = T.par[c]) path.push_back({c % N % w.aw, c % N / w.aw, c / N});
+            std::reverse(path.begin(), path.end());
+            return;
+        }
+    }
     const int goal = ty * W + tx, from = f.y * W + f.x + (f.up ? W * W : 0);
     // крупный идёт левой верхней клеткой в цель; если там не встать (стена, край, дерево) — до узла, где его квадрат накрывает цель
     const bool cover = fpFull(f) > 1 && !nodeOK(w, f, tx, ty, 0) && !nodeOK(w, f, tx, ty, 1);

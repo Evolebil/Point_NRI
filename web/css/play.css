@@ -562,3 +562,12 @@ table{border-collapse:collapse}
   .toast{bottom:90px}
   .search{padding:30px 18px}.search h2{font-size:24px}.search-clock{font-size:34px}
 }
+/* скрытие панелей (05_hud.js): кнопка «свернуть», свёрнутая панель — ярлык с названием, H — все панели */
+.hud-panel>.hud-min{position:absolute;top:3px;right:3px;z-index:3;width:22px;height:22px;min-height:0;padding:0;border-radius:6px;font-size:14px;line-height:1;opacity:.5;background:transparent;border:1px solid transparent;color:inherit;cursor:pointer}
+.hud-panel>.hud-min:hover,.hud-panel>.hud-min:focus-visible{opacity:1;border-color:var(--line2);background:rgba(255,255,255,.06)}
+.hud-panel.hud-off{width:auto!important;min-width:0!important;height:auto!important;max-height:none!important;overflow:visible!important;padding:5px 32px 5px 12px!important}
+.hud-panel.hud-off>:not(.hud-min){display:none!important}
+.hud-panel.hud-off::before{content:attr(data-hud-name);font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.8;white-space:nowrap}
+.hud-panel.hud-off>.hud-min{opacity:.9}
+body.hud-all-off .hud-panel{display:none!important}
+.hud-back{position:fixed;right:16px;bottom:16px;z-index:50}

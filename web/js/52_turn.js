@@ -51,7 +51,7 @@ function renderTurn(){
     ${q.conc >= 0 ? `<button data-c="dropconc" title="Бесплатно: эффекты концентрации снимаются">Снять концентрацию</button>` : ''}
     <button data-c="toward" title="Идти к ближайшему врагу">К врагу</button>
     ${(q.doors || []).map(d => `<button data-door="${d[0]},${d[1]}" title="Взаимодействие: первое за ход бесплатно, дальше — действием">🚪 ${d[2] === 1 ? 'Открыть' : 'Закрыть'} дверь</button>`).join('')}
-    ${q.fly ? `<button data-alt="1" ${q.fly.can && q.fly.alt < q.fly.max && q.speedLeft >= 10 ? '' : 'disabled'} title="10 фт движения за уровень; уход вверх из досягаемости ближника провоцирует атаку">🪽 Выше</button><button data-alt="-1" ${q.fly.alt > 0 && q.speedLeft >= 10 ? '' : 'disabled'} title="10 фт движения за уровень">⬇ Ниже</button><span class="tag" title="Высота полёта над землёй">${q.fly.alt ? 'в воздухе ' + q.fly.alt * 10 + ' фт' : 'на земле'}</span>` : ''}</div>
+    ${q.fly ? `<button data-alt="1" ${q.fly.can && q.fly.alt < q.fly.max && q.speedLeft >= 5 ? '' : 'disabled'} title="Выше на 5 фт (5 фт движения); уход вверх из досягаемости ближника провоцирует атаку">🪽 Выше</button><button data-alt="-1" ${q.fly.alt > 0 && q.speedLeft >= 5 ? '' : 'disabled'} title="Ниже на 5 фт (5 фт движения)">⬇ Ниже</button><span class="tag" title="Высота полёта над землёй">${q.fly.alt ? 'в воздухе ' + q.fly.alt * 5 + ' фт' : 'на земле'}</span>` : ''}</div>
     </div><div class="msg" id="tmsg"></div><div class="hint">${modeHint()}</div>`;
   el.innerHTML = h;
   const actionHelp = {
@@ -193,7 +193,7 @@ cv.addEventListener('click', e => {
 function isObjCell(x, y){
   if (x < 0 || y < 0 || x >= AW || y >= AH) return false;
   const fr = FR[curIdx]; if (fr.dyn && fr.dyn.some(d => d[0] === x && d[1] === y && d[2] === 4)) return false;
-  return ['wall', 'tree', 'climb'].some(k => MAP[k] && MAP[k][y] && MAP[k][y][x] === '1');
+  return ['wall', 'tree', 'climb'].some(k => ch(MAP[k], x, y));
 }
 let hover = null;
 cv.addEventListener('mousemove', e => { hover = cellAt(e); });
@@ -226,7 +226,7 @@ cv.addEventListener('mouseleave', () => { hover = null; });
 // туман войны: маска видимых клеток из последнего запроса хода (бит на клетку, base64) -> холст 1 пиксель = 1 клетка
 let fogKey = '', fogC = null;
 function fogCanvas(){
-  const q = G.req || G.lastReq; if (!q || !q.vis || !$('fogOn').checked || G.over) return null;
+  const q = G.req || G.lastReq; if (!q || !q.vis || G.over) return null;   // в бою туман не отключается
   if (q.vis !== fogKey){
     fogKey = q.vis; const W = q.visW, H = q.visH, bin = atob(q.vis);
     fogC = document.createElement('canvas'); fogC.width = W; fogC.height = H;
@@ -235,6 +235,39 @@ function fogCanvas(){
     c.putImageData(img, 0, 0);
   }
   return fogC;
+}
+// путь под мышью: дерево путей игрока из запроса хода (pt — по 3 символа base64 на узел: предок и футы / 5; узлы земли,
+// затем настила). По этому же дереву движок ведёт ход игрока — что показано, то и будет пройдено
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+let ptKey = '', ptPar = null, ptFt = null;
+function pathPreview(q, x, y){
+  const N = AW * AH;
+  if (!q || !q.pt || x < 0 || y < 0 || x >= AW || y >= AH || q.pt.length !== 3 * N * (q.ptL || 1)) return null;
+  if (q.pt !== ptKey){
+    ptKey = q.pt; const M = N * (q.ptL || 1); ptPar = new Int32Array(2 * N).fill(-1); ptFt = new Int32Array(2 * N).fill(-1);
+    for (let k = 0; k < M; k++){
+      const c = B64.indexOf(q.pt[3 * k]), ft = 5 * (64 * B64.indexOf(q.pt[3 * k + 1]) + B64.indexOf(q.pt[3 * k + 2]));
+      if (c <= 0) continue;
+      const i = (c - 1) % 8, d = i < 4 ? i : i + 1, kx = k % N % AW, ky = Math.floor(k % N / AW);
+      ptPar[k] = (ky + Math.floor(d / 3) - 1) * AW + kx + d % 3 - 1 + (c > 8 ? N : 0); ptFt[k] = ft;
+    }
+  }
+  const k0 = y * AW + x, k = ptFt[k0 + N] >= 0 && (ptFt[k0] < 0 || ptFt[k0 + N] < ptFt[k0]) ? k0 + N : k0;   // как в движке (pathTo)
+  if (ptFt[k] < 0) return null;
+  const cells = []; for (let c = k; ptPar[c] >= 0 && cells.length <= 2 * N; c = ptPar[c]) cells.push({x: c % N % AW, y: Math.floor(c % N / AW), up: c >= N ? 1 : 0, ft: ptFt[c]});
+  return {cells: cells.reverse(), ft: ptFt[k]};
+}
+// подпись пути: длина и сколько пройдёт за этот ход
+const pathLabel = (p, left) => p.ft <= left ? p.ft + ' фт' : `${p.ft} фт · за ход ${Math.max(0, ...p.cells.filter(c => c.ft <= left).map(c => c.ft))} фт`;
+// линия пути по точкам экрана: пройдёт за ход — зелёная, дальше — пунктир
+function pathStroke(pts, cells, left){
+  let cut = 0; while (cut < cells.length && cells[cut].ft <= left) cut++;
+  ctx.save(); ctx.lineCap = ctx.lineJoin = 'round';
+  ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 7; ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+  ctx.strokeStyle = '#7dffb0'; ctx.lineWidth = 3.5; ctx.beginPath(); pts.slice(0, cut + 1).forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+  if (cut < cells.length){ ctx.strokeStyle = 'rgba(230,230,240,.8)'; ctx.setLineDash([6, 6]); ctx.beginPath(); pts.slice(cut).forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke(); ctx.setLineDash([]); }
+  const e = pts[cut]; ctx.fillStyle = '#7dffb0'; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(e.x, e.y, 6, 0, 7); ctx.fill(); ctx.stroke();   // где окажется в конце хода
+  ctx.restore();
 }
 function overlayDraw(now){
   if (!G.req || G.busy || G.over || !FR.length) return;
@@ -265,10 +298,12 @@ function overlayDraw(now){
       ctx.restore();
     }
   }
+  const path = G.mode === 'move' && hover ? pathPreview(q, hover.x, hover.y) : null;
+  if (path) pathStroke([{x: cx, y: cy}, ...path.cells.map(c => ({x: PX(c.x + .5), y: PY(c.y + .5)}))], path.cells, q.speedLeft);
   if (hover && hover.x >= 0 && hover.y >= 0 && hover.x < AW && hover.y < AH){
     ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 2; ctx.strokeRect(PX(hover.x), PY(hover.y), cell, cell);
-    const n = me.n || 1, gap = (a, b) => Math.max(0, b - (a + n - 1), a - b), d = 5 * Math.max(gap(me.x, hover.x), gap(me.y, hover.y)); ctx.font = '700 13px system-ui'; ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.lineWidth = 4; ctx.textAlign = 'left';
-    ctx.strokeText(d + ' фт', PX(hover.x) + cell + 4, PY(hover.y) + 14); ctx.fillText(d + ' фт', PX(hover.x) + cell + 4, PY(hover.y) + 14); ctx.restore();
+    const n = me.n || 1, gap = (a, b) => Math.max(0, b - (a + n - 1), a - b), d = path ? pathLabel(path, q.speedLeft) : 5 * Math.max(gap(me.x, hover.x), gap(me.y, hover.y)) + ' фт'; ctx.font = '700 13px system-ui'; ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.lineWidth = 4; ctx.textAlign = 'left';
+    ctx.strokeText(d, PX(hover.x) + cell + 4, PY(hover.y) + 14); ctx.fillText(d, PX(hover.x) + cell + 4, PY(hover.y) + 14); ctx.restore();
   }
 }
 addEventListener('keydown', e => {

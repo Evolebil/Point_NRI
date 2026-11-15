@@ -72,13 +72,14 @@ void takeTurn(World& w, int idx) {
     // высота полёта (v21): стрелок (оружие от 30 фт) держится на 20 фт — ближнику с земли не достать, ближник — на уровне цели
     if (me.b.fly && canStayAloft(me) && speed >= 10 && !me.cond[C_FRIGHT]) {
         const int ground = zF(w, me) - me.alt, cap = maxAltAt(w, me, me.x, me.y, me.up);
-        int want = atkDist(me.b) >= 30 ? 2 : zF(w, F) - ground;
+        int want = atkDist(me.b) >= 30 ? 4 : zF(w, F) - ground;   // стрелок держится на 20 фт
         want = std::clamp(want, 0, cap);
         if (want != me.alt) {
-            const int step = std::min(std::abs(want - me.alt), speed / 10), a = me.alt + (want > me.alt ? step : -step);
+            // уровень (5 фт) — 5 фт движения; движением бот распоряжается шагами по 10 фт, как до перехода на 5 фт
+            const int step = std::min(std::abs(want - me.alt), 2 * (speed / 10)), a = me.alt + (want > me.alt ? step : -step);
             recordPrim(idx, {PR_ALT, a});
-            ts.speed -= 10 * step;
-            speed -= 10 * step;
+            ts.speed -= 5 * step;
+            speed -= 5 * step;
             setAlt(w, me, a);
             if (me.hp <= 0 || over(w)) return;
         }

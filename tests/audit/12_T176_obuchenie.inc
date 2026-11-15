@@ -113,10 +113,10 @@
         const std::string ja = mapToJson(a);
         regionArena(b, d, 200, 200);
         const bool same = ja == mapToJson(b);
-        auto edgeAvg = [&](int k) {   // средний уровень на краю: север, восток, юг, запад
+        auto edgeAvg = [&](int k) {   // средний уровень на краю (в уровнях региона по 10 фт; арена — по 5 фт): север, восток, юг, запад
             double s = 0;
             for (int i = 0; i < 200; i++) s += k == 0 ? a.height[0][i] : k == 1 ? a.height[i][199] : k == 2 ? a.height[199][i] : a.height[i][0];
-            return s / 200;
+            return s / 200 / 2;
         };
         bool edges = true;
         for (int k = 0; k < 4; k++) edges = edges && std::fabs(edgeAvg(k) - (d.level + d.nb[k]) / 2.0) <= 1.0;

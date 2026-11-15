@@ -229,9 +229,9 @@
         w.aw = w.ah = 30;
         w.dyn.clear();
         w.f.clear();
-        w.tree[10][11] = true;   // дерево рядом с (10,10)
-        w.tree[10][14] = true;   // дерево между (12,10) и (16,10)
-        w.tree[10][18] = true;
+        w.tree[10][11] = TREE_DEF;   // дерево рядом с (10,10)
+        w.tree[10][14] = TREE_DEF;   // дерево между (12,10) и (16,10)
+        w.tree[10][18] = TREE_DEF;
         w.wall[20][5] = true;
         initObjects(w);
         Fighter g = mk(plain(100, 0, 0, 5), 0, 10, 10);
@@ -335,7 +335,7 @@
         w.dyn.clear();
         w.f.clear();
         for (int y = 0; y < 30; y++)
-            for (int x = 20; x < 30; x++) w.height[y][x] = 2;   // скала 20 фт с x = 20
+            for (int x = 20; x < 30; x++) w.height[y][x] = 4;   // скала 20 фт с x = 20 (уровни по 5 фт)
         Fighter walker = mk(plain(100, 0, 0, 5), 0, 19, 5);
         Boss fb = plain(100, 0, 0, 5);
         fb.fly = true;
@@ -344,13 +344,13 @@
         w.ladder[6][20] = true;
         const bool ladder = stepOK(w, walker, 19, 6, 0, 20, 6, 0);
         // настил на 20 фт над (5..9, 15): под ним средний проходит, огромный — нет; летун под настилом обрыв не перелетит
-        for (int x = 5; x <= 9; x++) w.deck[15][x] = 2;
+        for (int x = 5; x <= 9; x++) w.deck[15][x] = 4;
         w.ladder[15][4] = true;
         Boss huge = plain(100, 0, 0, 5);
         huge.size = 4;
         Fighter hg = mk(huge, 1, 4, 14);
         const bool clearance = nodeOK(w, walker, 6, 15, 0) && !nodeOK(w, hg, 6, 15, 0);
-        w.deck[5][19] = 3;   // навес над клеткой у скалы: летун под ним на скалу не взлетит
+        w.deck[5][19] = 6;   // навес над клеткой у скалы: летун под ним на скалу не взлетит
         const bool roofFly = !stepOK(w, flyer, 19, 5, 0, 20, 5, 0);
         w.deck[5][19] = 0;
         Fighter p = mk(plain(100, 0, 0, 5), 0, 3, 15);
@@ -605,7 +605,7 @@
         w.aw = w.ah = 30;
         w.dyn.clear();
         w.f.clear();
-        w.deck[20][20] = 3;   // навес на 30 фт
+        w.deck[20][20] = 6;   // навес на 30 фт
         initObjects(w);
         Boss fb = plain(200, 1, 6, 5), gb = plain(200, 1, 6, 5);
         fb.fly = true;
@@ -617,23 +617,23 @@
         ts.speed = 30;
         std::string why;
         const int d0 = distFt(Fl, Gr);
-        const bool up = applyPrim(w, 0, ts, Prim{PR_ALT, 2}, true, &why);
+        const bool up = applyPrim(w, 0, ts, Prim{PR_ALT, 4}, true, &why);
         const int d2 = distFt(Fl, Gr), left = ts.speed;
         const bool noReach = d2 > meleeReach(Gr.b);
         TurnState ts2;
         ts2.speed = 30;
-        const bool walkerNo = !applyPrim(w, 1, ts2, Prim{PR_ALT, 1}, true, &why);
+        const bool walkerNo = !applyPrim(w, 1, ts2, Prim{PR_ALT, 2}, true, &why);
         const int capOpen = maxAltAt(w, Fl, 10, 10, 0), capRoof = maxAltAt(w, Fl, 20, 20, 0);
-        Fl.alt = 3;
+        Fl.alt = 6;
         const bool area = !inShapeF(SH_SPHERE, 20, 0, 0, 10, 10, Fl);
-        Fl.alt = 2;
+        Fl.alt = 4;
         const bool area2 = inShapeF(SH_SPHERE, 20, 0, 0, 10, 10, Fl);
         const int hp0 = Fl.hp;
         applyCond(Fl, C_PRONE, 1, -1, 0, false);
         const bool fell = Fl.alt == 0 && Fl.hp < hp0 && Fl.hp >= hp0 - 12;
         g_curW = nullptr;
-        T("T204", "§7 высота полёта: 10 фт за уровень, ближним с земли не достать, потолок, падение сбитого (1к6 за 10 фт), область от земли",
-          up && d0 == 5 && d2 == 20 && left == 10 && noReach && walkerNo && capOpen == ALT_MAX && capRoof == 2 && area && area2 && fell,
+        T("T204", "§7 высота полёта: уровни по 5 фт, 5 фт движения за 5 фт высоты, ближним с земли не достать, потолок, падение сбитого (1к6 за 10 фт), область от земли",
+          up && d0 == 5 && d2 == 20 && left == 10 && noReach && walkerNo && capOpen == ALT_MAX && capRoof == 4 && area && area2 && fell,
           fmt("подъём на 20 фт %d (осталось движения %d из 30); расстояние до стоящего рядом %d → %d фт (ближним не достать %d); не летун не взлетел %d; предел высоты %d, под навесом в 30 фт %d; огненный шар 20 фт: летуна на 30 фт не задел %d, на 20 фт задел %d; сбит с ног — упал %d (−%d)",
               up, left, d0, d2, noReach, walkerNo, capOpen, capRoof, area, area2, fell, hp0 - Fl.hp));
     }
@@ -653,7 +653,7 @@
         w.aw = w.ah = 30;
         w.dyn.clear();
         w.f.clear();
-        for (int x = 5; x < 15; x++) w.deck[10][x] = 2;   // мост на 20 фт
+        for (int x = 5; x < 15; x++) w.deck[10][x] = 4;   // мост на 20 фт
         initObjects(w);
         Boss fb = plain(100, 0, 0, 5), big = plain(100, 0, 0, 5);
         fb.fly = true;
@@ -661,7 +661,7 @@
         w.f.push_back(mk(plain(100, 0, 0, 5), 0, 8, 10));   // на мосту
         w.f[0].up = true;
         w.f.push_back(mk(fb, 0, 20, 20));                    // летун на 10 фт
-        w.f[1].alt = 1;
+        w.f[1].alt = 2;
         g_curW = &w;
         Fighter walker = mk(plain(100, 0, 0, 5), 1, 8, 9), bigW = mk(big, 1, 19, 19);
         const bool underBridge = !blockedAt(w, walker, 8, 10) && blockedAt(w, w.f[0], 8, 10) == false;
@@ -691,7 +691,7 @@
         w.aw = w.ah = 30;
         w.dyn.clear();
         w.f.clear();
-        for (int y = 0; y < 30; y++) w.height[y][15] = w.height[y][16] = 3;   // скала в 30 фт
+        for (int y = 0; y < 30; y++) w.height[y][15] = w.height[y][16] = 6;   // скала в 30 фт
         w.climb[5][5] = true;
         w.water[6][6] = w.diff[6][6] = true;
         for (int y = 0; y < 30; y++) w.pit[y][25] = true;   // ущелье
@@ -739,7 +739,7 @@
         w.aw = w.ah = 30;
         w.dyn.clear();
         w.f.clear();
-        w.deck[5][5] = 3;
+        w.deck[5][5] = 6;
         initObjects(w);
         g_curW = &w;
         // Увёртливость: 400 огненных шаров по увёртливому и обычному с ЛОВ 10

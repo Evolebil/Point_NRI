@@ -539,6 +539,16 @@ struct Trig {
     int dt = -1;   // тип урона эффекта X_DMG (−1 — как у оружия, без оружия — силовое поле)
 };
 
+// Чувства своей дальности (ветка 3d): шаг 5 фт; цена — по прямой между прежними ступенями (у них — прежняя): тёмное
+// зрение 30/60/120 фт = атом ×1/2/3, слепое 10/30/60 = ×1/2/3, истинное 10/30/60/120 = ×1/2/3/4
+struct SensePts { int n; int ft[5]; };
+constexpr SensePts SENSE_DV{4, {0, 30, 60, 120}}, SENSE_BS{4, {0, 10, 30, 60}}, SENSE_TS{5, {0, 10, 30, 60, 120}};
+inline double senseMul(int ft, const SensePts& p) {
+    for (int k = 1; k < p.n; k++)
+        if (ft <= p.ft[k]) return k - 1 + double(ft - p.ft[k - 1]) / (p.ft[k] - p.ft[k - 1]);
+    return p.n - 1;
+}
+inline bool senseOK(int ft, const SensePts& p) { return ft >= 0 && ft <= p.ft[p.n - 1] && ft % 5 == 0; }
 struct Boss {
     // состояние героя на входе в бой (кампания, задача Б-3): текущие ХП, потраченные ячейки и применения, истощение;
     // off — бой со свежим бойцом, как всегда

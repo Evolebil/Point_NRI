@@ -258,6 +258,7 @@ struct Cell {
     bool wall = false, climb = false, diff = false, dark = false, pit = false, water = false, tree = false, ladder = false, strong = false, town = false, road = false;
     unsigned char height = 0, haz = 0, deck = 0, door = 0;   // door: 0 нет, 1 закрыта, 2 открыта
     unsigned char biome = 0;
+    unsigned char treeH = 0;   // высота дерева в уровнях по 5 фт (treeHeight), 0 — нет дерева
 };
 
 inline double nearSeg(const Plan& p, const std::vector<Seg>& v, const std::vector<std::vector<int>>& B, int x, int y, int* wOut = nullptr) {
@@ -412,7 +413,23 @@ inline bool townCell(const Plan& p, const Settle& t, int x, int y, Cell& c) {
     return true;
 }
 
+// высота дерева (уровни по 5 фт, 10–40 фт) — по зерну и месту клетки, без общего генератора случайных чисел (остальной мир
+// не меняется): ели тайги и деревья леса и джунглей выше, в болоте, степи и саванне — ниже
+inline int treeHeight(uint64_t s, int x, int y, int biome) {
+    int lo = 3, hi = 7;
+    if (biome == B_TAIGA) lo = 5, hi = 8;
+    else if (biome == B_FOREST || biome == B_JUNGLE) lo = 4, hi = 8;
+    else if (biome == B_SWAMP) lo = 2, hi = 5;
+    else if (biome == B_STEPPE || biome == B_SAVANNA) lo = 2, hi = 6;
+    return lo + std::min(hi - lo, (int)(hash01(s, x, y, 113) * (hi - lo + 1)));
+}
+inline Cell worldCellRaw(const Plan& p, int x, int y);   // клетка мира без высоты дерева (ниже)
 inline Cell worldCell(const Plan& p, int x, int y) {
+    Cell c = worldCellRaw(p, x, y);
+    if (c.tree) c.treeH = (unsigned char)treeHeight(p.seed, x, y, c.biome);
+    return c;
+}
+inline Cell worldCellRaw(const Plan& p, int x, int y) {
     Cell c;
     if (x < 0 || y < 0 || x >= p.size || y >= p.size) {
         c.wall = true;

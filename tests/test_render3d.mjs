@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const src = fs.readFileSync(new URL('../web/js/55_render3d.js', import.meta.url), 'utf8');
 const ctx = vm.createContext({
   location: {search: ''}, URLSearchParams, $: () => ({}), toast: () => {}, console,
-  hash: () => .5, FR: [], curIdx: 0, prevIdx: 0, G: {}, cam: {}, MAP: null, AW: 1, AH: 1
+  hash: () => .5, lv36: (L, x, y) => { const c = L && L[y] && L[y][x]; return c ? parseInt(c, 36) || 0 : 0; }, FR: [], curIdx: 0, prevIdx: 0, G: {}, cam: {}, MAP: null, AW: 1, AH: 1
 });
 vm.runInContext(src + '\nglobalThis.T = {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx};', ctx);
 const {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx} = ctx.T;
@@ -27,28 +27,31 @@ build({});
 check('ровная земля: верхний куб — трава, над ним воздух', at(0, VZ0 - 1) === VM.GRASS && at(0, VZ0) === 0);
 check('боец на ровной земле стоит в кубе VZ0', r3Z({x: 0, y: 0}) === VZ0);
 
-build({height: '200'});
-check('высота 2 (20 фт) = 4 куба над нулём', at(0, VZ0 + 3) === VM.GRASS && at(0, VZ0 + 4) === 0 && r3Z({x: 0, y: 0}) === VZ0 + 4);
-check('летун: высота полёта 1 (10 фт) = +2 куба', r3Z({x: 0, y: 0, alt: 1}) === VZ0 + 6);
+build({height: '400'});
+check('высота 4 (20 фт) = 4 куба над нулём', at(0, VZ0 + 3) === VM.GRASS && at(0, VZ0 + 4) === 0 && r3Z({x: 0, y: 0}) === VZ0 + 4);
+check('летун: высота полёта 2 (10 фт) = +2 куба', r3Z({x: 0, y: 0, alt: 2}) === VZ0 + 6);
+build({height: 'b00'});
+check('уровень буквой: b = 11 (55 фт)', at(0, VZ0 + 10) === VM.GRASS && at(0, VZ0 + 11) === 0);
 
 build({wall: '100', strong: '010'});
 check('стена — 6 кубов камня (30 фт)', at(0, VZ0) === VM.STONE && at(0, VZ0 + 5) === VM.STONE && at(0, VZ0 + 6) === 0);
 
-build({tree: '100'});
-check('дерево: 2 куба ствола + 2 кроны, стоят на вершине (+20 фт)', at(0, VZ0) === VM.WOOD && at(0, VZ0 + 2) === VM.LEAF && at(0, VZ0 + 4) === 0 && r3Level({x: 0, y: 0}) === 2);
+build({tree: '428'});
+check('дерево 20 фт: 2 куба ствола + 2 кроны, стоят на вершине', at(0, VZ0) === VM.WOOD && at(0, VZ0 + 2) === VM.LEAF && at(0, VZ0 + 4) === 0 && r3Level({x: 0, y: 0}) === 4);
+check('куст 10 фт и великан 40 фт', at(1, VZ0) === VM.WOOD && at(1, VZ0 + 1) === VM.LEAF && at(1, VZ0 + 2) === 0 && at(2, VZ0 + 5) === VM.WOOD && at(2, VZ0 + 7) === VM.LEAF && at(2, VZ0 + 8) === 0 && r3Level({x: 2, y: 0}) === 8);
 
 build({pit: '100'});
 check('ущелье: только дно', at(0, 0) === VM.PITF && at(0, 1) === 0 && at(0, VZ0 - 1) === 0);
 
-build({deck: '300'});
-check('настил на уровне 3: доска в кубе VZ0+5, на нём стоят в VZ0+6', at(0, VZ0 + 5) === VM.PLANK && at(0, VZ0) === 0 && r3Z({x: 0, y: 0, up: 1}) === VZ0 + 6);
+build({deck: '600'});
+check('настил на 30 фт: доска в кубе VZ0+5, на нём стоят в VZ0+6', at(0, VZ0 + 5) === VM.PLANK && at(0, VZ0) === 0 && r3Z({x: 0, y: 0, up: 1}) === VZ0 + 6);
 
 build({door: '100'});
 check('закрытая дверь: 2 куба двери и перемычка до 30 фт', at(0, VZ0) === VM.DOOR && at(0, VZ0 + 1) === VM.DOOR && at(0, VZ0 + 2) === VM.STONE && at(0, VZ0 + 6) === 0);
 build({door: '100'}, [[0, 0, 6, 0]]);
 check('открытая дверь (изменение арены 6): проём свободен', at(0, VZ0) === 0 && at(0, VZ0 + 1) === 0 && at(0, VZ0 + 2) === VM.STONE);
 
-build({wall: '100', tree: '010'}, [[0, 0, 4, 0], [1, 0, 4, 0]]);
+build({wall: '100', tree: '040'}, [[0, 0, 4, 0], [1, 0, 4, 0]]);
 check('разрушенные стена и дерево (вид 4): обломки, над ними воздух', at(0, VZ0 - 1) === VM.RUBBLE && at(0, VZ0) === 0 && at(1, VZ0) === 0 && r3Level({x: 1, y: 0}) === 0);
 
 build({water: '100', haz: '010'});

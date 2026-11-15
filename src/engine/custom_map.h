@@ -2,19 +2,26 @@
 // Карты: запись арены в JSON (для просмотрщика и редактора) и пользовательские карты игрока.
 // Подключается из движка (fight.h) перед fight().
 //
-// Карта (JSON): {"aw":20,"ah":15,"theme":0,"wall":[строки],"pit":[..],"water":[..],"diff":[..],"climb":[..],"dark":[..],"height":[..],"tree":[..],"haz":[..],"ladder":[..],"deck":[..],"door":[..],"strong":[..],"starts":[[x,y],[x,y]]}
-// Каждый слой — ah строк по aw символов: '1' — есть (для height — '0','1','2' уровень). Недостающие строки и символы считаются пустыми.
+// Карта (JSON): {"aw":20,"ah":15,"theme":0,"hz":5,"wall":[строки],"pit":[..],"water":[..],"diff":[..],"climb":[..],"dark":[..],"height":[..],"tree":[..],"haz":[..],"ladder":[..],"deck":[..],"door":[..],"strong":[..],"starts":[[x,y],[x,y]]}
+// Каждый слой — ah строк по aw символов: '1' — есть. Недостающие строки и символы считаются пустыми.
+// hz — шаг высоты: 5 — уровни по 5 фт (ветка 3d), символ уровня — '0'..'9', 'a'..'z' (10–35); без hz — старые карты
+// (уровни по 10 фт, '0'..'9', дерево '1'): при чтении высота и настил ×2, дерево — 20 фт.
 //   wall — стена; pit — ущелье (пешком не пройти, обзор не закрывает, мост — клетки без ущелья в нём); water — ручей (труднопроходим);
 //   diff — труднопроходимая местность; climb — укрытие (10 фт движения, полукрытие); dark — тьма; height — возвышенность;
-//   tree — дерево (обзор закрывает, внизу не пройти — только залезть на него: вершина на 20 фт выше);
+//   tree — дерево своей высоты, уровень '2'..'8' (10–40 фт; обзор закрывает, внизу не пройти — только залезть на вершину);
 //   haz — опасная зона: '0' нет, '1' лава, '2' кислота, '3' ядовитый дым, '4' ледяное поле, '5' грозовое поле, '6' некротический туман;
-//   height — уровень земли '0'..'9' (по 10 фт; перепад больше 1 уровня — обрыв: только по лестнице или летуну под небом);
-//   ladder — лестница ('1'); deck — второй ярус '0'..'9' (мост, балкон, навес; без доступа — потолок), выше земли клетки;
+//   height — уровень земли (по 5 фт; перепад больше 10 фт — обрыв: только по лестнице или летуну под небом);
+//   ladder — лестница ('1'); deck — второй ярус, уровень его верха (мост, балкон, навес; без доступа — потолок), выше земли клетки;
 //   door — дверь '0' нет, '1' закрыта, '2' открыта (в проёме: на стене не ставится); strong — крепкая стена ('1');
 //   starts — клетки начала боя для сторон A и B (необязательно: тогда случайные).
 // ============================================================================
 #pragma once
 #include "mini_json.h"
+
+// уровень высоты в символ клетки и обратно: 0–9 — цифры, 10–35 — буквы a–z
+inline char lvChar(int v) { return v < 10 ? (char)('0' + v) : (char)('a' + std::min(35, v) - 10); }
+inline int lvOf(char c) { return c >= '0' && c <= '9' ? c - '0' : (c >= 'a' && c <= 'z' ? c - 'a' + 10 : 0); }
+constexpr int LV_MAX = 35;   // самый высокий уровень карты (175 фт)
 
 static std::string mapToJson(const World& w) {
     auto layer = [&](const char* name, auto cell) {
@@ -26,18 +33,18 @@ static std::string mapToJson(const World& w) {
         }
         return s + "]";
     };
-    std::string s = "{\"w\":" + std::to_string(W) + ",\"aw\":" + std::to_string(w.aw) + ",\"ah\":" + std::to_string(w.ah) + ",\"theme\":" + std::to_string(w.theme) + ",\"day\":" + (w.day ? "1" : "0") + ",";
+    std::string s = "{\"hz\":5,\"w\":" + std::to_string(W) + ",\"aw\":" + std::to_string(w.aw) + ",\"ah\":" + std::to_string(w.ah) + ",\"theme\":" + std::to_string(w.theme) + ",\"day\":" + (w.day ? "1" : "0") + ",";
     s += layer("wall", [&](int y, int x) { return w.wall[y][x] ? '1' : '0'; }) + ",";
     s += layer("climb", [&](int y, int x) { return w.climb[y][x] ? '1' : '0'; }) + ",";
     s += layer("diff", [&](int y, int x) { return w.diff[y][x] && !w.water[y][x] ? '1' : '0'; }) + ",";
     s += layer("dark", [&](int y, int x) { return w.dark[y][x] ? '1' : '0'; }) + ",";
     s += layer("water", [&](int y, int x) { return w.water[y][x] ? '1' : '0'; }) + ",";
     s += layer("pit", [&](int y, int x) { return w.pit[y][x] ? '1' : '0'; }) + ",";
-    s += layer("height", [&](int y, int x) { return (char)('0' + w.height[y][x]); }) + ",";
-    s += layer("tree", [&](int y, int x) { return w.tree[y][x] ? '1' : '0'; }) + ",";
+    s += layer("height", [&](int y, int x) { return lvChar(w.height[y][x]); }) + ",";
+    s += layer("tree", [&](int y, int x) { return lvChar(w.tree[y][x]); }) + ",";
     s += layer("haz", [&](int y, int x) { return (char)('0' + w.haz[y][x]); }) + ",";
     s += layer("ladder", [&](int y, int x) { return w.ladder[y][x] ? '1' : '0'; }) + ",";
-    s += layer("deck", [&](int y, int x) { return (char)('0' + w.deck[y][x]); }) + ",";
+    s += layer("deck", [&](int y, int x) { return lvChar(w.deck[y][x]); }) + ",";
     s += layer("door", [&](int y, int x) { return (char)('0' + w.door[y][x]); }) + ",";
     s += layer("strong", [&](int y, int x) { return w.strong[y][x] ? '1' : '0'; });
     if (w.wseed) s += ",\"world\":{\"seed\":\"" + std::to_string(w.wseed) + "\",\"size\":" + std::to_string(w.wsize) + ",\"x\":" + std::to_string(w.wx) + ",\"y\":" + std::to_string(w.wy) + ",\"step\":" + std::to_string(w.wstep) + "}";
@@ -47,6 +54,7 @@ static std::string mapToJson(const World& w) {
 struct CustomMap {
     bool on = false;
     int aw = 0, ah = 0, theme = 0;
+    bool old = false;   // старая карта: уровни по 10 фт (без "hz":5)
     bool parts = false;   // карта из генератора (участок по местности): несвязные карманы можно, бой — в самой большой части
     std::vector<std::string> wall, climb, diff, dark, water, pit, height, tree, haz, ladder, deck, door, strong;
     int start[2][2] = {{-1, -1}, {-1, -1}};
@@ -70,6 +78,7 @@ static bool parseCustomMap(const Json& j, CustomMap& m, std::string& err) {
     m.ah = j["ah"].num(0);
     m.theme = j["theme"].num(0) ? 1 : 0;
     m.parts = j["parts"].flag(false);
+    m.old = j["hz"].num(10) != 5;
     if (m.aw < 5 || m.ah < 5 || m.aw > W || m.ah > W) { err = "размер карты от 5×5 до " + std::to_string(W) + "×" + std::to_string(W) + " клеток"; return false; }
     readLayer(j["wall"], m.wall, m.aw, m.ah);
     readLayer(j["climb"], m.climb, m.aw, m.ah);
@@ -89,7 +98,7 @@ static bool parseCustomMap(const Json& j, CustomMap& m, std::string& err) {
         const Json& p = j["starts"][(size_t)i];
         if (p.t != Json::ARR) continue;
         const int x = p[0].num(-1), y = p[1].num(-1);
-        if (x < 0 || y < 0 || x >= m.aw || y >= m.ah || blocked(x, y) || m.tree[y][x] == '1' || (m.door[y][x] != '0' && m.door[y][x] != 0)) { err = std::string("начальная клетка стороны ") + (i ? "B" : "A") + " на стене, дереве, в ущелье или за краем карты"; return false; }
+        if (x < 0 || y < 0 || x >= m.aw || y >= m.ah || blocked(x, y) || m.tree[y][x] != '0' || (m.door[y][x] != '0' && m.door[y][x] != 0)) { err = std::string("начальная клетка стороны ") + (i ? "B" : "A") + " на стене, дереве, в ущелье или за краем карты"; return false; }
         m.start[i][0] = x;
         m.start[i][1] = y;
     }
@@ -174,16 +183,19 @@ static void applyCustomMap(World& w, const CustomMap& m) {
             w.diff[y][x] = (m.diff[y][x] == '1' || w.water[y][x]) && !w.wall[y][x];
             w.climb[y][x] = m.climb[y][x] == '1' && !w.wall[y][x] && !w.pit[y][x];
             w.dark[y][x] = m.dark[y][x] == '1';
-            const int h = m.height[y][x] - '0';
-            w.height[y][x] = (unsigned char)(h >= 1 && h <= 9 && !w.pit[y][x] ? h : 0);
+            const int k = m.old ? 2 : 1;   // старая карта: уровень 10 фт = 2 уровня по 5 фт
+            const int h = m.old ? (m.height[y][x] >= '1' && m.height[y][x] <= '9' ? 2 * (m.height[y][x] - '0') : 0) : lvOf(m.height[y][x]);
+            w.height[y][x] = (unsigned char)(h >= 1 && h <= LV_MAX && !w.pit[y][x] ? h : 0);
             w.ladder[y][x] = m.ladder[y][x] == '1' && !w.wall[y][x] && !w.pit[y][x];
             const int dr = m.door[y][x] - '0';
             w.door[y][x] = (unsigned char)(dr >= 1 && dr <= 2 && !w.wall[y][x] && !w.pit[y][x] ? dr : 0);
             w.strong[y][x] = m.strong[y][x] == '1' && w.wall[y][x];
-            const int dk = m.deck[y][x] - '0';
-            w.deck[y][x] = (unsigned char)(dk >= 1 && dk <= 9 && !w.wall[y][x] && dk > w.height[y][x] ? dk : 0);
+            const int dk = m.old ? (m.deck[y][x] >= '1' && m.deck[y][x] <= '9' ? k * (m.deck[y][x] - '0') : 0) : lvOf(m.deck[y][x]);
+            w.deck[y][x] = (unsigned char)(dk >= 1 && dk <= LV_MAX && !w.wall[y][x] && dk > w.height[y][x] ? dk : 0);
             const int hz = m.haz[y][x] - '0';
             w.haz[y][x] = (unsigned char)(hz >= 1 && hz < HAZ_N && !w.wall[y][x] && !w.pit[y][x] ? hz : 0);
-            w.tree[y][x] = m.tree[y][x] == '1' && !w.wall[y][x] && !w.pit[y][x] && !w.water[y][x] && !w.climb[y][x];
+            if (w.haz[y][x] && HAZ[w.haz[y][x]].obscure) w.fogAny = true;
+            const int th = m.old ? (m.tree[y][x] == '1' ? TREE_DEF : 0) : lvOf(m.tree[y][x]);   // дерево 10–40 фт
+            w.tree[y][x] = (unsigned char)(th && !w.wall[y][x] && !w.pit[y][x] && !w.water[y][x] && !w.climb[y][x] ? std::clamp(th, TREE_MIN, TREE_MAX) : 0);
         }
 }
