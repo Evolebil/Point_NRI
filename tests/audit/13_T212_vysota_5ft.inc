@@ -234,7 +234,7 @@
         B.x = 10; B.y = 5; B.z = 2;
         const size_t ed0 = vw.edits.size();
         vxDig(w, B);
-        const bool dug = vw.at(10, 5, 2) == VX_AIR && vw.at(10, 5, 3) == VX_AIR && vw.edits.size() == ed0 + 2 && vw.at(10, 5, G) == VX_STONE;
+        const bool dug = vw.at(10, 5, 2) == VX_AIR && vw.at(10, 5, 3) == VX_DIRT && vw.edits.size() == ed0 + 1 && vw.at(10, 5, G) == VX_STONE;   // средний — ход в 1 куб (T219)
         // 5. разбить блок: все кубы стены в клетке (10, 0) — объекта больше нет и в слоях
         for (int z = G; z < G + WALL_UP; z++) damageVox(vw, 10, 0, z, 1000, DT_BLUDGEONING);
         vxAfterBreak(w, 10, 0);

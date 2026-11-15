@@ -182,7 +182,9 @@ inline bool vxStand(const World& w, const Fighter& f, int x, int y, int z);
 inline bool vxStep(const World& w, const Fighter& f, int x, int y, int z, int nx, int ny, int nz);
 inline int vxStepCost(const World& w, const Fighter& f, int x, int y, int z, int nx, int ny, int nz);
 inline int vxTopZ(const World& w, int x, int y);
-bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1);
+inline int vxFitN(const World& w, const Fighter& f, int x, int y, int z);
+// глаза — e0, e1 кубов над низом куба ног (vxEyeH; по умолчанию — средний)
+bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1, double e0 = .8, double e1 = .8);
 struct PStep;
 void vxPathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PStep>& path);
 inline void vxDig(World& w, Fighter& f);
@@ -243,6 +245,11 @@ inline int dist3(int x0, int y0, int z0, int x1, int y1, int z1) { return 5 * st
 // левая верхняя клетка его квадрата. Расстояние — между ближайшими клетками квадратов, обзор — от любой клетки до любой,
 // область задевает, если накрыла хоть одну клетку
 inline int fpFull(const Fighter& f) { return sizeLv(f); }
+// Режим кубов (решение владельца 2026-11-16): рост крошечного 0,25 куба, маленького 0,5, среднего 1, большого 2, огромного 3,
+// громадного 4 — тело n×n×n кубов (до среднего — 1 куб: щелей меньше куба нет), протиснувшийся — на размер меньше.
+// Дробный рост — у глаз: 0,8 роста над низом куба ног (крошечный 0,2, маленький 0,4, средний 0,8, большой 1,6 …);
+// n — квадрат сейчас (fpN)
+inline double vxEyeH(const Fighter& f, int n) { return f.b.size == 0 ? .2 : (f.b.size == 1 ? .4 : .8 * n); }
 int fpN(const Fighter& f);   // занятый квадрат с учётом протискивания (ниже)
 inline int fpGap(int a0, int an, int b0, int bn) { return std::max({0, b0 - (a0 + an - 1), a0 - (b0 + bn - 1)}); }
 inline int distFP(int ax, int ay, int az, int an, int bx, int by, int bz, int bn) {
@@ -314,7 +321,11 @@ inline bool nodeOK(const World& w, const Fighter& f, int x, int y, int l) {
 }
 // квадрат f, стоящего в узле: полный или (протиснулся) на размер меньше
 inline int fpAt(const World& w, const Fighter& f, int x, int y, int l) {
-    if (fpFull(f) == 1 || w.vx) return fpFull(f);   // режим кубов: без протискивания (этап 2)
+    if (fpFull(f) == 1) return 1;
+    if (w.vx) {   // режим кубов: тело n×n×n или (протиснулся) на размер меньше; l — куб ног
+        const int m = vxFitN(w, f, x, y, l);
+        return m ? m : fpFull(f);
+    }
     const int m = fitInfo(w, f, x, y, l) & 7;
     return m ? m : fpFull(f);
 }
@@ -378,6 +389,7 @@ inline void forRules(const Fighter& x, F&& f) {
 }
 int fpN(const Fighter& f) {
     if (fpFull(f) == 1 || !g_curW) return fpFull(f);
+    if (g_curW->vx) return fpAt(*g_curW, f, f.x, f.y, f.z);   // режим кубов: без кэша (копание меняет кубы без mapVer)
     const long long key = ((((long long)g_curW->mapVer * W + f.y) * W + f.x) * 2 + (f.up ? 1 : 0)) * 8 + f.b.size;   // размер меняет превращение
     if (f.fpKey != key) {
         f.fpKey = key;
@@ -396,8 +408,9 @@ inline int distFC(const World& w, const Fighter& f, int x, int y) { return distF
 // свою высоту) и земля клетки, если линия проходит ниже их верха. На ровной арене — как раньше: закрывают стены и деревья
 // Настил закрывает обзор сквозь себя: линия, пересекающая его уровень над этой клеткой (в том числе над своей и над клеткой
 // цели — стоящий под мостом не видит стоящего на нём), закрыта
-bool losZ(const World& w, int x0, int y0, int z0, int x1, int y1, int z1) {
-    if (w.vx) return vxLos(w, x0, y0, z0 + VZ0, x1, y1, z1 + VZ0);   // режим кубов: луч по кубам (z — уровни, куб ног = z + VZ0)
+// Режим кубов: луч по кубам (z — уровни, куб ног = z + VZ0), глаза — e0, e1 над ногами (прежний бой их не берёт)
+bool losZ(const World& w, int x0, int y0, int z0, int x1, int y1, int z1, double e0 = .8, double e1 = .8) {
+    if (w.vx) return vxLos(w, x0, y0, z0 + VZ0, x1, y1, z1 + VZ0, e0, e1);
     int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx - dy,
         x = x0, y = y0;
     const double za = z0 + 1.0, zb = z1 + 1.0;   // глаза — на 5 фт выше ног
@@ -429,18 +442,21 @@ bool losZ(const World& w, int x0, int y0, int z0, int x1, int y1, int z1) {
 bool los(const World& w, int x0, int y0, int x1, int y1) { return losZ(w, x0, y0, zAt(w, x0, y0), x1, y1, zAt(w, x1, y1)); }
 // видимость между квадратами: есть линия от какой-нибудь клетки одного до какой-нибудь клетки другого (к каждой клетке b —
 // от ближайшей к ней клетки a)
-bool losFP(const World& w, int ax, int ay, int az, int an, int bx, int by, int bz, int bn) {
-    if (an == 1 && bn == 1) return losZ(w, ax, ay, az, bx, by, bz);
+bool losFP(const World& w, int ax, int ay, int az, int an, int bx, int by, int bz, int bn, double ea = .8, double eb = .8) {
+    if (an == 1 && bn == 1) return losZ(w, ax, ay, az, bx, by, bz, ea, eb);
     for (int dy = 0; dy < bn; dy++)
         for (int dx = 0; dx < bn; dx++) {
             const int x1 = bx + dx, y1 = by + dy;
-            if (losZ(w, std::clamp(x1, ax, ax + an - 1), std::clamp(y1, ay, ay + an - 1), az, x1, y1, bz)) return true;
+            if (losZ(w, std::clamp(x1, ax, ax + an - 1), std::clamp(y1, ay, ay + an - 1), az, x1, y1, bz, ea, eb)) return true;
         }
     return false;
 }
 // видимость между бойцами (с их ярусом) и от бойца до клетки (земля клетки)
-bool losF(const World& w, const Fighter& a, const Fighter& b) { return losFP(w, a.x, a.y, zF(w, a), fpN(a), b.x, b.y, zF(w, b), fpN(b)); }
-bool losFC(const World& w, const Fighter& a, int x, int y) { return losFP(w, a.x, a.y, zF(w, a), fpN(a), x, y, zAt(w, x, y), 1); }
+// (режим кубов — от глаз до глаз по росту, vxEyeH)
+bool losF(const World& w, const Fighter& a, const Fighter& b) {
+    return losFP(w, a.x, a.y, zF(w, a), fpN(a), b.x, b.y, zF(w, b), fpN(b), vxEyeH(a, fpN(a)), vxEyeH(b, fpN(b)));
+}
+bool losFC(const World& w, const Fighter& a, int x, int y) { return losFP(w, a.x, a.y, zF(w, a), fpN(a), x, y, zAt(w, x, y), 1, vxEyeH(a, fpN(a))); }
 // облако дыма или тумана (HAZ obscure) в клетке на уровне z: сильно заслонено
 inline bool fogCell(const World& w, int x, int y, double z) {
     const int k = w.haz[y][x];
@@ -477,6 +493,12 @@ bool inShapeF(int shape, int size, int ox, int oy, int cx, int cy, const Fighter
             if (inShape(shape, size, ox, oy, cx, cy, e.x + dx, e.y + dy)) return true;
     return false;
 }
+// режим кубов: в кубе (x, y, z) уже 4 крошечных (кроме f) — пятому не встать
+bool vxTinyFull(const World& w, const Fighter& f, int x, int y, int z) {
+    int c = 0;
+    for (auto& g : w.f) c += &g != &f && g.hp > 0 && g.b.size == 0 && g.x == x && g.y == y && g.z == z;
+    return c >= 4;
+}
 // клетку (x, y) занимает чей-то квадрат (кроме self)
 bool occupied(const World& w, int x, int y, const Fighter* self) {
     for (auto& g : w.f)
@@ -487,7 +509,14 @@ bool occupied(const World& w, int x, int y, const Fighter* self) {
 // большой 20, огромный 30, громадный 40). Под стоящим на мосту, под летуном выше роста — пройти можно (v21)
 inline bool vOverlap(int za, const Fighter& a, int zb, const Fighter& b) { return za < zb + bodyZ(sizeLv(b)) && zb < za + bodyZ(sizeLv(a)); }
 // f, поставленный в узел (x, y, l) на своей высоте, задевает g
+bool vxTinyFull(const World& w, const Fighter& f, int x, int y, int z);
 inline bool touchesAt(const World& w, const Fighter& f, int x, int y, int l, const Fighter& g) {
+    if (w.vx) {   // режим кубов: тела n×n×n от куба ног (l — куб ног f); крошечные — до 4 в одной клетке
+        if (&g == &f || g.hp <= 0) return false;
+        const int fn = fpAt(w, f, x, y, l), gn = fpN(g);
+        if (!fpOverlap(g.x, g.y, gn, x, y, fn) || !(l < g.z + gn && g.z < l + fn)) return false;
+        return f.b.size || g.b.size || vxTinyFull(w, f, x, y, l);
+    }
     return &g != &f && g.hp > 0 && fpOverlap(g.x, g.y, fpN(g), x, y, fpAt(w, f, x, y, l)) &&
            vOverlap(nodeZ(w, x, y, l) + std::min(f.alt, maxAltAt(w, f, x, y, l)), f, zF(w, g), g);
 }

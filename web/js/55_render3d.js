@@ -218,39 +218,47 @@ R3.syncFog = function(){
   R3.U.uFog.value.needsUpdate = true;
 };
 
-// ---- бойцы: капсулы цвета стороны, рост по размеру ----
-function r3Cap(n){
-  let g = R3.capGeo.get(n); if (g) return g;
-  const r = n > 1 ? .3 * n : .28, len = n > 1 ? .95 * n - 2 * r : .4;
-  g = new THREE.CapsuleGeometry(r, len, 4, 12); g.userData.h = len + 2 * r; R3.capGeo.set(n, g); return g;
+// ---- бойцы: капсулы цвета стороны, рост по размеру (режим кубов: крошечный 0,25 куба, маленький 0,5 — sz в кадре) ----
+function r3Cap(n, sz){
+  const key = n === 1 && sz != null && sz < 2 ? 's' + sz : n;
+  let g = R3.capGeo.get(key); if (g) return g;
+  const r = key === 's0' ? .1 : key === 's1' ? .17 : n > 1 ? .3 * n : .28, len = key === 's0' ? .04 : key === 's1' ? .15 : n > 1 ? .95 * n - 2 * r : .4;
+  g = new THREE.CapsuleGeometry(r, len, 4, 12); g.userData.h = len + 2 * r; R3.capGeo.set(key, g); return g;
+}
+// крошечные в одной клетке (до 4, режим кубов): каждый — в свою четверть клетки
+function r3TinySlots(fr){
+  const by = new Map(), slot = [];
+  fr.f.forEach((f, k) => { if (f.sz !== 0 || f.hp <= 0) return; const c = f.x + ',' + f.y + ',' + f.z; if (!by.has(c)) by.set(c, []); by.get(c).push(k); });
+  by.forEach(l => { if (l.length > 1) l.forEach((k, i) => { slot[k] = [(i & 1) ? .25 : -.25, (i & 2) ? .25 : -.25]; }); });
+  return slot;
 }
 function r3Colors(f){
   const side = f.kind % 2, tc = f.lead != null && typeof teamCol === 'function' ? teamCol(f.team) : null;
   return f.hp <= 0 ? '#8a8a8a' : (tc || (side ? '#e0644f' : '#4f8fe6'));
 }
 R3.syncFighters = function(fr, t){
-  const out = [];
+  const out = [], tiny = r3TinySlots(fr);
   fr.f.forEach((f, k) => {
     let m = R3.fm[k];
     if (!m){
       const mat = new THREE.MeshLambertMaterial({color: r3Colors(f)}), gmat = new THREE.MeshBasicMaterial({color: r3Colors(f), transparent: true, opacity: .32, depthTest: false, depthWrite: false});
-      m = R3.fm[k] = {mat, gmat, body: new THREE.Mesh(r3Cap(f.n || 1), mat), shadow: new THREE.Mesh(R3.shadowGeo, R3.shadowMat), n: f.n || 1, col: ''};
+      m = R3.fm[k] = {mat, gmat, body: new THREE.Mesh(r3Cap(f.n || 1, f.sz), mat), shadow: new THREE.Mesh(R3.shadowGeo, R3.shadowMat), n: f.n || 1, sz: f.sz, col: ''};
       m.ghost = new THREE.Mesh(m.body.geometry, gmat); m.ghost.renderOrder = 10;   // силуэт сквозь стены и деревья: бойца не теряем за кубами
       m.body.userData.k = k; R3.scene.add(m.body, m.shadow, m.ghost);
     }
     const n = f.n || 1, boss = f.ld != null ? !!f.ld : f.kind < 2;
-    if (m.n !== n){ m.body.geometry = m.ghost.geometry = r3Cap(n); m.n = n; }
+    if (m.n !== n || m.sz !== f.sz){ m.body.geometry = m.ghost.geometry = r3Cap(n, f.sz); m.n = n; m.sz = f.sz; }
     const hide = (f.hid && typeof G !== 'undefined') || (f.hp <= 0 && !boss);
     m.body.visible = m.shadow.visible = m.ghost.visible = !hide; if (hide) return;
     const c = r3Colors(f); if (c !== m.col){ m.mat.color.set(c); m.gmat.color.set(c); m.col = c; }
     const p = posAt(k, t), a = FR[prevIdx].f[k], tele = FR[curIdx].act === 'teleport' && FR[curIdx].actor === k;
     const z = a && !tele ? lerp(r3Z(a), r3Z(f), t) : r3Z(f), h = m.body.geometry.userData.h;
-    const X = p.x + n / 2, Z = p.y + n / 2;
+    const ts = tiny[k], X = p.x + n / 2 + (ts ? ts[0] : 0), Z = p.y + n / 2 + (ts ? ts[1] : 0);
     const A = fr.actor, act = k === A && stepT0 > -1e8 && t < 1;
     m.mat.emissive.set(act ? 0x6a5414 : 0x000000);
-    if (f.hp <= 0){ m.body.rotation.set(0, 0, Math.PI / 2); m.body.position.set(X, z + .3 * n, Z); }   // павший лежит
+    if (f.hp <= 0){ m.body.rotation.set(0, 0, Math.PI / 2); m.body.position.set(X, z + (f.sz === 0 ? .1 : f.sz === 1 ? .17 : .3 * n), Z); }   // павший лежит
     else { m.body.rotation.set(0, 0, 0); m.body.position.set(X, z + h / 2, Z); }
-    m.shadow.scale.setScalar(.9 * n); m.shadow.position.set(X, (MAP.vox ? r3Z(f) : VZ0 + r3Level(f) - (f.alt || 0)) + .02, Z);
+    m.shadow.scale.setScalar(f.sz === 0 ? .35 : f.sz === 1 ? .6 : .9 * n); m.shadow.position.set(X, (MAP.vox ? r3Z(f) : VZ0 + r3Level(f) - (f.alt || 0)) + .02, Z);
     m.ghost.position.copy(m.body.position); m.ghost.rotation.copy(m.body.rotation);
     out.push({k, f, X, Y: z, Z, h, n, boss});
   });

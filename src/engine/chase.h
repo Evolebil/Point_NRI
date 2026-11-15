@@ -187,7 +187,8 @@ std::string fighterJson(const Fighter& f, int kind, bool hid = false) {
                   speedOf(f), f.fled ? f.fledWhy : 0, condListJson(f).c_str(), hid ? ",\"hid\":1" : "", f.up ? ",\"up\":1" : "");
     if (g_curW && g_curW->vx) {   // режим кубов: куб ног — клиенту для высоты
         std::string r = buf;
-        r.insert(r.size() - 1, ",\"z\":" + std::to_string(f.z) + (fpN(f) > 1 ? ",\"n\":" + std::to_string(fpN(f)) : std::string()));
+        r.insert(r.size() - 1, ",\"z\":" + std::to_string(f.z) + (fpN(f) > 1 ? ",\"n\":" + std::to_string(fpN(f)) : std::string()) +
+                                   (f.b.size < 2 ? ",\"sz\":" + std::to_string(f.b.size) : std::string()));   // крошечный 0, маленький 1: рост капсулы
         return r;
     }
     if (fpN(f) > 1 || f.alt > 0) {   // крупный: квадрат n×n от (x, y); летун: высота (уровни по 5 фт)

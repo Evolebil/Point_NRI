@@ -183,24 +183,39 @@ inline int vxTopZ(const World& w, int x, int y) {
         if (MAT[v.at(x, y, z - 1)].solid && !MAT[v.at(x, y, z)].solid) return z;
     return 1;
 }
-// Можно ли f стоять ногами в кубе z клетки (x, y) (квадрат n×n, рост — bodyZ: средний 10 фт = 2 куба): тело — в воздухе или
-// жидкости (копатель — и в копаемом), опора — твёрдое или жидкость под ногами хоть одной клетки, лестница (до верха соседей),
-// стена рядом (лазун), земля вокруг (копатель); летуну опора не нужна
+// Тело f — m×m×m кубов от куба ног z клетки (x, y) (рост — vxEyeH в world.h: до среднего 1 куб, большой 2 …): все кубы на
+// арене и в воздухе или жидкости (копателю — и в копаемом; dug — тело в земле: копатель держится за неё)
+inline bool vxBodyIn(const World& w, const Fighter& f, int x, int y, int z, int m, bool* dug = nullptr) {
+    const VoxWorld& v = *w.vx;
+    if (x < 0 || y < 0 || x + m > w.aw || y + m > w.ah || z < 1 || z + m > v.sz) return false;
+    for (int dy = 0; dy < m; dy++)
+        for (int dx = 0; dx < m; dx++)
+            for (int k = 0; k < m; k++) {
+                const unsigned char c = v.at(x + dx, y + dy, z + k);
+                if (!MAT[c].solid) continue;
+                if (!(f.b.burrowS && vxDiggable(c))) return false;
+                if (dug) *dug = true;
+            }
+    return true;
+}
+// какое тело помещается в узел: полное n×n×n, на размер меньше (протиснулся, PHB: только крупные — до среднего тело и так
+// 1 куб) или никакое (0)
+inline int vxFitN(const World& w, const Fighter& f, int x, int y, int z) {
+    const int n = fpFull(f);
+    if (vxBodyIn(w, f, x, y, z, n)) return n;
+    return n > 1 && vxBodyIn(w, f, x, y, z, n - 1) ? n - 1 : 0;
+}
+// Можно ли f стоять ногами в кубе z клетки (x, y): тело (полное или протиснувшееся) свободно, опора — твёрдое или жидкость
+// под ногами хоть одной клетки, лестница (до верха соседей), стена рядом (лазун), земля вокруг (копатель); летуну опора не нужна
 // fly — держится ли в воздухе (vxFixAll проверяет опору и у летуна, сбитого с полёта)
 inline bool vxStandEx(const World& w, const Fighter& f, int x, int y, int z, bool fly) {
     const VoxWorld& v = *w.vx;
-    const int n = fpFull(f), h = bodyZ(sizeLv(f));
-    if (x < 0 || y < 0 || x + n > w.aw || y + n > w.ah || z < 1 || z + h > v.sz) return false;
+    const int n = vxFitN(w, f, x, y, z);
     bool sup = fly;
+    if (!n || !vxBodyIn(w, f, x, y, z, n, &sup)) return false;
     for (int dy = 0; dy < n; dy++)
         for (int dx = 0; dx < n; dx++) {
             const int cx = x + dx, cy = y + dy;
-            for (int k = 0; k < h; k++) {
-                const unsigned char m = v.at(cx, cy, z + k);
-                if (!MAT[m].solid) continue;
-                if (!(f.b.burrowS && vxDiggable(m))) return false;
-                sup = true;   // копатель в земле держится за неё
-            }
             const unsigned char below = v.at(cx, cy, z - 1);
             if (MAT[below].solid || MAT[below].liquid) sup = true;
             if (!sup && w.ladder[cy][cx]) {   // лестница: от земли до верха соседних клеток
@@ -221,19 +236,8 @@ inline bool vxStandEx(const World& w, const Fighter& f, int x, int y, int z, boo
     return sup;
 }
 inline bool vxStand(const World& w, const Fighter& f, int x, int y, int z) { return vxStandEx(w, f, x, y, z, f.b.fly); }
-// тело f в кубе z свободно (воздух или жидкость; копателю — и копаемое): туда можно упасть
-inline bool vxBodyFree(const World& w, const Fighter& f, int x, int y, int z) {
-    const VoxWorld& v = *w.vx;
-    const int n = fpFull(f), h = bodyZ(sizeLv(f));
-    if (z < 1 || z + h > v.sz) return false;
-    for (int dy = 0; dy < n; dy++)
-        for (int dx = 0; dx < n; dx++)
-            for (int k = 0; k < h; k++) {
-                const unsigned char m = v.at(x + dx, y + dy, z + k);
-                if (MAT[m].solid && !(f.b.burrowS && vxDiggable(m))) return false;
-            }
-    return true;
-}
+// тело f в кубе z свободно (воздух или жидкость; копателю — и копаемое; крупному — хотя бы протиснувшись): туда можно упасть
+inline bool vxBodyFree(const World& w, const Fighter& f, int x, int y, int z) { return vxFitN(w, f, x, y, z) > 0; }
 // Шаг между узлами: в соседнюю клетку — уступ до 10 фт вверх или вниз (больше — обрыв, как прежде); по вертикали на куб —
 // летун, лазун у стены, лестница, копатель. Наискосок — не сквозь угол стены (кроме копателя)
 inline bool vxStep(const World& w, const Fighter& f, int x, int y, int z, int nx, int ny, int nz) {
@@ -255,6 +259,7 @@ inline int vxStepCost(const World& w, const Fighter& f, int x, int y, int z, int
     if (!f.b.fly && !f.b.burrowS && w.diff[ny][nx] && !f.b.ignDiff && !(f.b.swimS && w.water[ny][nx]) && nz == vxTopZ(w, nx, ny)) cost = 10;
     const int up = nz - z;
     if (up > 0 && !f.b.fly && !f.b.climbS && !f.b.burrowS) cost += climbFt(up);
+    if (fpFull(f) > 1 && vxFitN(w, f, nx, ny, nz) < fpFull(f)) cost *= 2;   // протискивается: движение вдвое дороже
     return cost;
 }
 // Путь в клетку (tx, ty) — Дейкстра по узлам-кубам (цена — футы, при равенстве — меньше клеток зон); известных врагов
@@ -326,11 +331,11 @@ void vxPathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PSte
     for (int c = end; c != from; c = prev[(size_t)c]) path.push_back({c % SX, (c / SX) % SY, c / (SX * SY)});
     std::reverse(path.begin(), path.end());
 }
-// Обзор лучом по кубам (Amanatides–Woo): от глаз (куб ног z + 1,5 — в верхнем кубе роста среднего) клетки (x0, y0) к глазам
+// Обзор лучом по кубам (Amanatides–Woo): от глаз (низ куба ног z + e0, vxEyeH: средний — 0,8 куба) клетки (x0, y0) к глазам
 // в (x1, y1); закрывают твёрдые непрозрачные кубы (листва, укрытие, лёд — насквозь), кроме кубов самих концов
-bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1) {
+bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1, double e0, double e1) {
     const VoxWorld& v = *w.vx;
-    const double ax = x0 + 0.5, ay = y0 + 0.5, az = z0 + 1.5, bx = x1 + 0.5, by = y1 + 0.5, bz = z1 + 1.5;
+    const double ax = x0 + 0.5, ay = y0 + 0.5, az = z0 + e0, bx = x1 + 0.5, by = y1 + 0.5, bz = z1 + e1;
     const double ddx = bx - ax, ddy = by - ay, ddz = bz - az;
     int x = x0, y = y0, z = (int)std::floor(az);
     const int ex = x1, ey = y1, ez = (int)std::floor(bz);
@@ -352,7 +357,7 @@ bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1) {
 inline void vxDig(World& w, Fighter& f) {
     if (!w.vx || !f.b.burrowS) return;
     VoxWorld& v = *w.vx;
-    const int n = fpFull(f), h = bodyZ(sizeLv(f));
+    const int n = fpFull(f), h = n;   // тело n×n×n: тоннель среднего — 1 куб
     for (int dy = 0; dy < n; dy++)
         for (int dx = 0; dx < n; dx++)
             for (int k = 0; k < h; k++)

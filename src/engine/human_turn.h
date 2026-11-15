@@ -237,7 +237,7 @@ static void humanTurn(World& w, int idx) {
                 const int z = cmd["z"].num(-1);
                 VoxWorld& v = *w.vx;
                 if (!v.in(x, y, z) || MAT[v.at(x, y, z)].hp <= 0) { msg = "Этот блок не разрушить (или его нет)."; continue; }
-                const int h = bodyZ(sizeLv(me)), dz = std::max({0, z - (me.z + h - 1), me.z - z});
+                const int h = fpN(me), dz = std::max({0, z - (me.z + h - 1), me.z - z});
                 if (5 * std::max({fpGap(me.x, fpN(me), x, 1), fpGap(me.y, fpN(me), y, 1), dz}) > atkDist(me.b)) { msg = "Блок дальше дальности оружия."; continue; }
                 const int r = rollD20(), ac = v.acAt(x, y, z);
                 const bool crit = r == 20, hit = crit || (r != 1 && r + me.wAtk() >= ac);

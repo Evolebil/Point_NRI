@@ -332,6 +332,7 @@ int main(int argc, char** argv) {
 #include "audit/12_T176_obuchenie.inc"
 #include "audit/13_T212_vysota_5ft.inc"
 #include "audit/14_T213-T215_pravki_3d.inc"
+#include "audit/15_T219-T221_razmery_kuby.inc"
     blkTime();
     if (g_shards > 1)
         printf("#ИТОГ %d %d\n", g_pass, g_fail);
