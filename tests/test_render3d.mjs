@@ -8,8 +8,8 @@ const ctx = vm.createContext({
   location: {search: ''}, URLSearchParams, $: () => ({}), toast: () => {}, console,
   hash: () => .5, lv36: (L, x, y) => { const c = L && L[y] && L[y][x]; return c ? parseInt(c, 36) || 0 : 0; }, FR: [], curIdx: 0, prevIdx: 0, G: {}, cam: {}, MAP: null, AW: 1, AH: 1
 });
-vm.runInContext(src + '\nglobalThis.T = {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx};', ctx);
-const {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx} = ctx.T;
+vm.runInContext(src + '\nglobalThis.T = {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx, r3Area, r3TopZ};', ctx);
+const {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx, r3Area, r3TopZ} = ctx.T;
 
 // карта 3×1 из слоёв: каждый слой — одна строка
 function build(layers, dyn = []){
@@ -64,6 +64,26 @@ h = r3Voxel({x: .5, y: VZ0 + 2.5, z: .5}, {x: 1, y: 0, z: 0}, 1e9);
 check('луч вбок упирается в стену, грань к стреляющему', h && h.x === 2 && h.z === VZ0 + 2 && h.nx === -1, JSON.stringify(h));
 h = r3Voxel({x: .5, y: VZ0 + 7.5, z: .5}, {x: 1, y: 0, z: 0}, 1e9);
 check('луч над стеной (выше 30 фт) проходит мимо', h === null, JSON.stringify(h));
+
+// Предпросмотр области в режиме кубов — та же сцена и те же ответы, что T222 в движке (tests/audit/16_*.inc):
+// земля до куба G, стена камня 30 фт по x = 6, применивший — средний в (2, 6, G)
+{
+  ctx.AW = 20; ctx.AH = 20; R3.H = 32; R3.vox = new Uint8Array(20 * 20 * 32);
+  const G = VZ0 + 4, set = (x, y, z, m) => { R3.vox[vIdx(x, y, z)] = m; };
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) for (let z = 0; z < G; z++) set(x, y, z, z === G - 1 ? VM.GRASS : VM.DIRT);
+  for (let y = 0; y < 20; y++) for (let z = G; z < G + 6; z++) set(6, y, z, VM.STONE);
+  const me = {x: 2, y: 6, z: G}, sph = r3Area(0, 10, me, 5, 6, G);
+  check('область: верх столбца — куб над землёй', r3TopZ(3, 3) === G && r3TopZ(6, 3) === G + 6);
+  check('сфера у стены: рядом и сбоку — да, за стеной и дальше радиуса — нет', sph(4, 6, G) && sph(5, 8, G) && !sph(7, 6, G) && !sph(5, 9, G));
+  check('сфера: на 10 фт над центром — да, на 15 — нет', sph(5, 6, G + 2) && !sph(5, 6, G + 3));
+  for (let y = 10; y <= 14; y++) for (let x = 10; x <= 14; x++) set(x, y, G + 1, VM.STONE);
+  const roof = r3Area(0, 10, me, 12, 12, G);
+  check('сфера под потолком: на плите — нет, под ней рядом — да', !roof(12, 12, G + 2) && roof(13, 12, G));
+  set(16, 3, G, VM.LEAF);
+  check('листва область не держит', r3Area(0, 10, me, 15, 3, G)(17, 3, G));
+  const cone = r3Area(2, 15, me, 5, 6, G), line = r3Area(3, 30, me, 5, 6, G);
+  check('конус и линия упираются в стену', cone(4, 6, G) && !cone(4, 10, G) && line(5, 6, G) && !line(8, 6, G));
+}
 
 console.log(`3D-вид: PASS ${pass}, FAIL ${fail}`);
 process.exit(fail ? 1 : 0);

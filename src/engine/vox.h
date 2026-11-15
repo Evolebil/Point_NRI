@@ -331,14 +331,14 @@ void vxPathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PSte
     for (int c = end; c != from; c = prev[(size_t)c]) path.push_back({c % SX, (c / SX) % SY, c / (SX * SY)});
     std::reverse(path.begin(), path.end());
 }
-// Обзор лучом по кубам (Amanatides–Woo): от глаз (низ куба ног z + e0, vxEyeH: средний — 0,8 куба) клетки (x0, y0) к глазам
-// в (x1, y1); закрывают твёрдые непрозрачные кубы (листва, укрытие, лёд — насквозь), кроме кубов самих концов
-bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1, double e0, double e1) {
+// Луч по кубам (Amanatides–Woo) от точки a к точке b (координаты в кубах); кубы самих концов не считаются. f(материал) —
+// код куба на луче: 0 — пропустить, ≥ 100 — преграда (дальше не идём). Возвращает наибольший код
+template <class P>
+int vxRay(const World& w, double ax, double ay, double az, double bx, double by, double bz, P&& f) {
     const VoxWorld& v = *w.vx;
-    const double ax = x0 + 0.5, ay = y0 + 0.5, az = z0 + e0, bx = x1 + 0.5, by = y1 + 0.5, bz = z1 + e1;
     const double ddx = bx - ax, ddy = by - ay, ddz = bz - az;
-    int x = x0, y = y0, z = (int)std::floor(az);
-    const int ex = x1, ey = y1, ez = (int)std::floor(bz);
+    int x = (int)std::floor(ax), y = (int)std::floor(ay), z = (int)std::floor(az), best = 0;
+    const int ex = (int)std::floor(bx), ey = (int)std::floor(by), ez = (int)std::floor(bz);
     const int sx = ddx > 0 ? 1 : (ddx < 0 ? -1 : 0), sy = ddy > 0 ? 1 : (ddy < 0 ? -1 : 0), sz = ddz > 0 ? 1 : (ddz < 0 ? -1 : 0);
     const double tdx = sx ? std::abs(1 / ddx) : 1e9, tdy = sy ? std::abs(1 / ddy) : 1e9, tdz = sz ? std::abs(1 / ddz) : 1e9;
     double tx = sx ? (sx > 0 ? (x + 1 - ax) : (ax - x)) * tdx : 1e9, ty = sy ? (sy > 0 ? (y + 1 - ay) : (ay - y)) * tdy : 1e9,
@@ -348,10 +348,77 @@ bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1, doubl
         else if (ty < tz) { y += sy; if (ty > 1) break; ty += tdy; }
         else { z += sz; if (tz > 1) break; tz += tdz; }
         if (x == ex && y == ey && z == ez) break;
-        const unsigned char m = v.at(x, y, z);
-        if (MAT[m].solid && !MAT[m].seeThru) return false;
+        best = std::max(best, f(v.at(x, y, z)));
+        if (best >= 100) break;
     }
-    return true;
+    return best;
+}
+// Обзор лучом по кубам: от глаз (низ куба ног z + e0, vxEyeH: средний — 0,8 куба) клетки (x0, y0) к глазам в (x1, y1);
+// закрывают твёрдые непрозрачные кубы (листва, укрытие, лёд — насквозь), кроме кубов самих концов
+bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1, double e0, double e1) {
+    return vxRay(w, x0 + 0.5, y0 + 0.5, z0 + e0, x1 + 0.5, y1 + 0.5, z1 + e1,
+                 [](unsigned char m) { return MAT[m].solid && !MAT[m].seeThru ? 100 : 0; }) < 100;
+}
+// середина тела над низом куба ног (в кубах): половина роста — крошечный 0,125, маленький 0,25, средний 0,5, большой 1 …
+inline double vxMidH(const Fighter& f, int n) { return f.b.size == 0 ? .125 : (f.b.size == 1 ? .25 : .5 * n); }
+// Область в объёме (PHB «Области»): распространяется от точки начала по прямым; полное укрытие её останавливает — твёрдое,
+// кроме листвы и ящика-укрытия (лёд и силовой барьер — преграда, как стекло)
+inline bool vxBlocksEffect(unsigned char m) { return MAT[m].solid && m != VX_LEAF && m != VX_COVER; }
+// точка p (центр куба) в форме: сфера и куб — вокруг c, конус и линия — от o в сторону c (как inShape, но в объёме)
+inline bool vxInShape3(int shape, int size, double ox, double oy, double oz, double cx, double cy, double cz, double px, double py, double pz) {
+    if (shape == SH_CUBE) return 5 * std::max({std::fabs(px - cx), std::fabs(py - cy), std::fabs(pz - cz)}) <= size + 1e-9;
+    if (shape == SH_SPHERE) {
+        const double dx = 5 * (px - cx), dy = 5 * (py - cy), dz = 5 * (pz - cz), r = size + 2.5;
+        return dx * dx + dy * dy + dz * dz <= r * r;
+    }
+    const double ux = cx - ox, uy = cy - oy, uz = cz - oz, len = std::sqrt(ux * ux + uy * uy + uz * uz);
+    if (len <= 0) return false;
+    const double vx = 5 * (px - ox), vy = 5 * (py - oy), vz = 5 * (pz - oz);
+    const double t = (vx * ux + vy * uy + vz * uz) / len;
+    const double qx = vy * uz - vz * uy, qy = vz * ux - vx * uz, qz = vx * uy - vy * ux, perp = std::sqrt(qx * qx + qy * qy + qz * qz) / len;
+    if (t <= 0 || t > size + 2.5) return false;
+    return shape == SH_LINE ? perp <= 3.0 : perp <= t / 2.0 + 2.5;
+}
+// точка начала области: сфера и куб — середина куба (cx, cy, cz), конус и линия — глаза применившего
+inline void vxAreaOrigin(int shape, const Fighter& me, int cx, int cy, int cz, double& ox, double& oy, double& oz) {
+    if (shape == SH_CONE || shape == SH_LINE) {
+        const int n = fpN(me);
+        ox = me.x + n / 2.0, oy = me.y + n / 2.0, oz = me.z + vxEyeH(me, n);
+    } else ox = cx + .5, oy = cy + .5, oz = cz + .5;
+}
+// куб p задет областью: в форме и до него от точки начала нет полного укрытия
+inline bool vxAreaCube(const World& w, int shape, int size, const Fighter& me, int cx, int cy, int cz, int px, int py, int pz) {
+    double ox, oy, oz;
+    vxAreaOrigin(shape, me, cx, cy, cz, ox, oy, oz);
+    if (!vxInShape3(shape, size, ox, oy, oz, cx + .5, cy + .5, cz + .5, px + .5, py + .5, pz + .5)) return false;
+    if (vxBlocksEffect(w.vx->at(px, py, pz))) return false;
+    return vxRay(w, ox, oy, oz, px + .5, py + .5, pz + .5, [](unsigned char m) { return vxBlocksEffect(m) ? 100 : 0; }) < 100;
+}
+// Область задевает бойца e (центр — куб (cx, cy, cz)): прежний бой — по клеткам (inShapeF); режим кубов — хоть один куб его
+// тела в форме и без полного укрытия от точки начала
+inline bool areaHits(const World& w, int shape, int size, const Fighter& me, int cx, int cy, int cz, const Fighter& e) {
+    if (!w.vx) return inShapeF(shape, size, me.x, me.y, cx, cy, e);
+    const int n = fpN(e);
+    for (int k = 0; k < n; k++)
+        for (int dy = 0; dy < n; dy++)
+            for (int dx = 0; dx < n; dx++)
+                if (vxAreaCube(w, shape, size, me, cx, cy, cz, e.x + dx, e.y + dy, e.z + k)) return true;
+    return false;
+}
+// высота центра области в клетке (режим кубов): живой боец, чей квадрат начинается в клетке, — его куб ног, иначе — воздух
+// над землёй; прежний бой — 0 (не используется)
+inline int vxAreaZ(const World& w, int cx, int cy) {
+    if (!w.vx) return 0;
+    for (auto& g : w.f)
+        if (g.hp > 0 && g.x == cx && g.y == cy) return g.z;
+    return vxTopZ(w, cx, cy);
+}
+// Укрытие (решение ТЗ: один луч): от глаз a к середине тела d. На луче листва или ящик-укрытие — полукрытие (+2 КД),
+// камень, стена и прочее твёрдое (лёд, барьер) — укрытие на три четверти (+5); полное укрытие — цель не видна (обзор)
+inline int vxCover(const World& w, const Fighter& a, const Fighter& d) {
+    const int na = fpN(a), nd = fpN(d);
+    return vxRay(w, a.x + na / 2.0, a.y + na / 2.0, a.z + vxEyeH(a, na), d.x + nd / 2.0, d.y + nd / 2.0, d.z + vxMidH(d, nd),
+                 [](unsigned char m) { return !MAT[m].solid ? 0 : (m == VX_LEAF || m == VX_COVER ? 2 : 5); });
 }
 // копатель прошёл: кубы его тела, которые были землёй, стали воздухом (ход остаётся; событие vox в кадр)
 inline void vxDig(World& w, Fighter& f) {

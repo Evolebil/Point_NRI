@@ -188,6 +188,7 @@ bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1, doubl
 struct PStep;
 void vxPathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PStep>& path);
 inline void vxDig(World& w, Fighter& f);
+thread_local int g_vxGz = -1;   // режим кубов: куб центра способности по клетке, по верху которого щёлкнул игрок (−1 — верх столбца)
 thread_local int g_vxTz = -1;   // режим кубов: куб, в который игрок щёлкнул (цель пути по высоте), −1 — любой в клетке
 // ярус бойца для функций с узлом (x, y, l): прежний бой — 0/1 (земля/настил), режим кубов — z
 inline int fL(const World& w, const Fighter& f) { return w.vx ? f.z : (f.up ? 1 : 0); }

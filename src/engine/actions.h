@@ -951,9 +951,11 @@ void doSpec(World& w, Fighter& me, int si, int tIdx, int gx = -1, int gy = -1) {
         g_act.target = -1;
         g_act.gx = gx;
         g_act.gy = gy;
+        // режим кубов: центр — куб, по верху которого щёлкнул игрок (земля под кроной, крыша), если он не твёрдый; иначе — верх столбца
+        const int gz = !w.vx ? 0 : (g_vxGz >= 0 && w.vx->in(gx, gy, g_vxGz) && !MAT[w.vx->at(gx, gy, g_vxGz)].solid ? g_vxGz : vxTopZ(w, gx, gy));
         if (s.dmgN || !s.more.empty() || s.cond || s.pushFt || s.dotN)
             for (auto& e : w.f)
-                if (e.hp > 0 && (e.team != me.team || !s.selective) && inShapeF(s.shape, s.radius, me.x, me.y, gx, gy, e)) hitOne(w, s, me, e);
+                if (e.hp > 0 && (e.team != me.team || !s.selective) && areaHits(w, s.shape, s.radius, me, gx, gy, gz, e)) hitOne(w, s, me, e);
         if (s.radius > 0) areaHitsObjects(w, s, me, gx, gy);
         if (s.terr) {
             const int rr = s.radius / 5 + 1;
@@ -985,7 +987,7 @@ void doSpec(World& w, Fighter& me, int si, int tIdx, int gx = -1, int gy = -1) {
     } else {
         int cx = c.x, cy = c.y;
         for (auto& e : w.f)
-            if (e.hp > 0 && (e.team != me.team || !s.selective) && inShapeF(s.shape, s.radius, me.x, me.y, cx, cy, e))
+            if (e.hp > 0 && (e.team != me.team || !s.selective) && areaHits(w, s.shape, s.radius, me, cx, cy, c.z, e))
                 hitOne(w, s, me, e);
         areaHitsObjects(w, s, me, cx, cy);
         if (s.terr) {

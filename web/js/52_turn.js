@@ -186,7 +186,7 @@ cv.addEventListener('click', e => {
   }
   if (G.mode.startsWith('spell:')){
     const k = +G.mode.slice(6), a = q.abils[k];
-    if ((a.self && a.tele) || a.ground){ cmd({c:'spell', k, x:c.x, y:c.y}); return; }
+    if ((a.self && a.tele) || a.ground){ cmd(Object.assign({c:'spell', k, x:c.x, y:c.y}, c.z != null && a.ground ? {z: c.z} : {})); return; }   // режим кубов: центр области — куб, по верху которого щёлкнули
     if (a.self && a.ally){ const al = allyAt(c); if (al == null){ toast('Щёлкните себя или союзника.'); return; } cmd({c:'spell', k, tgt: al}); return; }
     const en = enemyAt(c); if (en == null){ toast('Щёлкните по врагу.'); return; } cmd({c:'spell', k, tgt: en});
   }

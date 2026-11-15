@@ -327,12 +327,12 @@ R3.cellAt = function(e){
   const hits = R3.ray.intersectObjects(R3.fm.filter(m => m && m.body.visible).map(m => m.body), false);
   const he = hits.find(h => { const f = fr.f[h.object.userData.k]; return f && f.hp > 0 && f.team !== myT; });
   const o = R3.ray.ray.origin, d = R3.ray.ray.direction, vh = r3Voxel(o, d, 1e9), hb = he || hits[0];
-  if (hb && (hb === he || !vh || hb.distance <= vh.t)){ const f = fr.f[hb.object.userData.k]; R3.hit = {x: f.x, y: f.y, top: r3Z(f)}; return {x: f.x, y: f.y}; }
+  if (hb && (hb === he || !vh || hb.distance <= vh.t)){ const f = fr.f[hb.object.userData.k]; R3.hit = {x: f.x, y: f.y, top: r3Z(f), k: hb.object.userData.k}; return {x: f.x, y: f.y}; }
   if (!vh){ R3.hit = null; return null; }
   // удар по объекту — сама клетка стены (в режиме кубов — любой разрушимый блок: копать действием), иначе — куб перед гранью
   const vm = R3.vox[vIdx(vh.x, vh.y, vh.z)], inObj = G.mode === 'attack' && (MAP.vox ? vm !== VM.PITF && vm !== VM.WATER && vm !== VM.LAVA && vm !== VM.ACID : isObjCell(vh.x, vh.y));
   const x = inObj ? vh.x : vh.x + vh.nx, y = inObj ? vh.y : vh.y + vh.ny;
-  R3.hit = {x, y, top: inObj ? vh.z + 1 : vh.z + vh.nz};
+  R3.hit = {x, y, top: inObj ? vh.z + 1 : vh.z + vh.nz, z: MAP.vox && !inObj && vh.nz === 1 ? vh.z + 1 : null};
   const c = {x, y};
   if (MAP.vox && inObj) c.oz = vh.z;               // какой блок бить
   else if (MAP.vox && vh.nz === 1) c.z = vh.z + 1;  // щёлкнули по верху блока: идти именно на эту высоту (тоннель или крыша)
@@ -416,6 +416,58 @@ function r3Fx(list, now){
     ctx.restore();
   });
 }
+// ---- область в объёме (режим кубов) — та же геометрия, что в движке (vox.h: vxRay, vxInShape3, vxAreaCube, vxTopZ) ----
+const r3Solid = m => !!m && m !== VM.WATER && m !== VM.LAVA && m !== VM.ACID;
+const r3BlocksEffect = m => r3Solid(m) && m !== VM.LEAF && m !== VM.COVER;   // полное укрытие: твёрдое, кроме листвы и ящика
+function r3TopZ(x, y){ for (let z = R3.H - 1; z >= 1; z--) if (r3Solid(vGet(x, y, z - 1)) && !r3Solid(vGet(x, y, z))) return z; return 1; }
+// луч от a к b (кубы концов не считаются); f(материал) ≥ 100 — преграда
+function r3Ray(ax, ay, az, bx, by, bz, f){
+  const ddx = bx - ax, ddy = by - ay, ddz = bz - az;
+  let x = Math.floor(ax), y = Math.floor(ay), z = Math.floor(az), best = 0;
+  const ex = Math.floor(bx), ey = Math.floor(by), ez = Math.floor(bz), sx = Math.sign(ddx), sy = Math.sign(ddy), sz = Math.sign(ddz);
+  const tdx = sx ? Math.abs(1 / ddx) : 1e9, tdy = sy ? Math.abs(1 / ddy) : 1e9, tdz = sz ? Math.abs(1 / ddz) : 1e9;
+  let tx = sx ? (sx > 0 ? x + 1 - ax : ax - x) * tdx : 1e9, ty = sy ? (sy > 0 ? y + 1 - ay : ay - y) * tdy : 1e9, tz = sz ? (sz > 0 ? z + 1 - az : az - z) * tdz : 1e9;
+  for (let i = 0; i < 4 * (AW + AH + R3.H); i++){
+    if (tx < ty && tx < tz){ x += sx; if (tx > 1) break; tx += tdx; }
+    else if (ty < tz){ y += sy; if (ty > 1) break; ty += tdy; }
+    else { z += sz; if (tz > 1) break; tz += tdz; }
+    if (x === ex && y === ey && z === ez) break;
+    best = Math.max(best, f(vGet(x, y, z))); if (best >= 100) break;
+  }
+  return best;
+}
+function r3InShape3(shape, size, o, c, p){
+  if (shape === 1) return 5 * Math.max(Math.abs(p[0] - c[0]), Math.abs(p[1] - c[1]), Math.abs(p[2] - c[2])) <= size + 1e-9;
+  if (shape === 0){ const dx = 5 * (p[0] - c[0]), dy = 5 * (p[1] - c[1]), dz = 5 * (p[2] - c[2]), r = size + 2.5; return dx * dx + dy * dy + dz * dz <= r * r; }
+  const ux = c[0] - o[0], uy = c[1] - o[1], uz = c[2] - o[2], len = Math.hypot(ux, uy, uz); if (len <= 0) return false;
+  const vx = 5 * (p[0] - o[0]), vy = 5 * (p[1] - o[1]), vz = 5 * (p[2] - o[2]), t = (vx * ux + vy * uy + vz * uz) / len;
+  const perp = Math.hypot(vy * uz - vz * uy, vz * ux - vx * uz, vx * uy - vy * ux) / len;
+  if (t <= 0 || t > size + 2.5) return false;
+  return shape === 3 ? perp <= 3 : perp <= t / 2 + 2.5;
+}
+const r3Eye = f => f.sz === 0 ? .2 : f.sz === 1 ? .4 : .8 * (f.n || 1);
+// область: shape, size; me — боец кадра (x, y, z, n, sz); центр — куб (cx, cy, cz). Возвращает проверку куба p
+function r3Area(shape, size, me, cx, cy, cz){
+  const n = me.n || 1, c = [cx + .5, cy + .5, cz + .5], o = shape === 2 || shape === 3 ? [me.x + n / 2, me.y + n / 2, me.z + r3Eye(me)] : c;
+  return (px, py, pz) => {
+    const p = [px + .5, py + .5, pz + .5];
+    if (!r3InShape3(shape, size, o, c, p) || r3BlocksEffect(vGet(px, py, pz))) return false;
+    return r3Ray(o[0], o[1], o[2], p[0], p[1], p[2], m => r3BlocksEffect(m) ? 100 : 0) < 100;
+  };
+}
+// предпросмотр: клетки земли (верх столбца) и бойцы, которых заденет
+function r3AreaPreview(list, ga, me, cx, cy, cz){
+  const hit = r3Area(ga.shape, ga.radius, me.f, cx, cy, cz), R = Math.ceil(ga.radius / 5) + 1;
+  const far = ga.shape === 2 || ga.shape === 3, bx = far ? me.f.x : cx, by = far ? me.f.y : cy;
+  for (let y = Math.max(0, by - R); y <= Math.min(AH - 1, by + R); y++)
+    for (let x = Math.max(0, bx - R); x <= Math.min(AW - 1, bx + R); x++){ const tz = r3TopZ(x, y); if (hit(x, y, tz)) r3Square(x, y, tz + .03, 1, 'rgba(255,110,50,.95)', 'rgba(255,100,40,.3)'); }
+  list.forEach(o => {
+    const f = o.f; if (f.hp <= 0 || (ga.sel && f.team === me.f.team)) return;
+    const n = f.n || 1; let h = false;
+    for (let k = 0; k < n && !h; k++) for (let dy = 0; dy < n && !h; dy++) for (let dx = 0; dx < n && !h; dx++) h = hit(f.x + dx, f.y + dy, f.z + k);
+    if (h) r3Circle(o.X, o.Y + .05, o.Z, .45 * o.n + .15, f.team === me.f.team ? '#ffd35a' : '#ff5d5d', 'rgba(255,90,60,.18)', null, 4);
+  });
+}
 // подсветка своего хода: дальность движения и оружия, цели, клетка под курсором с расстоянием
 function r3Turn(list, now){
   if (!G.req || G.busy || G.over) return;
@@ -429,8 +481,13 @@ function r3Turn(list, now){
     if (!(ga && ga.ground)) q.enemies.forEach(en => { const o = list.find(x => x.k === en.i); if (!o || o.f.hp <= 0) return; const ok = en.dist <= range && en.los && !en.charm; r3Circle(o.X, o.Y + .04, o.Z, .45 * o.n + .12 + Math.sin(now / 160) * .04, ok ? '#ff5d5d' : 'rgba(180,180,190,.7)', null, null, ok ? 4 : 2); });
   }
   const h = R3.hit; if (!h || h.x < 0 || h.y < 0 || h.x >= AW || h.y >= AH) return;
+  if (MAP.vox && ga && ga.radius > 0 && ga.shape != null){   // режим кубов: область по кубам (не сквозь стены)
+    const t = h.k != null ? FR[curIdx].f[h.k] : null;
+    if (ga.ground) r3AreaPreview(list, ga, me, h.x, h.y, h.z != null && !r3Solid(vGet(h.x, h.y, h.z)) ? h.z : r3TopZ(h.x, h.y));   // как движок
+    else if (t && t.hp > 0) r3AreaPreview(list, ga, me, t.x, t.y, t.z);
+  }
   if (ga && ga.ground){
-    if (ga.radius) r3Circle(h.x + .5, h.top + .04, h.y + .5, ga.radius / 5, 'rgba(255,140,90,.85)', 'rgba(255,120,80,.16)');
+    if (ga.radius && !(MAP.vox && ga.shape != null)) r3Circle(h.x + .5, h.top + .04, h.y + .5, ga.radius / 5, 'rgba(255,140,90,.85)', 'rgba(255,120,80,.16)');
     if (ga.wallLen){   // клетки барьера — тот же расчёт направления, что у 2D
       const dx = h.x - me.f.x, dy = h.y - me.f.y, ax = Math.abs(dx), ay = Math.abs(dy), sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1;
       let px = 1, py = 0; if (ax === 0 && ay === 0){ px = 1; py = 0; } else if (ax >= 2 * ay){ px = 0; py = 1; } else if (ay >= 2 * ax){ px = 1; py = 0; } else { px = -sy; py = sx; }

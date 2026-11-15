@@ -397,6 +397,8 @@ int coverBonus(const World& w, int x0, int y0, int x1, int y1) {
     }
     return w.tree[y1][x1] ? 2 : 0;   // в кроне дерева — полукрытие листвы
 }
+// укрытие цели d от a: прежний бой — по клеткам (coverBonus), режим кубов — одним лучом по кубам (vxCover)
+inline int coverF(const World& w, const Fighter& a, const Fighter& d) { return w.vx ? vxCover(w, a, d) : coverBonus(w, a.x, a.y, d.x, d.y); }
 inline bool canReact(const Fighter& d) {
     return d.hp > 0 && !d.reactionUsed && !d.cond[C_STUN] && !d.cond[C_PARAL] && !d.cond[C_INCAP];
 }
@@ -455,7 +457,7 @@ bool attackRoll(World& w, Fighter& a, Fighter& d, int mod, int range, bool& crit
         if (rl.what == E_ATKDIE && ruleOn(w, a, &d, rl, true, range <= 5)) die += rollDice(rl.n, rl.s);
         if (rl.what == E_NOCOVER && ruleOn(w, a, &d, rl, true, range <= 5)) noCover = true;
     });
-    int ac = d.b.ac + (d.acBuffRounds > 0 ? d.acBuff : 0) + (noCover ? 0 : coverBonus(w, a.x, a.y, d.x, d.y)) + ruleAC(w, d, a);
+    int ac = d.b.ac + (d.acBuffRounds > 0 ? d.acBuff : 0) + (noCover ? 0 : coverF(w, a, d)) + ruleAC(w, d, a);
     bool hit = crit || r + mod + die >= ac;   // mod — полный бонус атаки (wAtk или sAtk: с мастерством)
     // переброс (v21): промахнулся — свой переброс (Везунчик); попали по мне — заставить перебросить (Второй шанс)
     if (!hit && useReroll(a, T_MISS)) {
@@ -516,7 +518,7 @@ double pHitEst(const World& w, const Fighter& a, const Fighter& d, int mod, int 
     bool adv, dis;
     advState(w, a, d, range, adv, dis);
     // ожидаемый эффект Парирования
-    double ac = d.b.ac + (d.acBuffRounds > 0 ? d.acBuff : 0) + coverBonus(w, a.x, a.y, d.x, d.y) + ruleAC(w, d, a) +
+    double ac = d.b.ac + (d.acBuffRounds > 0 ? d.acBuff : 0) + coverF(w, a, d) + ruleAC(w, d, a) +
                 ((d.b.parry > 0 && range <= 5 && canReact(d)) ? a.pol->v[PO_PARRYW] * d.b.parry : 0.0);
     double p = std::clamp((21.0 - (ac - mod)) / 20.0, 0.05, 0.95);
     if (adv && !dis) return 1 - (1 - p) * (1 - p);

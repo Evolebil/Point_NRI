@@ -75,8 +75,9 @@ double evSpecOne(const World& w, const Spec& s, const Fighter& me, const Fighter
 // Ценность области с центром (cx, cy): враги в радиусе — польза, свои (и я сам) — вред, если область не избирательная (№17)
 double areaValue(const World& w, const Spec& s, const Fighter& me, int cx, int cy) {
     double ev = 0;
+    const int cz = vxAreaZ(w, cx, cy);
     for (auto& e : w.f) {
-        if (e.hp <= 0 || !inShapeF(s.shape, s.radius, me.x, me.y, cx, cy, e)) continue;
+        if (e.hp <= 0 || !areaHits(w, s.shape, s.radius, me, cx, cy, cz, e)) continue;
         if (e.team != me.team)
             ev += evSpecOne(w, s, me, e);
         else if (!s.selective)

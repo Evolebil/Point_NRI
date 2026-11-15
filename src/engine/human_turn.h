@@ -117,7 +117,8 @@ static std::string humanRequest(World& w, int idx, const TurnState& ts, const st
         o += std::string(i ? "," : "") + "{\"k\":" + std::to_string(i) + ",\"title\":" + jq(specTitle(s)) + ",\"desc\":" + jq(describe(s)) + ",\"avail\":" + (why.empty() ? "true" : "false") + ",\"why\":" + jq(why) +
              ",\"bonus\":" + (s.bonus ? "true" : "false") + ",\"react\":" + std::to_string(s.react) + ",\"self\":" + (s.self ? "true" : "false") + ",\"ally\":" + (s.ally ? "true" : "false") + ",\"ground\":" + (s.ground ? "true" : "false") +
              ",\"wallLen\":" + std::to_string(s.wallLen) + ",\"range\":" + std::to_string(specReach(me.b, s)) + ",\"radius\":" + std::to_string(s.radius) +
-             ",\"tele\":" + std::to_string(s.teleFt) + ",\"uses\":" + std::to_string(me.uses[i] >= UNL ? -1 : me.uses[i]) + ",\"slot\":" + std::to_string(s.slotLvl) + "}";
+             ",\"tele\":" + std::to_string(s.teleFt) + ",\"uses\":" + std::to_string(me.uses[i] >= UNL ? -1 : me.uses[i]) + ",\"slot\":" + std::to_string(s.slotLvl) +
+             (w.vx ? ",\"shape\":" + std::to_string(s.shape) + ",\"sel\":" + (s.selective ? "1" : "0") : std::string()) + "}";   // режим кубов: предпросмотр области
     }
     o += "],\"slots\":[";   // ячейки заклинаний: [уровень, осталось, всего] по купленным уровням
     for (int L = 1, n = 0; L < 10; L++)
@@ -179,7 +180,7 @@ static void humanTurn(World& w, int idx) {
         const std::string c = ok ? cmd["c"].str() : "end";
         if (c == "end" || c.empty()) break;
         Prim p;
-        g_vxTz = -1;   // цель по высоте — только у этой команды хода (ошибка разбора не должна оставить её боту)
+        g_vxTz = g_vxGz = -1;   // цель по высоте — только у этой команды хода (ошибка разбора не должна оставить её боту)
         if (c == "move") {
             p.kind = PR_MOVE;
             p.x = cmd["x"].num(-1);
@@ -197,6 +198,7 @@ static void humanTurn(World& w, int idx) {
             p.y = cmd["wk"].num(-1) + 1;   // запасное оружие мультиатаки (−1 — основное)
         } else if (c == "spell") {
             p.kind = PR_SPELL;
+            g_vxGz = w.vx ? cmd["z"].num(-1) : -1;   // режим кубов: способность по клетке — центр в кубе, по верху которого щёлкнули
             p.a = cmd["k"].num(-1);
             p.b = cmd["tgt"].num(-1);
             p.x = cmd["x"].num(-1);
@@ -294,7 +296,7 @@ static void humanTurn(World& w, int idx) {
         g_straight = p.kind == PR_MOVE;   // путь игрока — по прямой из дерева путей (то же, что показано под мышью)
         const bool applied = applyPrim(w, idx, ts, p, true, &msg);
         g_straight = false;
-        g_vxTz = -1;
+        g_vxTz = g_vxGz = -1;
         if (!applied) continue;
         switch (p.kind) {
             case PR_MOVE:
