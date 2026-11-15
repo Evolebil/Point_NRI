@@ -774,6 +774,8 @@ function render(now){
   if (!viewActive()) return;
   const tt = stepT0 < -1e8 ? 1 : Math.min(1, (now - stepT0) / (ANIM_MS / speed)), t = ease(tt);
   try {   // ошибка рисования не должна останавливать кадры: иначе ход игрока не наступает и кнопки молчат
+  if (typeof R3 !== 'undefined' && R3.on) R3.draw(now, t, tt);   // 3D-вид (?3d=1): только рисование, очередь кадров — ниже, общая
+  else {
   camUpdate();
   const W = cvW(), H = cvH(), cell = cam.cell;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -912,6 +914,7 @@ function render(now){
     }
   });
   if (typeof overlayDraw === 'function') overlayDraw(now);
+  }
   } catch (e) { if (!render.err){ render.err = 1; console.error('ошибка рисования', e); } }
   if (playing && tt >= 1 && now >= holdUntil){
     if (curIdx >= FR.length - 1){ pause(); if (typeof LIVE !== 'undefined') liveNext(); }

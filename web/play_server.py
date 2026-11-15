@@ -27,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # корень проекта (сервер лежит в web/)
 WEB = os.path.join(HERE, "web")
+VENDOR = {"/vendor/three-r159.min.js": "three-r159.min.js"}   # путь в адресе -> файл в web/vendor (версия в имени: кэш на год)
 STATE = os.path.join(HERE, "state")   # игроки и журналы — не в git
 os.makedirs(STATE, exist_ok=True)
 ENGINE = os.path.join(HERE, "build", "arena_play")
@@ -684,7 +685,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+    def _send(self, code, body, ctype="application/json; charset=utf-8", cache="no-store"):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
         gz = len(data) > 1024 and "gzip" in self.headers.get("Accept-Encoding", "")   # сжатие: через туннель канал узкий
         if gz:
@@ -694,7 +695,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Encoding", "gzip")
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(data)
 
@@ -709,6 +710,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 with open(os.path.join(STATE, "portraits", portrait_id + ".webp"), "rb") as f:
                     self._send(200, f.read(), "image/webp")
+            except OSError:
+                self._send(404, "не найдено", "text/plain; charset=utf-8")
+        elif path in VENDOR:   # библиотеки 3D-вида (?3d=1): файлом с кэшем, не с CDN (из России бывает недоступен)
+            try:
+                with open(os.path.join(WEB, "vendor", VENDOR[path]), "rb") as f:
+                    self._send(200, f.read(), "text/javascript; charset=utf-8", "public, max-age=31536000, immutable")
             except OSError:
                 self._send(404, "не найдено", "text/plain; charset=utf-8")
         elif path == "/sheet":

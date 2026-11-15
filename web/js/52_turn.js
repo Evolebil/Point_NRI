@@ -144,6 +144,7 @@ function weaponClick(){ const q = G.req; const ok = q.enemies.filter(en => !en.c
 
 // ---- клики по полю ----
 function cellAt(e){
+  if (R3.on) return R3.cellAt(e);   // 3D-вид: луч по кубам (может не попасть — тогда null)
   const r = cv.getBoundingClientRect(), px = (e.clientX - r.left) * (cvW() / r.width), py = (e.clientY - r.top) * (cvH() / r.height);
   return {x: Math.floor((px - cvW() / 2) / cam.cell + cam.x), y: Math.floor((py - cvH() / 2) / cam.cell + cam.y)};
 }
@@ -167,8 +168,8 @@ function enemyAt(c){
 }
 cv.addEventListener('click', e => {
   if (e.shiftKey) return;   // Shift + перетаскивание — сдвиг обзора, не ход
-  if (G.busy || !G.req || G.over) return;
-  const c = cellAt(e), q = G.req;
+  if (G.busy || !G.req || G.over || (R3.on && R3.dragged)) return;   // в 3D перетаскивание — поворот камеры, не ход
+  const c = cellAt(e), q = G.req; if (!c) return;
   if (G.mode === 'move'){ const en = enemyAt(c); if (en != null && (q.actionFree || q.weapon.atkLeft > 0) && q.weapon.armed){ const E = q.enemies.find(x => x.i === en); if (E && E.dist <= q.weapon.range && E.los){ cmd({c:'attack', tgt: en, reckless: q.weapon.reckless}); return; } }
     const n = (FR[curIdx].f[q.me] || {}).n || 1, off = Math.floor((n - 1) / 2);
     cmd({c:'move', x: Math.max(0, Math.min(AW - n, c.x - off)), y: Math.max(0, Math.min(AH - n, c.y - off))}); return; }
@@ -198,6 +199,7 @@ let hover = null;
 cv.addEventListener('mousemove', e => { hover = cellAt(e); });
 // свободный обзор: колесо — масштаб к курсору, правая кнопка или Shift + перетаскивание — сдвиг (обычный щелчок — ход)
 cv.addEventListener('wheel', e => {
+  if (R3.on) return;   // 3D-вид приближает сам
   e.preventDefault(); setCamMode('free');
   const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
   const wx = cam.fx + (mx - cvW() / 2) / cam.fcell, wy = cam.fy + (my - cvH() / 2) / cam.fcell;
@@ -205,7 +207,7 @@ cv.addEventListener('wheel', e => {
   cam.fx = wx - (mx - cvW() / 2) / cam.fcell; cam.fy = wy - (my - cvH() / 2) / cam.fcell;
 }, {passive: false});
 let panFrom = null;
-cv.addEventListener('mousedown', e => { if (e.button === 2 || e.shiftKey){ setCamMode('free'); panFrom = {x: e.clientX, y: e.clientY, fx: cam.fx, fy: cam.fy}; e.preventDefault(); } });
+cv.addEventListener('mousedown', e => { if (R3.on) return; if (e.button === 2 || e.shiftKey){ setCamMode('free'); panFrom = {x: e.clientX, y: e.clientY, fx: cam.fx, fy: cam.fy}; e.preventDefault(); } });
 addEventListener('mousemove', e => { if (panFrom){ cam.fx = panFrom.fx - (e.clientX - panFrom.x) / cam.fcell; cam.fy = panFrom.fy - (e.clientY - panFrom.y) / cam.fcell; } });
 addEventListener('mouseup', () => { if (panFrom) setTimeout(() => { panFrom = null; }, 0); });
 cv.addEventListener('contextmenu', e => e.preventDefault());
