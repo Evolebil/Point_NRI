@@ -8,14 +8,15 @@
 // местность, тьма, ручей (труднопроходим), ущелье с мостом, возвышенности. Всё за пределами прямоугольника — стена. Выход за арену — побег (поражение).
 #include "world_gen.h"
 // клетка мира → клетка арены (участок мира и участок по заданной местности)
-inline void putWorldCell(World& w, int x, int y, const wg::Cell& c) {
+// h5 — высота земли шагом 5 фт (wg::fineHeight); −1 — 2·c.height
+inline void putWorldCell(World& w, int x, int y, const wg::Cell& c, int h5 = -1) {
     w.wall[y][x] = c.wall;
     w.climb[y][x] = c.climb && !c.wall;
     w.water[y][x] = c.water;
     w.diff[y][x] = c.diff || c.water;
     w.dark[y][x] = c.dark;
     w.pit[y][x] = c.pit && !c.wall;
-    w.height[y][x] = (unsigned char)(2 * c.height);   // мир хранит уровни по 10 фт, арена — по 5 фт
+    w.height[y][x] = (unsigned char)(h5 >= 0 ? h5 : 2 * c.height);   // мир — уровни по 10 фт, арена — шагом 5 фт (fineHeight)
     w.tree[y][x] = (unsigned char)(c.tree && !c.wall && !c.pit && !c.water ? (c.treeH ? c.treeH : TREE_DEF) : 0);   // дерево своей высоты (10–40 фт)
     w.haz[y][x] = c.wall || c.pit ? 0 : c.haz;
     if (w.haz[y][x] && HAZ[w.haz[y][x]].obscure) w.fogAny = true;
@@ -152,7 +153,7 @@ void genMap(World& w) {
                     continue;
                 }
                 const wg::Cell c = wg::worldCell(P, x0 + x * stride, y0 + y * stride);
-                putWorldCell(w, x, y, c);
+                putWorldCell(w, x, y, c, wg::fineHeight(P, x0 + x * stride, y0 + y * stride, c));
                 townN += c.town;
             }
         w.wseed = ws;
@@ -189,7 +190,7 @@ void regionArena(World& w, const wg::RegionDesc& d, int aw, int ah) {
                 continue;
             }
             const wg::Cell c = wg::worldCell(P, x0 + x, y0 + y);
-            putWorldCell(w, x, y, c);
+            putWorldCell(w, x, y, c, wg::fineHeight(P, x0 + x, y0 + y, c));
             townN += c.town;
         }
     wg::lvlCache().p = nullptr;   // кэш уровней — этого участка; следующий участок его перезаполнит

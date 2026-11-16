@@ -100,6 +100,8 @@ inline double rawHeight(uint64_t s, int x, int y) {
     return std::clamp(h, 0.0, 1.0);
 }
 inline int levelOf(double h) { return std::clamp((int)std::floor(std::pow(h, 1.35) * 10.0), 0, 9); }
+// то же шагом 5 фт (0–19): levelOf5(h) / 2 == levelOf(h) — полшага внутри своей ступени по 10 фт
+inline int levelOf5(double h) { return std::clamp((int)std::floor(std::pow(h, 1.35) * 20.0), 0, 19); }
 // высота участка по заданной местности: в центре — уровень клетки, к краю — плавно к середине между своим уровнем и
 // уровнем соседа (тогда соседние участки сходятся на общей границе) и мелкая волна шума
 inline int regionLevel(const Plan& p, int x, int y) {
@@ -424,6 +426,13 @@ inline int treeHeight(uint64_t s, int x, int y, int biome) {
     return lo + std::min(hi - lo, (int)(hash01(s, x, y, 113) * (hi - lo + 1)));
 }
 inline Cell worldCellRaw(const Plan& p, int x, int y);   // клетка мира без высоты дерева (ниже)
+// Высота клетки для арены шагом 5 фт (просьба владельца 2026-11-16): вся логика мира — на уровнях по 10 фт (height: биомы,
+// обрывы, дома, кампания), а земля арены — 2·height и полшага (+5 фт) из того же шума рельефа, всегда внутри своей ступени.
+// Ровно (2·height): вода, город, ущелье, участок по заданной местности (края участков кампании сходятся, как прежде)
+inline int fineHeight(const Plan& p, int x, int y, const Cell& c) {
+    if (p.reg.on || c.water || c.town || c.pit || x < 0 || y < 0 || x >= p.size || y >= p.size) return 2 * c.height;
+    return 2 * c.height + (levelOf5(rawHeight(p.seed, x, y)) & 1);
+}
 inline Cell worldCell(const Plan& p, int x, int y) {
     Cell c = worldCellRaw(p, x, y);
     if (c.tree) c.treeH = (unsigned char)treeHeight(p.seed, x, y, c.biome);

@@ -173,16 +173,24 @@ void takeTurn(World& w, int idx) {
                 } else if (!dx && !dy)
                     continue;
                 bool done = false;
-                for (int st = s.teleFt / 5; st >= 1 && !done; st--) {
+                // побег — как можно дальше; к врагу — как можно ближе к нему, но не на голову и не за спину (раньше прыжок шёл на
+                // всю дальность и перелетал врага, оказываясь дальше, чем был)
+                int bestSt = 0, bestGap = 1 << 20;
+                for (int st = s.teleFt / 5; st >= 1 && !(bestSt && !toward); st--) {
                     int nx = me.x + dx * st, ny = me.y + dy * st;
                     if (!fpAll(w, me, nx, ny, [&](int cx, int cy) { return !w.wall[cy][cx] && !w.pit[cy][cx]; }) || blockedAt(w, me, nx, ny)) continue;
-                    // не на голову врагу
-                    if (toward && 5 * std::max(std::abs(nx - F.x), std::abs(ny - F.y)) < 5) continue;
+                    const int gap = std::max(std::abs(nx - F.x), std::abs(ny - F.y));
+                    if (toward && gap < 1) continue;   // не на голову врагу
                     if (s.jump) {   // прыжок (пакет атомов 2): хватает движения и не сквозь стену — как проверяет applyPrim
                         const int d = distFC(w, me, nx, ny);
                         if (d > speed || !losFC(w, me, nx, ny)) continue;
-                        speed -= d;
                     }
+                    if (!toward || gap <= bestGap) bestSt = st, bestGap = gap;   // при равенстве — короче прыжок
+                }
+                if (bestSt && toward && bestGap >= std::max(std::abs(me.x - F.x), std::abs(me.y - F.y))) bestSt = 0;   // ближе не стать — не прыгать
+                if (bestSt) {
+                    const int nx = me.x + dx * bestSt, ny = me.y + dy * bestSt;
+                    if (s.jump) speed -= distFC(w, me, nx, ny);
                     me.x = nx;
                     me.y = ny;
                     done = true;
