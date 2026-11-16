@@ -446,9 +446,6 @@ table{border-collapse:collapse}
 .acts .sp small{display:none}
 .acts.minor button{font-size:15px}
 .acts label{display:flex;align-items:center;gap:6px}
-.recap{background:var(--glass2);border:1px solid var(--line2);border-radius:10px;padding:6px 10px;font-size:13px}
-.recap b{color:var(--muted);font-weight:600;font-size:12px;letter-spacing:.05em;text-transform:uppercase}
-.recap .ln{padding:2px 0}
 .msg{min-height:0;color:var(--gold1);font-size:14px}
 .msg:empty{display:none}
 #turn .hint{margin:0;font-size:13px}
@@ -480,7 +477,7 @@ table{border-collapse:collapse}
   .fx-me,.fx-enemy{width:calc(50% - 32px)}
   .fx-round{left:16px;right:16px;top:auto;bottom:calc(36vh + 82px);transform:none}
   .fx-turn{left:16px;right:16px;bottom:16px;max-height:36vh}
-  #turn .hint,#turn .recap{display:none}
+  #turn .hint{display:none}
   .fx-log{left:16px;top:auto;bottom:calc(36vh + 34px);width:auto;height:auto;padding:8px 12px}
   .fx-log .log{display:none}
   .fx-log.open{left:16px;right:16px;top:120px;bottom:auto;height:40vh}

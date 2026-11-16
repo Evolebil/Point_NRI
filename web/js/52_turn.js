@@ -14,11 +14,7 @@ function renderTurn(){
     <span class="act-lbl ${q.actionFree ? 'free' : ''}"><span class="dot ${q.actionFree ? 'free' : ''}"></span>действие</span><span class="act-lbl ${q.bonusFree ? 'free b' : ''}"><span class="dot ${q.bonusFree ? 'free b' : ''}"></span>бонусное</span>${slotsLine(q.slots)}
     <button class="primary endb" data-c="end" title="Клавиша E или Enter">Завершить ход</button><button class="danger" data-leave="1">${G.room ? 'Выйти' : 'Сдаться'}</button></div>`;
   roundBar(q);
-  // что сделал соперник с вашего прошлого решения
-  const rec = [];
-  for (let k = Math.max(1, G.sentAt || 1); k < FR.length; k++){ const fr = FR[k]; if (fr.actor >= 0 && fr.f[fr.actor] && fr.f[fr.actor].team !== fr.f[G.me].team){ const L = frameLog(k); rec.push(`<div class="ln ${L.cls}">${L.lines.join('<br>')}${L.evs.join('')}</div>`); } }
-  if (rec.length) h += `<div class="recap"><b>Пока вы ждали</b>${rec.slice(-5).join('')}</div>`;
-  h += `<div class="acts">`;
+  h += `<div class="acts">`;   // что сделал соперник — в журнале боя (список «Пока вы ждали» убран по просьбе владельца 2026-11-16)
   h += `<button data-m="move" class="sp ${G.mode === 'move' ? 'sel' : ''}" title="Клавиша M; клик по клетке — идти, по врагу в досягаемости — удар"><span>Идти</span><small>клик по полю</small></button>`;
   const wTag = !q.weapon.armed ? 'безоружны' : (q.weapon.atkLeft > 0 ? `ещё атак: ${q.weapon.atkLeft} (можно идти и сменить цель)` : `${q.weapon.attacks > 1 ? q.weapon.attacks + ' атаки по одной' : '1 атака'}, ${ftToText(q.weapon.range)}`);
   const attackWhy = !q.weapon.armed ? 'Недоступно: у персонажа нет оружия.' : (!q.actionFree && q.weapon.atkLeft <= 0 ? 'Недоступно: действие уже потрачено.' : (q.enemies.every(en => en.dist > q.weapon.range) ? `Пока нет цели в радиусе ${q.weapon.range} фт. Подойдите ближе.` : 'Клавиша A; затем выберите подсвеченную цель.'));
