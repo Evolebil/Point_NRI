@@ -169,7 +169,20 @@ const FACES = [   // [смещение соседа x, z(высота), y], 4 у
   [[-1, 0, 0], [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], .7],
   [[0, 0, 1], [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], .86],
   [[0, 0, -1], [[0,0,0],[0,1,0],[1,1,0],[1,0,0]], .62]];
-const vOpaque = m => m !== 0 && m !== VM.COVER;
+// ствол дерева — тонкий столбик в углу клетки; угол у каждого дерева свой (по месту, как движок не различает — правила те же)
+const TRUNK_W = .34;
+function r3TrunkOff(x, y){ const k = Math.floor(hash(x * 31 + 5, y * 17 + 3) * 4); return [(k & 1) ? 1 - TRUNK_W - .06 : .06, (k & 2) ? 1 - TRUNK_W - .06 : .06]; }
+function r3Trunk(x, y, z, pos, col, cel, idx, c){
+  const [ox, oy] = r3TrunkOff(x, y), up = vGet(x, y, z + 1), dn = vGet(x, y, z - 1);
+  for (const [[dx, dz, dy], quad, shade] of FACES){
+    if (dz === 1 && up === VM.WOOD) continue;
+    if (dz === -1 && (dn === VM.WOOD || vOpaque(dn))) continue;
+    c.set(VCOL[VM.WOOD]); const b = pos.length / 3;
+    for (const [qx, qy, qz] of quad){ pos.push(x + ox + qx * TRUNK_W, z + qy, y + oy + qz * TRUNK_W); col.push(c.r * shade, c.g * shade, c.b * shade); cel.push(x, y, 0); }
+    idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+  }
+}
+const vOpaque = m => m !== 0 && m !== VM.COVER && m !== VM.WOOD;   // ствол тонкий — грани соседей за ним видны
 R3.buildChunk = function(ci){
   const T = THREE, old = R3.chunks[ci];
   if (old && old.mesh){ R3.scene.remove(old.mesh); old.mesh.geometry.dispose(); }
@@ -178,6 +191,7 @@ R3.buildChunk = function(ci){
   for (let y = cz * VCH; y < Math.min(AH, cz * VCH + VCH); y++) for (let x = cx * VCH; x < Math.min(AW, cx * VCH + VCH); x++)
     for (let z = cy * VCH; z < Math.min(R3.H, cy * VCH + VCH); z++){
       const m = R3.vox[vIdx(x, y, z)]; if (!m) continue;
+      if (m === VM.WOOD){ r3Trunk(x, y, z, pos, col, cel, idx, c); continue; }
       const hgt = m === VM.COVER ? .5 : (m === VM.WATER && !vGet(x, y, z + 1) ? .85 : 1);   // ящик — в полкуба, вода чуть ниже берега
       const jit = .94 + hash(x * 7 + z, y * 13 + z) * .12;   // лёгкая пестрота кубов
       for (const [[dx, dz, dy], quad, shade] of FACES){
@@ -371,7 +385,8 @@ function r3Voxel(o, d, maxT){
   let tx = sx ? ((sx > 0 ? x + 1 - o.x : o.x - x) * tdx) : 1e9, ty = sy ? ((sy > 0 ? y + 1 - o.z : o.z - y) * tdy) : 1e9, tz = sz ? ((sz > 0 ? z + 1 - o.y : o.y - z) * tdz) : 1e9;
   let nx = 0, ny = 0, nz = 0, t = 0;
   for (let i = 0; i < 2000 && t <= Math.min(maxT, 1500); i++){
-    if (x >= 0 && y >= 0 && x < AW && y < AH && z >= 0 && z < R3.H && R3.vox[vIdx(x, y, z)]) return {x, y, z, nx, ny, nz, t};
+    const m = x >= 0 && y >= 0 && x < AW && y < AH && z >= 0 && z < R3.H ? R3.vox[vIdx(x, y, z)] : 0;
+    if (m && (m !== VM.WOOD || G.mode === 'attack')) return {x, y, z, nx, ny, nz, t};   // тонкий ствол — сквозь (рубить — в режиме атаки)
     if (z < 0 && sz <= 0) return null;
     if (tx < ty && tx < tz){ x += sx; t = tx; tx += tdx; nx = -sx; ny = 0; nz = 0; }
     else if (ty < tz){ y += sy; t = ty; ty += tdy; nx = 0; ny = -sy; nz = 0; }
@@ -442,7 +457,7 @@ function r3Fx(list, now){
   });
 }
 // ---- область в объёме (режим кубов) — та же геометрия, что в движке (vox.h: vxRay, vxInShape3, vxAreaCube, vxTopZ) ----
-const r3Solid = m => !!m && m !== VM.WATER && m !== VM.LAVA && m !== VM.ACID;
+const r3Solid = m => !!m && m !== VM.WATER && m !== VM.LAVA && m !== VM.ACID && m !== VM.WOOD;   // ствол тонкий — не твёрдый (как в движке)
 const r3BlocksEffect = m => r3Solid(m) && m !== VM.LEAF && m !== VM.COVER;   // полное укрытие: твёрдое, кроме листвы и ящика
 function r3TopZ(x, y){ for (let z = R3.H - 1; z >= 1; z--) if (r3Solid(vGet(x, y, z - 1)) && !r3Solid(vGet(x, y, z))) return z; return 1; }
 // луч от a к b (кубы концов не считаются); f(материал) ≥ 100 — преграда

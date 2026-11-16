@@ -450,6 +450,26 @@ void pushAway(World& w, Fighter& src, Fighter& t, int ft, int collN = 0) {
     if (t.b.immPush || t.b.size > src.b.size + 1) return;   // размеры (v21): толкнуть — не больше чем на ступень крупнее
     int steps = ft / 5;
     int sx = (t.x > src.x) - (t.x < src.x), sy = (t.y > src.y) - (t.y < src.y);
+    if (w.vx) {   // режим кубов: по клеткам на своей высоте; упёрся — куда тело не помещается (стена, уступ вверх, край, существо)
+        for (int i = 0; i < steps; i++) {
+            const int nx = t.x + sx, ny = t.y + sy;
+            const bool out = nx < 0 || ny < 0 || nx + fpFull(t) > w.aw || ny + fpFull(t) > w.ah;
+            if (out || !vxBodyFree(w, t, nx, ny, t.z) || blockedAt(w, t, nx, ny)) {
+                if (collN > 0) {
+                    hurt(t, rollDice(collN, 6), DT_FORCE, true);
+                    if (!out)
+                        if (Fighter* g = blockerAt(w, t, nx, ny)) hurt(*g, rollDice(collN, 6), DT_FORCE, true);
+                }
+                break;
+            }
+            t.x = nx;
+            t.y = ny;
+            t.zCol = ny * W + nx;   // та же высота в новой клетке: без опоры vxFixAll уронит (1к6 за 10 фт, сбит с ног)
+            if (!vxStandEx(w, t, nx, ny, t.z, t.b.fly && canStayAloft(t))) break;   // столкнули с уступа — дальше падает, а не летит
+        }
+        hazardHit(w, t);
+        return;
+    }
     const int h0 = zF(w, t);
     for (int i = 0; i < steps; i++) {
         int nx = t.x + sx, ny = t.y + sy;
@@ -700,11 +720,33 @@ bool hitDeck(World& w, int x, int y, int dmg, int dtype) {
     return true;
 }
 // область способности задевает объекты: урон кубиками способности (объект не спасается), по разу на клетку
-void areaHitsObjects(World& w, const Spec& s, const Fighter& me, int cx, int cy) {
+void areaHitsObjects(World& w, const Spec& s, const Fighter& me, int cx, int cy, int cz = 0) {
     if (s.dmgN <= 0 && s.more.empty()) return;
     const int rr = s.radius / 5 + 1;
     const bool fromMe = s.shape == SH_CONE || s.shape == SH_LINE;
     const int bx = fromMe ? me.x : cx, by = fromMe ? me.y : cy;
+    if (w.vx) {   // режим кубов: кубы-объекты в форме, до которых от точки начала есть прямая (земля, трава, песок — не объекты)
+        VoxWorld& v = *w.vx;
+        double ox, oy, oz;
+        vxAreaOrigin(s.shape, me, cx, cy, cz, ox, oy, oz);
+        const int bz = fromMe ? me.z : cz;
+        std::vector<std::array<int, 3>> hit;   // сначала — что задето в мире до взрыва (иначе разрушенный слой открыл бы следующий)
+        for (int z = std::max(0, bz - rr); z <= std::min(v.sz - 1, bz + rr); z++)
+            for (int y = std::max(0, by - rr); y <= std::min(w.ah - 1, by + rr); y++)
+                for (int x = std::max(0, bx - rr); x <= std::min(w.aw - 1, bx + rr); x++) {
+                    const unsigned char m = v.at(x, y, z);
+                    if (MAT[m].hp <= 0 || m == VX_DIRT || m == VX_GRASS || m == VX_SAND) continue;
+                    if (!vxInShape3(s.shape, s.radius, ox, oy, oz, cx + .5, cy + .5, cz + .5, x + .5, y + .5, z + .5)) continue;
+                    if (vxRay(w, ox, oy, oz, x + .5, y + .5, z + .5, [](unsigned char c) { return vxBlocksEffect(c) ? 100 : 0; }) >= 100) continue;
+                    hit.push_back({x, y, z});
+                }
+        for (const auto& c : hit) {
+            int r = s.dmgN > 0 ? damageVox(v, c[0], c[1], c[2], rollDice(s.dmgN, s.dmgS), s.dtype) : 0;
+            for (size_t k = 0; k < s.more.size() && r < 2; k++) r = std::max(r, damageVox(v, c[0], c[1], c[2], rollDice(s.more[k].n, s.more[k].s), s.more[k].type));
+            if (r == 2) vxAfterBreak(w, c[0], c[1]);
+        }
+        return;
+    }
     for (int y = std::max(0, by - rr); y <= std::min(w.ah - 1, by + rr); y++)
         for (int x = std::max(0, bx - rr); x <= std::min(w.aw - 1, bx + rr); x++) {
             if (!inShape(s.shape, s.radius, me.x, me.y, cx, cy, x, y)) continue;
@@ -956,7 +998,7 @@ void doSpec(World& w, Fighter& me, int si, int tIdx, int gx = -1, int gy = -1) {
         if (s.dmgN || !s.more.empty() || s.cond || s.pushFt || s.dotN)
             for (auto& e : w.f)
                 if (e.hp > 0 && (e.team != me.team || !s.selective) && areaHits(w, s.shape, s.radius, me, gx, gy, gz, e)) hitOne(w, s, me, e);
-        if (s.radius > 0) areaHitsObjects(w, s, me, gx, gy);
+        if (s.radius > 0) areaHitsObjects(w, s, me, gx, gy, gz);
         if (s.terr) {
             const int rr = s.radius / 5 + 1;
             const bool fromMe = s.shape == SH_CONE || s.shape == SH_LINE;
@@ -989,7 +1031,7 @@ void doSpec(World& w, Fighter& me, int si, int tIdx, int gx = -1, int gy = -1) {
         for (auto& e : w.f)
             if (e.hp > 0 && (e.team != me.team || !s.selective) && areaHits(w, s.shape, s.radius, me, cx, cy, c.z, e))
                 hitOne(w, s, me, e);
-        areaHitsObjects(w, s, me, cx, cy);
+        areaHitsObjects(w, s, me, cx, cy, c.z);
         if (s.terr) {
             const int rr = s.radius / 5 + 1;
             const bool fromMe = s.shape == SH_CONE || s.shape == SH_LINE;

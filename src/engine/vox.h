@@ -15,7 +15,9 @@ enum VoxMat : unsigned char {
     VX_COVER, VX_RUBBLE, VX_LAVA, VX_ACID, VX_ICE, VX_FORCE, VX_N
 };
 // hp 0 — неразрушим (дно мира, жидкости, барьер способности); solid — опора и преграда движению; seeThru — обзор сквозь
-// (листва и вода — пока насквозь: частичное укрытие листвой — этап 2); liquid — плавание (этап 2)
+// (листва и вода — пока насквозь: частичное укрытие листвой — этап 2); liquid — плавание (этап 2). Ствол дерева — тонкий, в углу
+// клетки (решение владельца 2026-11-16): не твёрдый — мимо него проходят, обзор и области не держит, даёт полукрытие (vxCover),
+// хиты есть — рубится; по нему лезут (vxByTree)
 struct MatInfo { const char* name; short hp; unsigned char ac; bool solid, seeThru, liquid; };
 // КД и хиты — как у объектов сейчас (DMG «Объекты»: дерево КД 15, камень КД 17): кубик стены — OBJ_WALL_HP, крепкой —
 // OBJ_STRONG_HP, ствола — OBJ_TREE_HP, двери — OBJ_DOOR_HP, настила — DECK_HP; земля и песок — мягче камня
@@ -24,7 +26,7 @@ constexpr MatInfo MAT[VX_N] = {
     {"земля", 27, 10, true, false, false},       {"трава", 27, 10, true, false, false},
     {"песок", 18, 8, true, false, false},        {"камень", OBJ_WALL_HP, 17, true, false, false},
     {"крепкий камень", OBJ_STRONG_HP, 19, true, false, false},
-    {"дерево", OBJ_TREE_HP, 15, true, false, false}, {"листва", 5, 10, true, true, false},
+    {"дерево", OBJ_TREE_HP, 15, false, true, false}, {"листва", 5, 10, true, true, false},
     {"вода", 0, 0, false, true, true},           {"доски", DECK_HP, 15, true, false, false},
     {"дверь", OBJ_DOOR_HP, 15, true, false, false}, {"укрытие", OBJ_CLIMB_HP, 17, true, true, false},
     {"обломки", 9, 10, true, false, false},      {"лава", 0, 0, false, true, true},
@@ -175,6 +177,7 @@ inline void vxResync(World& w, int x, int y) {
 
 // ---- правила режима кубов (этап 1б) ----
 // копатель идёт сквозь землю, песок, обломки и листву (камень — только разбить действием)
+inline bool vxTreeMat(unsigned char m) { return m == VX_WOOD || m == VX_LEAF; }   // дерево: за него держится любой (лазание)
 inline bool vxDiggable(unsigned char m) { return m == VX_DIRT || m == VX_GRASS || m == VX_SAND || m == VX_RUBBLE || m == VX_LEAF; }
 // верхняя опора клетки: куб над самым верхним твёрдым (стоять на стене, на кроне, на крыше)
 inline int vxTopZ(const World& w, int x, int y) {
@@ -227,10 +230,11 @@ inline bool vxStandEx(const World& w, const Fighter& f, int x, int y, int z, boo
                 }
                 sup = z <= top;
             }
-            if (!sup && f.b.climbS)
-                for (int k = 0; k < 4 && !sup; k++) {
-                    static const int DX[4] = {1, -1, 0, 0}, DY[4] = {0, 0, 1, -1};
-                    sup = MAT[v.at(cx + DX[k], cy + DY[k], z)].solid || MAT[v.at(cx + DX[k], cy + DY[k], z + 1)].solid;
+            if (!sup)   // лазун держится за любую стену; любой — за дерево (ствол в своей клетке, крона рядом: лезут, как в 2D)
+                for (int k = 0; k < 5 && !sup; k++) {
+                    static const int DX[5] = {0, 1, -1, 0, 0}, DY[5] = {0, 0, 0, 1, -1};
+                    const unsigned char a = v.at(cx + DX[k], cy + DY[k], z), b = v.at(cx + DX[k], cy + DY[k], z + 1);
+                    sup = vxTreeMat(a) || vxTreeMat(b) || (f.b.climbS && (MAT[a].solid || MAT[b].solid));
                 }
         }
     return sup;
@@ -238,12 +242,19 @@ inline bool vxStandEx(const World& w, const Fighter& f, int x, int y, int z, boo
 inline bool vxStand(const World& w, const Fighter& f, int x, int y, int z) { return vxStandEx(w, f, x, y, z, f.b.fly); }
 // тело f в кубе z свободно (воздух или жидкость; копателю — и копаемое; крупному — хотя бы протиснувшись): туда можно упасть
 inline bool vxBodyFree(const World& w, const Fighter& f, int x, int y, int z) { return vxFitN(w, f, x, y, z) > 0; }
+// у клетки (x, y) на высоте z — дерево (ствол или крона) в ней или с какой-нибудь стороны: по нему лезут вверх и вниз
+inline bool vxByTree(const World& w, int x, int y, int z) {
+    static const int DX[5] = {0, 1, -1, 0, 0}, DY[5] = {0, 0, 0, 1, -1};   // и ствол в своей клетке
+    for (int k = 0; k < 5; k++)
+        if (vxTreeMat(w.vx->at(x + DX[k], y + DY[k], z)) || vxTreeMat(w.vx->at(x + DX[k], y + DY[k], z - 1))) return true;
+    return false;
+}
 // Шаг между узлами: в соседнюю клетку — уступ до 10 фт вверх или вниз (больше — обрыв, как прежде); по вертикали на куб —
 // летун, лазун у стены, лестница, копатель. Наискосок — не сквозь угол стены (кроме копателя)
 inline bool vxStep(const World& w, const Fighter& f, int x, int y, int z, int nx, int ny, int nz) {
     const int dx = nx - x, dy = ny - y, dz = nz - z;
     if (std::abs(dx) > 1 || std::abs(dy) > 1 || (!dx && !dy && !dz) || !vxStand(w, f, nx, ny, nz)) return false;
-    if (!dx && !dy) return std::abs(dz) == 1 && (f.b.fly || f.b.climbS || f.b.burrowS || w.ladder[y][x]);
+    if (!dx && !dy) return std::abs(dz) == 1 && (f.b.fly || f.b.climbS || f.b.burrowS || w.ladder[y][x] || vxByTree(w, x, y, std::max(z, nz)));
     if (std::abs(dz) > (f.b.fly ? 1 : 2)) return false;
     if (dx && dy && !f.b.burrowS) {
         const VoxWorld& v = *w.vx;
@@ -418,7 +429,7 @@ inline int vxAreaZ(const World& w, int cx, int cy) {
 inline int vxCover(const World& w, const Fighter& a, const Fighter& d) {
     const int na = fpN(a), nd = fpN(d);
     return vxRay(w, a.x + na / 2.0, a.y + na / 2.0, a.z + vxEyeH(a, na), d.x + nd / 2.0, d.y + nd / 2.0, d.z + vxMidH(d, nd),
-                 [](unsigned char m) { return !MAT[m].solid ? 0 : (m == VX_LEAF || m == VX_COVER ? 2 : 5); });
+                 [](unsigned char m) { return m == VX_WOOD || m == VX_LEAF || m == VX_COVER ? 2 : (!MAT[m].solid ? 0 : 5); });
 }
 // копатель прошёл: кубы его тела, которые были землёй, стали воздухом (ход остаётся; событие vox в кадр)
 inline void vxDig(World& w, Fighter& f) {

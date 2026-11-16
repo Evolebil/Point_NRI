@@ -547,14 +547,26 @@ Fighter* blockerAt(World& w, const Fighter& f, int x, int y) {
 // не заканчивать ход в занятой клетке
 void nudge(const World& w, Fighter& f) {
     if (!blockedAt(w, f, f.x, f.y)) return;
-    if (w.vx) {   // режим кубов: ближайшая свободная клетка, где можно стоять — на её верхней опоре
+    if (w.vx) {   // режим кубов: ближайшая свободная клетка, где можно стоять, — на высоте поближе к своей, иначе на верхней опоре;
+                  // занятость — на той высоте, куда ставим
+        auto freeAt = [&](int x, int y, int z) {
+            for (auto& g : w.f)
+                if (touchesAt(w, f, x, y, z, g)) return false;
+            return true;
+        };
         for (int r = 1; r < 14; r++)
             for (int dy = -r; dy <= r; dy++)
                 for (int dx = -r; dx <= r; dx++) {
                     const int nx = f.x + dx, ny = f.y + dy;
                     if (nx < 0 || ny < 0 || nx >= w.aw || ny >= w.ah) continue;
-                    const int nz = vxTopZ(w, nx, ny);
-                    if (!vxStand(w, f, nx, ny, nz) || blockedAt(w, f, nx, ny)) continue;
+                    int nz = -1;
+                    for (int d : {0, -1, 1, -2, 2})
+                        if (nz < 0 && vxStand(w, f, nx, ny, f.z + d) && freeAt(nx, ny, f.z + d)) nz = f.z + d;
+                    if (nz < 0) {
+                        const int tz = vxTopZ(w, nx, ny);
+                        if (vxStand(w, f, nx, ny, tz) && freeAt(nx, ny, tz)) nz = tz;
+                    }
+                    if (nz < 0) continue;
                     f.x = nx;
                     f.y = ny;
                     f.z = nz;

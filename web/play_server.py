@@ -448,8 +448,8 @@ def room_cmd1(msg, sid):
                     e["char"], e["seat"] = m["char"], r.seats[m["sid"]]
                 members.append(e)
             r.order = [m["name"] for m in r.members]
-            opts = {k: msg[k] for k in ("seed", "rounds", "map", "world") if k in msg}
-            r.opts = {k: v for k, v in opts.items() if k in ("seed", "rounds")}
+            opts = {k: msg[k] for k in ("seed", "rounds", "map", "world", "vox") if k in msg}
+            r.opts = {k: v for k, v in opts.items() if k in ("seed", "rounds", "vox")}
             r.status, r.err, r.frames, r.init, r.end, r.pending = "fight", "", [], None, None, None
             if r.eng:
                 r.eng.kill()

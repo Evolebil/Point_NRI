@@ -210,7 +210,7 @@ $('rmBox').addEventListener('click', async e => {
     if (ROOM.mapKind !== 'own' && !roomMapPayload().map) await roomMapPreview();
     if (ROOM.mapKind !== 'own' && !roomMapPayload().map){ toast('Карта ещё не построена — попробуйте снова', 4000, true); return; }
     b.disabled = true;
-    ROOM.n = 0; G.room = ''; await roomCall(Object.assign({cmd:'room_start', rounds: ROOM.rounds, seed: ROOM.seed}, roomMapPayload()));
+    ROOM.n = 0; G.room = ''; await roomCall(Object.assign({cmd:'room_start', rounds: ROOM.rounds, seed: ROOM.seed}, R3.want ? {vox: 1} : {}, roomMapPayload()));   // вид 3D у хозяина — бой в кубах
   }
 });
 $('rmBox').addEventListener('change', async e => {

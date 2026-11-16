@@ -267,6 +267,27 @@ class TestRoomWithEngine(unittest.TestCase):
         self.assertEqual(v["end"]["who"], ["Аня", "Бот 1"])
         self.assertTrue(all(m["sid"] != "s1" or m["name"] == "Аня" for m in ps.ROOMS[code].members))
 
+    def test_room_vox(self):
+        # хозяин с видом 3D: бой комнаты в режиме кубов (у бойцов в кадре z, карта с vox) и доходит до конца; без vox — по слоям
+        code = ps.room_cmd1({"cmd": "room_create", "name": "Аня"}, "s1")["code"]
+        ps.room_cmd1({"cmd": "room_set", "code": code, "char": KNIGHT}, "s1")
+        ps.room_cmd1({"cmd": "room_bot", "code": code, "team": 1, "budget": 800}, "s1")
+        v = ps.room_cmd1({"cmd": "room_start", "code": code, "seed": 5, "vox": 1}, "s1")
+        self.assertEqual(v["err"], "")
+        self.assertEqual(v["init"]["map"].get("vox"), 1)
+        self.assertTrue(all("z" in f for f in ps.ROOMS[code].frames[0]["f"]))
+        turns = 0
+        while v["status"] == "fight" and turns < MAX_TURNS:
+            v = ps.room_cmd1({"cmd": "room_step", "code": code, "c": "end"}, "s1")
+            turns += 1
+        self.assertEqual(v["status"], "end")
+        code2 = ps.room_cmd1({"cmd": "room_create", "name": "Боря"}, "s2")["code"]
+        ps.room_cmd1({"cmd": "room_set", "code": code2, "char": KNIGHT}, "s2")
+        ps.room_cmd1({"cmd": "room_bot", "code": code2, "team": 1, "budget": 800}, "s2")
+        v = ps.room_cmd1({"cmd": "room_start", "code": code2, "seed": 5}, "s2")
+        self.assertNotIn("vox", v["init"]["map"])
+        self.assertTrue(all("z" not in f for f in ps.ROOMS[code2].frames[0]["f"]))
+
     def test_pointer(self):
         """Указка (Q): точку игрока видят другие (не он сам); отпустил — гаснет; без обновления — гаснет сама."""
         code = ps.room_cmd1({"cmd": "room_create", "name": "Аня"}, "s1")["code"]

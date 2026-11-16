@@ -281,12 +281,12 @@ int main() {
             };
             g_human.seats = seat;
             g_human.multi = true;
-            g_voxMode = false;   // бой комнаты — пока по слоям (режим кубов — только одиночный бой по ?3d=1)
+            g_voxMode = cmd["vox"].flag(false);   // режим кубов, если хозяин комнаты выбрал вид 3D; ботами тогда — правило-бот
             g_human.idx = -1;
             for (size_t i = 0; i < seat.size(); i++)
                 if (seat[i] >= 0 && g_human.idx < 0) g_human.idx = (int)i;
             g_forceNetMask = 0;
-            if (anyFighterNet())
+            if (anyFighterNet() && !g_voxMode)   // сеть-боец кубов не знает (переобучение — ТЗ №12)
                 for (size_t i = 0; i < brains.size() && i < 31; i++)
                     if (seat[i] < 0 && brains[i] == "net") g_forceNetMask |= (1 << i);
             World* wp = nullptr;
