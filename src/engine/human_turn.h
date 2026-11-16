@@ -140,6 +140,7 @@ static std::string humanRequest(World& w, int idx, const TurnState& ts, const st
                 fd = false;
             }
     o += "]";
+    if (me.b.fly && w.vx) o += std::string(",\"vfly\":") + (canStayAloft(me) ? "1" : "0");   // режим кубов: летит в любой куб воздуха (высоту цели выбирают клавишами R/F)
     if (me.b.fly && !w.vx)   // летун: высота (уровни по 5 фт; режим кубов — летит ходом в куб), потолок над ним, может ли сейчас держаться в воздухе
         o += ",\"fly\":{\"alt\":" + std::to_string(me.alt) + ",\"max\":" + std::to_string(maxAltAt(w, me, me.x, me.y, me.up)) + ",\"can\":" + (canStayAloft(me) ? "1" : "0") + "}";
     if (w.vx) o += vxPathTreeJson(w, me, std::clamp(2 * ts.speed, 30, 120));   // режим кубов: дерево путей по кубам (вдвое дальше остатка)

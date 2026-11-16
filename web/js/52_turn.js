@@ -51,7 +51,7 @@ function renderTurn(){
     ${q.conc >= 0 ? `<button data-c="dropconc" title="Бесплатно: эффекты концентрации снимаются">Снять концентрацию</button>` : ''}
     <button data-c="toward" title="Идти к ближайшему врагу">К врагу</button>
     ${(q.doors || []).map(d => `<button data-door="${d[0]},${d[1]}" title="Взаимодействие: первое за ход бесплатно, дальше — действием">🚪 ${d[2] === 1 ? 'Открыть' : 'Закрыть'} дверь</button>`).join('')}
-    ${q.fly ? `<button data-alt="1" ${q.fly.can && q.fly.alt < q.fly.max && q.speedLeft >= 5 ? '' : 'disabled'} title="Выше на 5 фт (5 фт движения); уход вверх из досягаемости ближника провоцирует атаку">🪽 Выше</button><button data-alt="-1" ${q.fly.alt > 0 && q.speedLeft >= 5 ? '' : 'disabled'} title="Ниже на 5 фт (5 фт движения)">⬇ Ниже</button><span class="tag" title="Высота полёта над землёй">${q.fly.alt ? 'в воздухе ' + q.fly.alt * 5 + ' фт' : 'на земле'}</span>` : ''}</div>
+    ${q.fly ? `<button data-alt="1" ${q.fly.can && q.fly.alt < q.fly.max && q.speedLeft >= 5 ? '' : 'disabled'} title="Выше на 5 фт (5 фт движения); уход вверх из досягаемости ближника провоцирует атаку">🪽 Выше</button><button data-alt="-1" ${q.fly.alt > 0 && q.speedLeft >= 5 ? '' : 'disabled'} title="Ниже на 5 фт (5 фт движения)">⬇ Ниже</button><span class="tag" title="Высота полёта над землёй">${q.fly.alt ? 'в воздухе ' + q.fly.alt * 5 + ' фт' : 'на земле'}</span>` : ''}${q.vfly ? `<span class="tag" title="Летун в 3D: клавиши R и F поднимают и опускают точку хода над клеткой под мышью (по 5 фт)">🪽 R / F — высота хода</span>` : ''}</div>
     </div><div class="msg" id="tmsg"></div><div class="hint">${modeHint()}</div>`;
   el.innerHTML = h;
   const actionHelp = {

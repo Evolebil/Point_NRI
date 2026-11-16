@@ -394,6 +394,7 @@ R3.cellAt = function(e){
   const x = inObj ? vh.x : vh.x + vh.nx, y = inObj ? vh.y : vh.y + vh.ny;
   R3.hit = {x, y, top: inObj ? vh.z + 1 : vh.z + vh.nz, z: MAP.vox && !inObj && vh.nz === 1 ? vh.z + 1 : null};
   const c = {x, y};
+  if (!inObj && r3FlyAim()){ const z = r3TopZ(x, y) + R3.flyOff; R3.hit.z = R3.hit.top = z; c.z = z; return c; }   // летун: в воздух над клеткой
   if (MAP.vox && inObj) c.oz = vh.z;               // какой блок бить
   else if (MAP.vox && vh.nz === 1) c.z = vh.z + 1;  // щёлкнули по верху блока: идти именно на эту высоту (тоннель или крыша)
   return c;
@@ -557,6 +558,10 @@ function r3Turn(list, now){
   }
   const path = G.mode === 'move' ? pathPreview(q, h.x, h.y, h.z) : null;   // путь под мышью (как в 2D; в кубах — с высотой щелчка)
   if (path){ const pts = [r3P(me.X, me.Y + .08, me.Z), ...path.cells.map(c => r3P(c.x + .5, r3Z(c) + .08, c.y + .5))]; if (pts.every(p => p.ok)) pathStroke(pts, path.cells, q.speedLeft); }
+  if (r3FlyAim() && h.z != null){   // летун: столбик от земли до точки в воздухе и высота
+    const g = r3TopZ(h.x, h.y), a = r3P(h.x + .5, g, h.y + .5), b = r3P(h.x + .5, h.z, h.y + .5);
+    if (a.ok && b.ok){ ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(160,220,255,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore(); r3Text('↑ ' + 5 * R3.flyOff + ' фт (R/F)', b.x + 10, b.y - 14, '700 12px system-ui', '#bfe6ff'); }
+  }
   r3Square(h.x, h.y, h.top, 1, 'rgba(255,255,255,.95)', 'rgba(255,255,255,.12)');
   const n = me.n, gap = (a, b) => Math.max(0, b - (a + n - 1), a - b), d = path ? pathLabel(path, q.speedLeft) : 5 * Math.max(gap(me.f.x, h.x), gap(me.f.y, h.y)) + ' фт', p = r3P(h.x + 1, h.top, h.y);
   if (p.ok){ ctx.save(); ctx.textAlign = 'left'; r3Text(d, p.x + 22, p.y, '700 13px system-ui', '#fff'); ctx.restore(); }
@@ -613,3 +618,14 @@ if ($('camKindBtn') && $('camKindBtn').addEventListener){
   });
   try { const k = localStorage.getItem('dnd_cam3d'); if (CAMK[k]) R3.setCamKind(k); } catch (e) {}
 }
+// Полёт в 3D (режим кубов): высота цели хода летуна — клавиши R (выше) и F (ниже) по 5 фт над верхом клетки под мышью
+// (кнопок высоты нет: путь движка ведёт в выбранный куб воздуха, предпросмотр пути показывает подъём)
+R3.flyOff = 0;
+function r3FlyAim(){ return MAP && MAP.vox && G.req && G.req.vfly && G.mode === 'move' && R3.flyOff > 0; }
+if (typeof document !== 'undefined' && document.addEventListener)
+  document.addEventListener('keydown', e => {
+    if (!R3.on || !MAP || !MAP.vox || !G.req || !G.req.vfly || e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || '')) return;
+    const up = /^[rRкК]$/.test(e.key), dn = /^[fFаА]$/.test(e.key); if (!up && !dn) return;
+    R3.flyOff = Math.max(0, Math.min(12, R3.flyOff + (up ? 1 : -1)));
+    const h = R3.hit; if (h && G.mode === 'move'){ const t = r3TopZ(h.x, h.y); h.z = R3.flyOff > 0 ? t + R3.flyOff : null; h.top = R3.flyOff > 0 ? h.z : t; }
+  });
