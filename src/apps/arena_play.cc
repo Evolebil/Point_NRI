@@ -101,7 +101,9 @@ int main() {
             g_style.fixedH = cmd["h"].num(0);
             g_style.theme = cmd.has("theme") ? cmd["theme"].num(0) : -1;
             static World gw;
+            g_volGen = true;   // карта для редактора: и слой кубов (пещеры, дома) — для боя в 3D
             genMap(gw);
+            g_volGen = false;
             g_style = MapStyle();
             emitLine("{\"type\":\"map\",\"map\":" + mapToJson(gw) + "}");
         } else if (c == "regionmap") {   // участок по заданной местности (кампания, задача Б-1): карта в формате редактора
@@ -120,8 +122,13 @@ int main() {
                 d.pop = q["settle"]["pop"].num(0);
             }
             d.seed = q["seed"].str("1");
+            d.gx = q.has("gx") ? q["gx"].num(-1) : -1;   // место в регионе и зерно мира: пещеры соседних участков сходятся
+            d.gy = q.has("gy") ? q["gy"].num(-1) : -1;
+            d.wseed = q["wseed"].str("");
             static World rw;
+            g_volGen = true;
             regionArena(rw, d, cmd["w"].num(200), cmd["h"].num(200));
+            g_volGen = false;
             emitLine("{\"type\":\"map\",\"map\":{\"parts\":1," + mapToJson(rw).substr(1) + "}");
         } else if (c == "checkmap") {
             CustomMap m;

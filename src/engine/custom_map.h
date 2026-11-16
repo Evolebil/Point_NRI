@@ -47,6 +47,16 @@ static std::string mapToJson(const World& w) {
     s += layer("deck", [&](int y, int x) { return lvChar(w.deck[y][x]); }) + ",";
     s += layer("door", [&](int y, int x) { return (char)('0' + w.door[y][x]); }) + ",";
     s += layer("strong", [&](int y, int x) { return w.strong[y][x] ? '1' : '0'; });
+    if (!w.vxo.empty()) {   // слой кубов (этап 4): [x, y, нижний куб, материалы снизу вверх]
+        s += ",\"vx\":[";
+        bool first = true;
+        for (const auto& [k, o] : w.vxo) {
+            if (k % W >= w.aw || k / W >= w.ah) continue;
+            s += (first ? "[" : ",[") + std::to_string(k % W) + "," + std::to_string(k / W) + "," + std::to_string(o.first) + ",\"" + o.second + "\"]";
+            first = false;
+        }
+        s += "]";
+    }
     if (w.vx) s += ",\"vox\":1";   // режим кубов: клиент берёт высоту бойцов из кадров и правки кубов из событий
     if (w.wseed) s += ",\"world\":{\"seed\":\"" + std::to_string(w.wseed) + "\",\"size\":" + std::to_string(w.wsize) + ",\"x\":" + std::to_string(w.wx) + ",\"y\":" + std::to_string(w.wy) + ",\"step\":" + std::to_string(w.wstep) + "}";
     return s + "}";
@@ -59,6 +69,7 @@ struct CustomMap {
     bool parts = false;   // карта из генератора (участок по местности): несвязные карманы можно, бой — в самой большой части
     std::vector<std::string> wall, climb, diff, dark, water, pit, height, tree, haz, ladder, deck, door, strong;
     int start[2][2] = {{-1, -1}, {-1, -1}};
+    std::map<int, std::pair<int, std::string>> vx;   // слой кубов (World::vxo): ключ y·W + x
     bool hasStarts() const { return start[0][0] >= 0 && start[1][0] >= 0; }
 };
 thread_local CustomMap g_customMap;
@@ -94,6 +105,16 @@ static bool parseCustomMap(const Json& j, CustomMap& m, std::string& err) {
     readLayer(j["deck"], m.deck, m.aw, m.ah);
     readLayer(j["door"], m.door, m.aw, m.ah);
     readLayer(j["strong"], m.strong, m.aw, m.ah);
+    for (size_t i = 0; i < j["vx"].size(); i++) {   // слой кубов: столбцы в пределах карты, не ниже дна мира и не выше мира
+        const Json& c = j["vx"][i];
+        const int x = c[0].num(-1), y = c[1].num(-1), z0 = c[2].num(-1);
+        std::string q = c[3].str("");
+        if (x < 0 || y < 0 || x >= m.aw || y >= m.ah || z0 < 1 || z0 >= VH_MAX || q.empty()) continue;
+        q.resize(std::min(q.size(), (size_t)(VH_MAX - z0)));
+        for (char& ch : q)
+            if (!((ch >= '0' && ch <= '9') || (ch >= 'a' && ch < 'a' + VX_N - 10))) ch = '.';
+        m.vx[y * W + x] = {z0, q};
+    }
     auto blocked = [&](int x, int y) { return m.wall[y][x] == '1' || m.pit[y][x] == '1'; };
     for (int i = 0; i < 2; i++) {
         const Json& p = j["starts"][(size_t)i];
@@ -172,6 +193,7 @@ static void applyCustomMap(World& w, const CustomMap& m) {
     std::memset(w.strong, 0, sizeof w.strong);
     w.wseed = 0;
     w.wstep = 1;
+    w.vxo = m.vx;
     w.aw = m.aw;
     w.ah = m.ah;
     w.theme = m.theme;

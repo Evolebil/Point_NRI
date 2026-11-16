@@ -25,6 +25,177 @@ inline void putWorldCell(World& w, int x, int y, const wg::Cell& c, int h5 = -1)
     w.door[y][x] = c.wall ? 0 : c.door;
     w.strong[y][x] = c.strong && c.wall;
 }
+// ---- слой кубов арены (этап 4): пещеры и дома с этажами и крышами (только режим кубов; бой по слоям его не видит) ----
+// Строится по зерну и мировым координатам, без общего генератора случайных чисел: бои по слоям — побитово прежние
+thread_local bool g_volGen = false;   // строить слой кубов и вне боя в кубах (карта для редактора и кампании: genmap, regionmap)
+// что собрал проход по клеткам мира: поселение (под ним пещер нет), дома (угол в клетках арены → клетка дома) и чей дом в
+// клетке (номер угла y·4·W + x со сдвигом; −1 — не дом): обрезанный краем поселения дом строится только по своим клеткам
+struct VolSrc {
+    std::vector<unsigned char> town;
+    std::vector<int> own;
+    std::map<std::pair<int, int>, wg::Cell> houses;
+    static int key(int ox, int oy) { return (oy + W) * 4 * W + ox + W; }
+    void reset(const World& w) { town.assign((size_t)w.aw * w.ah, 0); own.assign((size_t)w.aw * w.ah, -1); houses.clear(); }
+    void add(int x, int y, int aw, const wg::Cell& c) {
+        town[(size_t)y * aw + x] = c.town;
+        if (!c.hw) return;
+        houses.emplace(std::make_pair(x - c.hx, y - c.hy), c);
+        own[(size_t)y * aw + x] = key(x - c.hx, y - c.hy);
+    }
+};
+// столбец слоя кубов из набора «куб → материал» (символ base36 VoxMat; чего нет — '.', как по слоям)
+static void vxoPut(World& w, int x, int y, const std::map<int, char>& col) {
+    if (col.empty()) return;
+    const int z0 = col.begin()->first, z1 = col.rbegin()->first;
+    std::string m((size_t)(z1 - z0 + 1), '.');
+    for (const auto& [z, c] : col) m[(size_t)(z - z0)] = c;
+    w.vxo[y * W + x] = {z0, m};
+}
+// Дом из кубов (решение владельца 2026-11-16): этаж — 2 куба (10 фт) до потолка, зал — 3; пол верхнего этажа — доски;
+// ступени по кубу у стены (идут обычным шагом); двускатная крыша из досок уступами по кубу (по ней ходят, конёк — вдоль
+// длинной стороны, не выше 3 кубов над карнизом, торцы — стеной); стены высотой дома: деревня — доски, город — камень.
+// Снаружи у длинной стены — приставная лестница на карниз. Дом на неровной земле (клетки разной высоты) — по слоям, как был
+static void houseVol(World& w, int x0, int y0, const wg::Cell& h, const VolSrc& src) {
+    const int HW = h.hw, HH = h.hh, F = std::max(1, (int)h.floors), Hs = h.hall ? 3 : 2;
+    int b = -1;
+    for (int qy = 0; qy < HH; qy++)
+        for (int qx = 0; qx < HW; qx++) {
+            const int x = x0 + qx, y = y0 + qy;
+            if (x < 0 || y < 0 || x >= w.aw || y >= w.ah || src.own[(size_t)y * w.aw + x] != VolSrc::key(x0, y0)) continue;
+            const int g = VZ0 + w.height[y][x];
+            if (b < 0) b = g;
+            else if (g != b) return;
+        }
+    if (b < 0) return;
+    const int zt = b + F * (Hs + 1) - 1;   // карниз: верх стен, нижний ряд крыши
+    const bool ridgeX = HW >= HH;
+    const int L = ridgeX ? HH : HW;
+    auto dOf = [&](int qx, int qy) { const int q = ridgeX ? qy : qx; return std::min({q, L - 1 - q, 3}); };
+    // ступени: по сторонам без двери (дверь с севера или юга — у западной и восточной стен, и наоборот), этаж k — своя сторона
+    const int ds = h.hdoor, c0 = ds < 2 ? 2 : 0, pick = (HW * 7 + HH * 3 + ds) & 1;
+    auto stairAt = [&](int k, int qx, int qy) {   // номер ступени (1..Hs+1) лестницы на этаж k+1 в клетке, 0 — нет
+        const int sd = c0 + ((pick + k - 1) & 1);
+        for (int i = 1; i <= Hs + 1; i++) {
+            const int sx = sd == 0 ? i : sd == 1 ? HW - 1 - i : sd == 2 ? 1 : HW - 2, sy = sd == 0 ? 1 : sd == 1 ? HH - 2 : sd == 2 ? HH - 1 - i : i;
+            if (sx == qx && sy == qy) return i;
+        }
+        return 0;
+    };
+    for (int qy = 0; qy < HH; qy++)
+        for (int qx = 0; qx < HW; qx++) {
+            const int x = x0 + qx, y = y0 + qy;
+            if (x < 0 || y < 0 || x >= w.aw || y >= w.ah || src.own[(size_t)y * w.aw + x] != VolSrc::key(x0, y0)) continue;
+            const char wallM = h.wood ? 'a' : (w.strong[y][x] ? '6' : '5');
+            const int d = dOf(qx, qy), roof = zt + d;
+            const bool border = qx == 0 || qy == 0 || qx == HW - 1 || qy == HH - 1;
+            std::map<int, char> col;
+            for (int z = b + 1; z < std::max(roof + 1, b + WALL_UP + 2); z++) col[z] = '0';
+            if (border) {
+                const bool door = w.door[y][x];
+                for (int z = door ? b + 2 : b; z < roof; z++) col[z] = wallM;   // стена (над дверью — перемычка), торец — до крыши
+                if (door) col.erase(b + 1);
+            } else {
+                for (int k = 1; k < F; k++) {
+                    const int zf = b + (k - 1) * (Hs + 1), zs = zf + Hs, st = stairAt(k, qx, qy);
+                    if (!st) col[zs] = 'a';   // пол этажа k+1
+                    for (int z = zf; z < zf + st; z++) col[z] = 'a';   // ступень: st кубов от пола этажа k
+                }
+            }
+            col[roof] = 'a';
+            vxoPut(w, x, y, col);
+        }
+    // приставная лестница на карниз: снаружи у длинной стены, на ровной свободной земле
+    const int cand[2][2] = {{ridgeX ? 1 : -1, ridgeX ? -1 : 1}, {ridgeX ? HW - 2 : HW, ridgeX ? HH : HH - 2}};
+    for (const auto& q : cand) {
+        const int x = x0 + q[0], y = y0 + q[1];
+        if (x < 1 || y < 1 || x >= w.aw - 1 || y >= w.ah - 1 || src.own[(size_t)y * w.aw + x] >= 0 || VZ0 + w.height[y][x] != b) continue;
+        if (w.wall[y][x] || w.water[y][x] || w.pit[y][x] || w.tree[y][x] || w.door[y][x] || w.deck[y][x] || w.haz[y][x]) continue;
+        std::map<int, char> col;
+        for (int z = b; z <= zt; z++) col[z] = 'i';
+        vxoPut(w, x, y, col);
+        break;
+    }
+}
+// Пещеры (решение владельца 2026-11-16): ходы и залы из объёмного шума (wg::caveAir) в мировых координатах gx0 + x, gy0 + y,
+// под землёй не меньше 2 кубов (нет под водой, ущельем, опасностью и поселением). У каждой пещеры (связной полости от 12
+// кубов) — выход на поверхность: спуск ступенями по кубу из её места поближе к поверхности, по прямой в ту сторону, где он
+// короче, не ближе 2 клеток к краю арены
+static void caveVol(World& w, uint64_t seed, int gx0, int gy0, const std::vector<unsigned char>& town) {
+    const int AW = w.aw, AH = w.ah;
+    int Z = 0;
+    for (int y = 0; y < AH; y++)
+        for (int x = 0; x < AW; x++) Z = std::max(Z, VZ0 + (int)w.height[y][x] + 1);
+    auto id = [&](int x, int y, int z) { return ((size_t)y * AW + x) * Z + z; };
+    std::vector<unsigned char> air((size_t)AW * AH * Z, 0);
+    auto ground = [&](int x, int y) { return VZ0 + (int)w.height[y][x]; };   // первый куб воздуха над землёй
+    auto open = [&](int x, int y) { return !w.water[y][x] && !w.pit[y][x] && !w.haz[y][x] && !town[(size_t)y * AW + x]; };
+    bool any = false;
+    for (int y = 0; y < AH; y++)
+        for (int x = 0; x < AW; x++) {
+            if (!open(x, y)) continue;
+            for (int z = 1; z <= ground(x, y) - 3; z++)
+                if (wg::caveAir(seed, gx0 + x, gy0 + y, z)) air[id(x, y, z)] = 1, any = true;
+        }
+    if (!any) return;
+    // связные полости (6 соседей) и выход у каждой
+    std::vector<int> comp(air.size(), -1), st;
+    for (size_t s0 = 0; s0 < air.size(); s0++) {
+        if (!air[s0] || comp[s0] >= 0) continue;
+        const int cid = (int)s0;
+        std::vector<int> cubes;
+        st.assign(1, (int)s0);
+        comp[s0] = cid;
+        while (!st.empty()) {
+            const int c = st.back();
+            st.pop_back();
+            cubes.push_back(c);
+            const int z = c % Z, x = (c / Z) % AW, y = c / Z / AW;
+            static const int D[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            for (const auto& e : D) {
+                const int nx = x + e[0], ny = y + e[1], nz = z + e[2];
+                if (nx < 0 || ny < 0 || nz < 0 || nx >= AW || ny >= AH || nz >= Z) continue;
+                const size_t n = id(nx, ny, nz);
+                if (air[n] && comp[n] < 0) comp[n] = cid, st.push_back((int)n);
+            }
+        }
+        if (cubes.size() < 12) continue;
+        // место для выхода: куб пола (под ним не полость) поближе к поверхности; спуск — самый короткий из четырёх сторон
+        std::vector<std::array<int, 3>> best;
+        int bestLen = 1 << 30;
+        for (int c : cubes) {
+            const int z = c % Z, x = (c / Z) % AW, y = c / Z / AW;
+            if (z > 1 && air[id(x, y, z - 1)]) continue;
+            if (ground(x, y) - z > (int)(bestLen + 1)) continue;
+            static const int DX[4] = {1, -1, 0, 0}, DY[4] = {0, 0, 1, -1};
+            for (int k = 0; k < 4; k++) {
+                std::vector<std::array<int, 3>> ramp;
+                bool ok = false;
+                for (int i = 1; i <= 40; i++) {
+                    const int rx = x + DX[k] * i, ry = y + DY[k] * i, zs = z + i;
+                    if (rx < 2 || ry < 2 || rx >= AW - 2 || ry >= AH - 2 || !open(rx, ry) || w.wall[ry][rx] || w.tree[ry][rx] || w.door[ry][rx] || w.deck[ry][rx]) break;
+                    const int g = ground(rx, ry);
+                    if (zs >= g) { ok = zs - 1 - g <= 2; break; }   // вышли на поверхность (уступ вниз — не больше 10 фт)
+                    ramp.push_back({rx, ry, zs});
+                }
+                if (ok && (int)ramp.size() < bestLen) { bestLen = (int)ramp.size(); best = ramp; }
+            }
+        }
+        for (const auto& r : best)   // спуск: высота хода 2 куба (поверху — до поверхности)
+            for (int z = r[2]; z <= std::min(r[2] + 1, ground(r[0], r[1]) - 1); z++) air[id(r[0], r[1], z)] = 1;
+    }
+    for (int y = 0; y < AH; y++)
+        for (int x = 0; x < AW; x++) {
+            std::map<int, char> col;
+            for (int z = 1; z < Z; z++)
+                if (air[id(x, y, z)]) col[z] = '0';
+            vxoPut(w, x, y, col);
+        }
+}
+static void buildVolume(World& w, uint64_t caveSeed, int gx0, int gy0, const VolSrc& src) {
+    w.vxo.clear();
+    caveVol(w, caveSeed, gx0, gy0, src.town);
+    for (const auto& [o, h] : src.houses) houseVol(w, o.first, o.second, h, src);
+}
 struct MapStyle {
     int fixedW = 0, fixedH = 0, theme = -1;   // заданный размер участка и тема (−1 — как получится), для тестов и редактора
     unsigned long long worldSeed = 0;         // мир по зерну (игра; 0 — обучение: новый мир каждые 500 боёв)
@@ -122,6 +293,9 @@ void genMap(World& w) {
     }
     if (g_wplan.seed != ws || g_wplan.size != wsz) wg::buildPlan(g_wplan, ws, wsz);
     const wg::Plan& P = g_wplan;
+    const bool vol = g_voxMode || g_volGen;
+    static thread_local VolSrc vs;
+    w.vxo.clear();
     for (int tries = 0;; tries++) {
         w.aw = g_style.fixedW > 0 ? std::min(W, g_style.fixedW) : pickArenaSide();
         w.ah = g_style.fixedH > 0 ? std::min(W, g_style.fixedH) : pickArenaSide();
@@ -144,6 +318,7 @@ void genMap(World& w) {
             y0 = irand(maxY + 1);
         }
         int townN = 0;
+        if (vol) vs.reset(w);
         if (stride == 1) wg::fillLevelCache(P, x0, y0, spanW, spanH);
         else wg::lvlCache().p = nullptr;
         for (int y = 0; y < W; y++)
@@ -155,6 +330,7 @@ void genMap(World& w) {
                 const wg::Cell c = wg::worldCell(P, x0 + x * stride, y0 + y * stride);
                 putWorldCell(w, x, y, c, wg::fineHeight(P, x0 + x * stride, y0 + y * stride, c));
                 townN += c.town;
+                if (vol) vs.add(x, y, w.aw, c);
             }
         w.wseed = ws;
         w.wsize = wsz;
@@ -163,7 +339,10 @@ void genMap(World& w) {
         w.wstep = stride;
         w.theme = g_style.theme >= 0 ? g_style.theme : (townN * 4 >= w.aw * w.ah ? 1 : 0);   // тема «город» — четверть участка и больше
         const int mainN = markMain(w), startN = startCellsN(w);   // мест для расстановки должно быть хотя бы 2
-        if (startN >= 2 && (mainN >= std::max(2, (int)(0.3 * w.aw * w.ah)) || g_style.wx >= 0 || tries >= 40)) break;
+        if (startN >= 2 && (mainN >= std::max(2, (int)(0.3 * w.aw * w.ah)) || g_style.wx >= 0 || tries >= 40)) {
+            if (vol && stride == 1) buildVolume(w, ws, x0, y0, vs);   // слой кубов — по клеткам мира (выборка с шагом — без него)
+            break;
+        }
         if (tries >= 200) {   // совсем не вышло: пустая арена
             for (int y = 0; y < w.ah; y++)
                 for (int x = 0; x < w.aw; x++) w.wall[y][x] = w.pit[y][x] = w.tree[y][x] = false, w.deck[y][x] = w.door[y][x] = 0, w.height[y][x] = 0;
@@ -182,6 +361,10 @@ void regionArena(World& w, const wg::RegionDesc& d, int aw, int ah) {
     const int x0 = (P.size - w.aw) / 2, y0 = (P.size - w.ah) / 2;
     wg::fillLevelCache(P, x0, y0, w.aw, w.ah);
     int townN = 0;
+    const bool vol = g_voxMode || g_volGen;
+    static thread_local VolSrc vs;
+    w.vxo.clear();
+    if (vol) vs.reset(w);
     for (int y = 0; y < W; y++)
         for (int x = 0; x < W; x++) {
             if (x >= w.aw || y >= w.ah) {   // за пределами участка — стена (край арены)
@@ -192,8 +375,15 @@ void regionArena(World& w, const wg::RegionDesc& d, int aw, int ah) {
             const wg::Cell c = wg::worldCell(P, x0 + x, y0 + y);
             putWorldCell(w, x, y, c, wg::fineHeight(P, x0 + x, y0 + y, c));
             townN += c.town;
+            if (vol) vs.add(x, y, w.aw, c);
         }
     wg::lvlCache().p = nullptr;   // кэш уровней — этого участка; следующий участок его перезаполнит
+    // слой кубов: пещеры — в координатах региона (клетка региона gx, gy по 200 клеток и зерно мира), тогда ходы соседних
+    // участков сходятся на границе; без места в регионе — в своих координатах по зерну участка
+    if (vol) {
+        const bool inReg = d.gx >= 0 && d.gy >= 0;
+        buildVolume(w, inReg ? wg::seedOfText("пещеры:" + d.wseed) : P.seed ^ 0x43415645, inReg ? d.gx * P.size + x0 : x0, inReg ? d.gy * P.size + y0 : y0, vs);
+    }
     w.wseed = 0;
     w.wsize = 0;
     w.wx = w.wy = 0;

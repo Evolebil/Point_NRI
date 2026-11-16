@@ -12,12 +12,12 @@
 
 enum VoxMat : unsigned char {
     VX_AIR, VX_BEDROCK, VX_DIRT, VX_GRASS, VX_SAND, VX_STONE, VX_STRONG, VX_WOOD, VX_LEAF, VX_WATER, VX_PLANK, VX_DOOR,
-    VX_COVER, VX_RUBBLE, VX_LAVA, VX_ACID, VX_ICE, VX_FORCE, VX_N
+    VX_COVER, VX_RUBBLE, VX_LAVA, VX_ACID, VX_ICE, VX_FORCE, VX_LADDER, VX_N
 };
 // hp 0 — неразрушим (дно мира, жидкости, барьер способности); solid — опора и преграда движению; seeThru — обзор сквозь
 // (листва и вода — пока насквозь: частичное укрытие листвой — этап 2); liquid — плавание (этап 2). Ствол дерева — тонкий, в углу
 // клетки (решение владельца 2026-11-16): не твёрдый — мимо него проходят, обзор и области не держит, даёт полукрытие (vxCover),
-// хиты есть — рубится; по нему лезут (vxByTree)
+// хиты есть — рубится; по нему лезут (vxByTree). Лестница (этап 4: на крышу дома) — как ствол: не твёрдая, лезет любой
 struct MatInfo { const char* name; short hp; unsigned char ac; bool solid, seeThru, liquid; };
 // КД и хиты — как у объектов сейчас (DMG «Объекты»: дерево КД 15, камень КД 17): кубик стены — OBJ_WALL_HP, крепкой —
 // OBJ_STRONG_HP, ствола — OBJ_TREE_HP, двери — OBJ_DOOR_HP, настила — DECK_HP; земля и песок — мягче камня
@@ -31,7 +31,7 @@ constexpr MatInfo MAT[VX_N] = {
     {"дверь", OBJ_DOOR_HP, 15, true, false, false}, {"укрытие", OBJ_CLIMB_HP, 17, true, true, false},
     {"обломки", 9, 10, true, false, false},      {"лава", 0, 0, false, true, true},
     {"кислота", 0, 0, false, true, true},        {"лёд", 18, 13, true, true, false},
-    {"силовой барьер", 0, 0, true, true, false}};
+    {"силовой барьер", 0, 0, true, true, false}, {"лестница", DECK_HP, 15, false, true, false}};
 constexpr int VCH = 16;     // сторона чанка
 thread_local bool g_voxMode = false;   // бой в режиме кубов (игра по ?3d=1): мир из кубов строится в начале боя
 constexpr int VH_MAX = 64;  // высота мира в кубах (320 фт, решение ТЗ 3.1)
@@ -143,6 +143,13 @@ inline void voxColumn(VoxWorld& v, const World& w, int x, int y, int b) {
         if (!open && st != 8) put(g, g + 2, VX_DOOR);
     }
     if (w.deck[y][x] && !(b & (1 << 5)) && VZ0 + w.deck[y][x] - 1 >= g) put(VZ0 + w.deck[y][x] - 1, VZ0 + w.deck[y][x], VX_PLANK);
+    const auto o = w.vxo.find(y * W + x);   // слой кубов карты (пещеры, дома): поверх слоёв, '.' — как по слоям
+    if (o != w.vxo.end())
+        for (int k = 0; k < (int)o->second.second.size(); k++) {
+            const char c = o->second.second[(size_t)k];
+            const int m = c >= '0' && c <= '9' ? c - '0' : (c >= 'a' && c <= 'z' ? c - 'a' + 10 : -1);
+            if (m >= 0 && m < VX_N && m != VX_BEDROCK) put(o->second.first + k, o->second.first + k + 1, (unsigned char)m);
+        }
     if (b & (1 << 1)) put(g, g + 4, VX_FORCE);
 }
 // Перевод нынешней карты (World, уровни по 5 фт) в кубы — те же правила, что у клиента (web/js/55_render3d.js r3Column):
@@ -153,6 +160,7 @@ inline void voxFromWorld(VoxWorld& v, const World& w) {
     int top = 0;
     for (int y = 0; y < w.ah; y++)
         for (int x = 0; x < w.aw; x++) top = std::max({top, (int)w.height[y][x] + std::max(WALL_UP, (int)w.tree[y][x]), (int)w.deck[y][x]});
+    for (const auto& [k, o] : w.vxo) top = std::max(top, o.first + (int)o.second.size() - VZ0);   // крыши слоя кубов
     v.init(w.aw, w.ah, VZ0 + top + 6);   // запас над самым высоким: летуну есть куда подняться
     for (int y = 0; y < w.ah; y++)
         for (int x = 0; x < w.aw; x++) voxColumn(v, w, x, y, voxDynBits(w, x, y));
@@ -177,7 +185,7 @@ inline void vxResync(World& w, int x, int y) {
 
 // ---- правила режима кубов (этап 1б) ----
 // копатель идёт сквозь землю, песок, обломки и листву (камень — только разбить действием)
-inline bool vxTreeMat(unsigned char m) { return m == VX_WOOD || m == VX_LEAF; }   // дерево: за него держится любой (лазание)
+inline bool vxTreeMat(unsigned char m) { return m == VX_WOOD || m == VX_LEAF || m == VX_LADDER; }   // дерево и лестница: за них держится любой
 inline bool vxDiggable(unsigned char m) { return m == VX_DIRT || m == VX_GRASS || m == VX_SAND || m == VX_RUBBLE || m == VX_LEAF; }
 // верхняя опора клетки: куб над самым верхним твёрдым (стоять на стене, на кроне, на крыше)
 inline int vxTopZ(const World& w, int x, int y) {
@@ -486,7 +494,7 @@ inline void vxAfterBreak(World& w, int x, int y) {
     const int g = VZ0 + w.height[y][x];
     for (int z = g; z < std::min(v.sz, g + std::max(WALL_UP, (int)w.tree[y][x])); z++) {
         const unsigned char m = v.at(x, y, z);
-        if (m == VX_STONE || m == VX_STRONG || m == VX_WOOD || m == VX_LEAF || m == VX_COVER || m == VX_DOOR) return;
+        if (m == VX_STONE || m == VX_STRONG || m == VX_WOOD || m == VX_LEAF || m == VX_COVER || m == VX_DOOR || (m == VX_PLANK && w.wall[y][x])) return;
     }
     w.wall[y][x] = w.climb[y][x] = false;
     w.tree[y][x] = 0;

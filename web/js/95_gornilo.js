@@ -518,7 +518,7 @@ async function worldPieceMap(w, f, wm){
   const n = wm.n, k = n / w.cells, cx = Math.max(0, Math.min(n - 1, Math.floor((f.x + f.w / 2) * k))), cy = Math.max(0, Math.min(n - 1, Math.floor((f.y + f.h / 2) * k)));
   const bi = wm.biome[cy][cx], level = +wm.height[cy][cx];
   const terrain = {a:'тундра', b:'тайга', c:'ледник', d:'степь', e:'лес', f:'болото', g:'пустыня', h:'саванна', i:'джунгли'}[bi] || 'лес';
-  return api({cmd:'regionmap', cell: {terrain, level, river: bi === '~', road: bi === '=' ? 'NESW' : '', settle: bi === '#' ? 'город' : bi === '+' ? 'деревня' : '', seed: `${w.seed}:${cx}:${cy}`}, w: f.w, h: f.h});
+  return api({cmd:'regionmap', cell: {terrain, level, river: bi === '~', road: bi === '=' ? 'NESW' : '', settle: bi === '#' ? 'город' : bi === '+' ? 'деревня' : '', seed: `${w.seed}:${cx}:${cy}`, gx: cx, gy: cy, wseed: String(w.seed)}, w: f.w, h: f.h});   // gx, gy, wseed — пещеры соседних участков сходятся
 }
 $('wdOpen').onclick = async () => {
   if (!WD.map || !WD.cur) return;

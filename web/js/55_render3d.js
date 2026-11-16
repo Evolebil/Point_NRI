@@ -16,9 +16,9 @@ const VZ0 = 2;      // кубов под уровнем «0» нынешней �
 const VCH = 16;     // чанк 16×16×16
 // материалы кубов: цвет (sRGB) и твёрдость для луча
 const VM = {AIR:0, GRASS:1, DIRT:2, STONE:3, STRONG:4, WOOD:5, LEAF:6, WATER:7, MUD:8, PLANK:9, DOOR:10, PITF:11,
-  LAVA:12, ACID:13, SMOKE:14, ICE:15, STORM:16, NECRO:17, FORCE:18, COBBLE:19, RUBBLE:20, DARKG:21, COVER:22, LADDER:23, CDIRT:24};
+  LAVA:12, ACID:13, SMOKE:14, ICE:15, STORM:16, NECRO:17, FORCE:18, COBBLE:19, RUBBLE:20, DARKG:21, COVER:22, LADDER:23, CDIRT:24, LADDV:25};   // LADDER — поверхность клетки с лестницей слоя, LADDV — куб «лестница» движка
 const VCOL = [0, 0x5b8a4f, 0x6e5236, 0x80848f, 0x4a4e58, 0x6b4a2b, 0x3f7a3a, 0x3a7fc0, 0x5e4524, 0x9a7442, 0x6b4423, 0x15161c,
-  0xe2572a, 0x7ccf2e, 0x7e8f57, 0x9fd8ff, 0x5868d8, 0x4b3a63, 0x7a63c9, 0x5c606c, 0x6a6152, 0x2a2e40, 0x7d7568, 0xc9a46a, 0x4e525c];
+  0xe2572a, 0x7ccf2e, 0x7e8f57, 0x9fd8ff, 0x5868d8, 0x4b3a63, 0x7a63c9, 0x5c606c, 0x6a6152, 0x2a2e40, 0x7d7568, 0xc9a46a, 0x4e525c, 0xb98a4e];
 
 // Вид боя: ?3d=1 / ?3d=0 в адресе, иначе настройка (localStorage dnd_view: '3d' или '2d'; по умолчанию 2D)
 function r3Want(){
@@ -102,7 +102,13 @@ function r3Level(f){
 // куб, где ноги: в режиме кубов (бой по ?3d=1, этап 1б) — из кадра движка, иначе — по слоям карты
 const r3Z = f => MAP && MAP.vox && f.z != null ? f.z : VZ0 + r3Level(f);
 // материалы движка (src/engine/vox.h VoxMat) → материалы рисунка (VM)
-const ENG2VM = [VM.AIR, VM.PITF, VM.DIRT, VM.GRASS, VM.DIRT, VM.STONE, VM.STRONG, VM.WOOD, VM.LEAF, VM.WATER, VM.PLANK, VM.DOOR, VM.COVER, VM.RUBBLE, VM.LAVA, VM.ACID, VM.ICE, VM.FORCE];
+const ENG2VM = [VM.AIR, VM.PITF, VM.DIRT, VM.GRASS, VM.DIRT, VM.STONE, VM.STRONG, VM.WOOD, VM.LEAF, VM.WATER, VM.PLANK, VM.DOOR, VM.COVER, VM.RUBBLE, VM.LAVA, VM.ACID, VM.ICE, VM.FORCE, VM.LADDV];
+// слой кубов карты (этап 4, World::vxo в движке): столбцы [x, y, нижний куб, материалы base36 движка, '.' — как по слоям]
+function r3VxMap(){
+  const m = new Map();
+  if (MAP && MAP.vox && Array.isArray(MAP.vx)) for (const c of MAP.vx) if (Array.isArray(c) && typeof c[3] === 'string') m.set(c[0] + ',' + c[1], c);
+  return m;
+}
 function r3Column(x, y){
   const V = R3.vox, i0 = vIdx(x, y, 0), H = R3.H, d = R3.dynCells.get(x + ',' + y) || {}, city = !!MAP.theme;
   for (let z = 0; z < H; z++) V[i0 + z] = 0;
@@ -129,6 +135,11 @@ function r3Column(x, y){
   }
   const dk = mapN('deck', x, y);
   if (dk && !d[5] && VZ0 + dk - 1 >= top) put(VZ0 + dk - 1, VZ0 + dk, VM.PLANK);   // настил: стоять на его верху
+  const o = R3.vxo && R3.vxo.get(x + ',' + y);   // слой кубов карты (пещеры, дома) — поверх слоёв, как voxColumn в движке
+  if (o) for (let k = 0; k < o[3].length; k++){
+    const e = parseInt(o[3][k], 36), z = o[2] + k;
+    if (e >= 0 && e < ENG2VM.length && e !== 1 && z >= 0 && z < H) V[i0 + z] = ENG2VM[e];
+  }
   if (d[1]) put(top, top + 4, VM.FORCE);   // временная стена способности
   const ed = R3.voxEd.get(x + ',' + y);   // режим кубов: вырытое и разрушенное в бою — поверх (как vxResync в движке)
   if (ed) for (const [z, m] of ed) if (z >= 0 && z < H) V[i0 + z] = m;
@@ -147,6 +158,7 @@ R3.setMap = function(){
   R3.fm = []; R3.map = MAP; R3.dynFr = null; R3.fogKey = ''; R3.dynCells = r3DynMap(FR[curIdx] && FR[curIdx].dyn); R3.dynKey = JSON.stringify((FR[curIdx] && FR[curIdx].dyn) || []);
   let maxTop = 0;
   for (let y = 0; y < AH; y++) for (let x = 0; x < AW; x++) maxTop = Math.max(maxTop, VZ0 + Math.max(mapN('height', x, y) + Math.max(6, mapN('tree', x, y)), mapN('deck', x, y)));
+  R3.vxo = r3VxMap(); R3.vxo.forEach(c => { maxTop = Math.max(maxTop, c[2] + c[3].length); });
   R3.H = Math.ceil((maxTop + 2) / VCH) * VCH;
   R3.vox = new Uint8Array(AW * AH * R3.H);
   R3.NX = Math.ceil(AW / VCH); R3.NY = Math.ceil(R3.H / VCH); R3.NZ = Math.ceil(AH / VCH);
@@ -183,7 +195,23 @@ function r3Trunk(x, y, z, pos, col, cel, idx, c){
     idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
   }
 }
-const vOpaque = m => m !== 0 && m !== VM.COVER && m !== VM.WOOD;   // ствол тонкий — грани соседей за ним видны
+// лестница (куб «лестница» движка) — тонкая доска у твёрдого соседа (стены дома), иначе посреди клетки
+const LADDER_W = .14;
+function r3Ladder(x, y, z, pos, col, cel, idx, c){
+  let ox = .5 - LADDER_W / 2, oy = 0, sx = LADDER_W, sy = 1;
+  for (const [ax, ay] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) if (vOpaque(vGet(x + ax, y + ay, z)) || vOpaque(vGet(x + ax, y + ay, z + 1))){
+    if (ax) { ox = ax > 0 ? 1 - LADDER_W : 0; oy = 0; sx = LADDER_W; sy = 1; } else { ox = 0; oy = ay > 0 ? 1 - LADDER_W : 0; sx = 1; sy = LADDER_W; }
+    break;
+  }
+  const up = vGet(x, y, z + 1);
+  for (const [[dx, dz, dy], quad, shade] of FACES){
+    if (dz === 1 && up === VM.LADDV) continue;
+    c.set(VCOL[VM.LADDV]); const b = pos.length / 3, k = shade * ((z & 1) ? .9 : 1.05);   // ступени — полосами
+    for (const [qx, qy, qz] of quad){ pos.push(x + ox + qx * sx, z + qy, y + oy + qz * sy); col.push(c.r * k, c.g * k, c.b * k); cel.push(x, y, 0); }
+    idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+  }
+}
+const vOpaque = m => m !== 0 && m !== VM.COVER && m !== VM.WOOD && m !== VM.LADDV;   // ствол и лестница тонкие — грани соседей за ними видны
 R3.buildChunk = function(ci){
   const T = THREE, old = R3.chunks[ci];
   if (old && old.mesh){ R3.scene.remove(old.mesh); old.mesh.geometry.dispose(); }
@@ -193,6 +221,7 @@ R3.buildChunk = function(ci){
     for (let z = cy * VCH; z < Math.min(R3.H, cy * VCH + VCH); z++){
       const m = R3.vox[vIdx(x, y, z)]; if (!m) continue;
       if (m === VM.WOOD){ r3Trunk(x, y, z, pos, col, cel, idx, c); continue; }
+      if (m === VM.LADDV){ r3Ladder(x, y, z, pos, col, cel, idx, c); continue; }
       const hgt = m === VM.COVER ? .5 : (m === VM.WATER && !vGet(x, y, z + 1) ? .85 : 1);   // ящик — в полкуба, вода чуть ниже берега
       const jit = .94 + hash(x * 7 + z, y * 13 + z) * .12;   // лёгкая пестрота кубов
       for (const [[dx, dz, dy], quad, shade] of FACES){
@@ -408,7 +437,7 @@ function r3Voxel(o, d, maxT){
   let nx = 0, ny = 0, nz = 0, t = 0;
   for (let i = 0; i < 2000 && t <= Math.min(maxT, 1500); i++){
     const m = x >= 0 && y >= 0 && x < AW && y < AH && z >= 0 && z < R3.H ? R3.vox[vIdx(x, y, z)] : 0;
-    if (m && (m !== VM.WOOD || G.mode === 'attack')) return {x, y, z, nx, ny, nz, t};   // тонкий ствол — сквозь (рубить — в режиме атаки)
+    if (m && ((m !== VM.WOOD && m !== VM.LADDV) || G.mode === 'attack')) return {x, y, z, nx, ny, nz, t};   // тонкий ствол и лестница — сквозь (рубить — в режиме атаки)
     if (z < 0 && sz <= 0) return null;
     if (tx < ty && tx < tz){ x += sx; t = tx; tx += tdx; nx = -sx; ny = 0; nz = 0; }
     else if (ty < tz){ y += sy; t = ty; ty += tdy; nx = 0; ny = -sy; nz = 0; }
@@ -479,7 +508,7 @@ function r3Fx(list, now){
   });
 }
 // ---- область в объёме (режим кубов) — та же геометрия, что в движке (vox.h: vxRay, vxInShape3, vxAreaCube, vxTopZ) ----
-const r3Solid = m => !!m && m !== VM.WATER && m !== VM.LAVA && m !== VM.ACID && m !== VM.WOOD;   // ствол тонкий — не твёрдый (как в движке)
+const r3Solid = m => !!m && m !== VM.WATER && m !== VM.LAVA && m !== VM.ACID && m !== VM.WOOD && m !== VM.LADDV;   // ствол и лестница — не твёрдые (как в движке)
 const r3BlocksEffect = m => r3Solid(m) && m !== VM.LEAF && m !== VM.COVER;   // полное укрытие: твёрдое, кроме листвы и ящика
 function r3TopZ(x, y){ for (let z = R3.H - 1; z >= 1; z--) if (r3Solid(vGet(x, y, z - 1)) && !r3Solid(vGet(x, y, z))) return z; return 1; }
 // луч от a к b (кубы концов не считаются); f(материал) ≥ 100 — преграда

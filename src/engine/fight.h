@@ -161,6 +161,7 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
     w.nTeams = nT;
     for (int t = 0; t < MAXT; t++) w.kills[t] = 0;
     w.f.reserve(N + (size_t)N * std::max(0, limits().sumFightBoss));   // все приспешники под потолком: ссылки на бойцов не ломаются
+    w.vx = nullptr;   // кубы прошлого боя: генератор и связность арены — по слоям (иначе второй бой в кубах искал места по чужим кубам)
     if (g_customMap.on) applyCustomMap(w, g_customMap);   // карта игрока
     else genMap(w);
     if (g_customMap.on) markMain(w);   // карта игрока проверена на связность — основная часть вся
@@ -271,8 +272,8 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
         }
         w.f.push_back(f);
     }
-    if (w.vx) {   // режим кубов: бойцы — на верхней опоре своих клеток
-        for (auto& f : w.f) f.zCol = -1, f.z = 0;
+    if (w.vx) {   // режим кубов: бойцы — на земле своих клеток (в доме — на полу, не на крыше), нельзя — на верхней опоре
+        for (auto& f : w.f) f.zCol = -1, f.z = VZ0 + w.height[f.y][f.x];
         vxFixAll(w);
     }
     for (auto& f : w.f) fireTrig(w, f, T_INIT, nullptr);   // «событие → эффект» (v21): в начале боя

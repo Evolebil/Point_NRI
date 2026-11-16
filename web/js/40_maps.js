@@ -6,7 +6,7 @@ let MAPS = {}; try { MAPS = JSON.parse(localStorage.getItem('dnd_maps') || '{}')
 let ME = null, meTool = 'wall', meCS = 20, mePainting = 0;
 const TOOLS = [['wall','Стена','#3b404d'],['pit','Ущелье','#07080c'],['water','Ручей','#2d6fa3'],['h','Высота земли (уровень)','#6f9a6f'],['ladder','Лестница','#c9a46a'],['deck','Настил / потолок (уровень)','#96703c'],['diff','Грязь','#56401e'],['climb','Укрытие','#7d7568'],['tree','Дерево','#2f6a33'],['doorC','Дверь (закрыта)','#6b4423'],['doorO','Дверь (открыта)','#a07040'],['strong','Крепкая стена','#17191f'],['z1','Лава','#e2572a'],['z2','Кислота','#7ccf2e'],['z3','Ядовитый дым','#7e8f57'],['z4','Ледяное поле','#9fd8ff'],['z5','Грозовое поле','#5868d8'],['z6','Некротический туман','#4b3a63'],['dark','Тьма','#1a1d3a'],['startA','Старт A','#2f7de1'],['startB','Старт B','#e0553f'],['erase','Ластик','#999']];
 const TOOL_GROUPS = [['Рельеф',['wall','pit','water','h','ladder','deck','diff']],['Объекты',['climb','tree','doorC','doorO','strong']],['Опасное',['z1','z2','z3','z4','z5','z6','dark']],['Старт и ластик',['startA','startB','erase']]];
-function meNew(aw, ah, theme = 0){ const L = {}; LAYERS.forEach(k => L[k] = new Uint8Array(aw * ah)); return {name: ME ? ME.name : 'Моя арена', aw, ah, theme, L, starts: [null, null]}; }
+function meNew(aw, ah, theme = 0){ const L = {}; LAYERS.forEach(k => L[k] = new Uint8Array(aw * ah)); return {name: ME ? ME.name : 'Моя арена', aw, ah, theme, L, starts: [null, null], vx: new Map()}; }
 // Высота, настил и дерево — в уровнях по 5 фт, символ клетки — цифра или буква (0–9, a–z = 10–35); карта с "hz":5.
 // Старые карты (уровни по 10 фт, дерево «1») переводятся при чтении: высота и настил ×2, дерево — 20 фт
 const HZ_LAYERS = ['height', 'deck', 'tree'];
@@ -17,12 +17,16 @@ function meFromJson(j, name){
     m.L[k][y * j.aw + x] = !old || !HZ_LAYERS.includes(k) ? v : (k === 'tree' ? (v ? 4 : 0) : 2 * v); } } });
   m.starts = [j.starts && j.starts[0] ? j.starts[0].slice() : null, j.starts && j.starts[1] ? j.starts[1].slice() : null];
   if (!(m.starts[0] && m.starts[1])) m.starts = [null, null];
+  // слой кубов (этап 4: пещеры и дома генератора для боя в 3D): [x, y, нижний куб, материалы] — хранится как есть
+  if (Array.isArray(j.vx)) for (const c of j.vx) if (Array.isArray(c) && c[0] >= 0 && c[1] >= 0 && c[0] < j.aw && c[1] < j.ah && typeof c[3] === 'string') m.vx.set(c[0] + ',' + c[1], [c[0], c[1], c[2], c[3]]);
   return m;
 }
 function meToJson(m = ME){
   const o = {aw: m.aw, ah: m.ah, theme: m.theme, hz: 5};
   LAYERS.forEach(k => { o[k] = []; for (let y = 0; y < m.ah; y++){ let r = ''; for (let x = 0; x < m.aw; x++) r += m.L[k][y * m.aw + x].toString(36); o[k].push(r); } });
   if (m.starts[0] && m.starts[1]) o.starts = m.starts;
+  const vx = [...(m.vx || new Map()).values()].filter(c => c[0] < m.aw && c[1] < m.ah).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+  if (vx.length) o.vx = vx;
   return o;
 }
 function meMsg(t, cls = ''){ $('meMsg').innerHTML = t ? `<div class="${cls || 'hint'}">${esc(t)}</div>` : ''; }
@@ -122,6 +126,7 @@ function mePaint(e, erase){
     const x = cx - off + dx, y = cy - off + dy; if (x < 0 || y < 0 || x >= m.aw || y >= m.ah) continue;
     const i = y * m.aw + x, t = meTool, L = m.L;
     if (t === 'startA' || t === 'startB'){ if (!erase) { m.starts[t === 'startA' ? 0 : 1] = [x, y]; L.wall[i] = 0; L.pit[i] = 0; } else if (m.starts[t === 'startA' ? 0 : 1]) m.starts[t === 'startA' ? 0 : 1] = null; continue; }
+    if (m.vx) m.vx.delete(x + ',' + y);   // правка клетки снимает её столбец слоя кубов: дальше клетка — по слоям
     if (t === 'erase'){ LAYERS.forEach(k => L[k][i] = 0); m.starts = m.starts.map(s => s && s[0] === x && s[1] === y ? null : s); continue; }
     if (/^z\d$/.test(t)){ if (erase) L.haz[i] = 0; else if (!L.wall[i] && !L.pit[i]) L.haz[i] = +t[1]; continue; }
     const lv = +$('meLevel').value || 0;
@@ -181,6 +186,7 @@ $('meResize').onclick = async () => {
   const n = meNew(aw, ah, ME.theme); n.name = ME.name;
   for (let y = 0; y < Math.min(ah, ME.ah); y++) for (let x = 0; x < Math.min(aw, ME.aw); x++) LAYERS.forEach(k => n.L[k][y * aw + x] = ME.L[k][y * ME.aw + x]);
   n.starts = ME.starts.map(s => s && s[0] < aw && s[1] < ah ? s : null); if (!(n.starts[0] && n.starts[1])) n.starts = [null, null];
+  (ME.vx || new Map()).forEach((c, k) => { if (c[0] < aw && c[1] < ah) n.vx.set(k, c); });
   ME = n; meDraw(); meMsg('Размер изменён.');
 };
 $('meClear').onclick = async () => { if (!(await confirmBox('Очистить карту?', 'Очистить', true))) return;const n = meNew(ME.aw, ME.ah, ME.theme); n.name = ME.name; ME = n; meDraw(); };

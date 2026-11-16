@@ -59,6 +59,34 @@ inline double fbm(uint64_t s, double x, double y, int oct) {
     return sum / norm;
 }
 
+// объёмный градиентный шум (пещеры, этап 4): градиенты — 12 рёбер куба (целые, без таблицы); значения примерно в [-1, 1]
+inline double noise3(uint64_t s, double x, double y, double z) {
+    static const signed char G[12][3] = {{1, 1, 0}, {-1, 1, 0}, {1, -1, 0}, {-1, -1, 0}, {1, 0, 1}, {-1, 0, 1},
+                                         {1, 0, -1}, {-1, 0, -1}, {0, 1, 1}, {0, -1, 1}, {0, 1, -1}, {0, -1, -1}};
+    const int ix = (int)std::floor(x), iy = (int)std::floor(y), iz = (int)std::floor(z);
+    const double fx = x - ix, fy = y - iy, fz = z - iz;
+    auto corner = [&](int cx, int cy, int cz) {
+        const signed char* g = G[mixh(hash3(s, ix + cx, iy + cy), (uint64_t)(uint32_t)(iz + cz)) % 12];
+        return g[0] * (fx - cx) + g[1] * (fy - cy) + g[2] * (fz - cz);
+    };
+    auto fade = [](double t) { return t * t * t * (t * (t * 6 - 15) + 10); };
+    const double u = fade(fx), v = fade(fy), w = fade(fz);
+    auto lerp = [](double a, double b, double t) { return a + t * (b - a); };
+    const double a = lerp(lerp(corner(0, 0, 0), corner(1, 0, 0), u), lerp(corner(0, 1, 0), corner(1, 1, 0), u), v);
+    const double b = lerp(lerp(corner(0, 0, 1), corner(1, 0, 1), u), lerp(corner(0, 1, 1), corner(1, 1, 1), u), v);
+    return lerp(a, b, w);
+}
+// Пещеры (этап 4, решение владельца 2026-11-16): извилистые ходы — где два объёмных шума оба близки к нулю (пересечение двух
+// поверхностей — нить), залы — где третий, крупный шум выше порога (ход там шире и выше). Координаты мировые (клетка; куб по
+// высоте), поэтому ходы соседних участков сходятся на границе. Здесь только шум: где хватает земли над ходом — решает арена
+constexpr double CAVE_T = 0.10, CAVE_HALL = 0.30, CAVE_HK = 0.6;   // толщина хода и залы (подобрано замером, T230)
+inline bool caveAir(uint64_t s, int x, int y, int z) {
+    const double hall = noise3(s ^ 0x4841, x / 20.0, y / 20.0, z / 8.0);
+    const double t = hall > CAVE_HALL ? CAVE_T + (hall - CAVE_HALL) * CAVE_HK : CAVE_T;
+    if (std::abs(noise3(s ^ 0x4341, x / 18.0, y / 18.0, z / 7.0)) >= t) return false;
+    return std::abs(noise3(s ^ 0x4342, x / 18.0, y / 18.0, z / 7.0)) < t;
+}
+
 // биомы: температура (холодно, умеренно, жарко) × влажность (сухо, средне, сыро)
 enum Biome { B_TUNDRA, B_TAIGA, B_GLACIER, B_STEPPE, B_FOREST, B_SWAMP, B_DESERT, B_SAVANNA, B_JUNGLE, B_N };
 inline const char* biomeName(int b) {
@@ -261,6 +289,10 @@ struct Cell {
     unsigned char height = 0, haz = 0, deck = 0, door = 0;   // door: 0 нет, 1 закрыта, 2 открыта
     unsigned char biome = 0;
     unsigned char treeH = 0;   // высота дерева в уровнях по 5 фт (treeHeight), 0 — нет дерева
+    // дом поселения (этап 4, слой кубов): место клетки в доме hx, hy (−1 — не дом), размер hw × hh, этажей, зал (потолок выше),
+    // сторона двери (0 — север, 1 — юг, 2 — запад, 3 — восток), деревянный (деревня), уровень площадки поселения (по 10 фт)
+    signed char hx = -1, hy = -1;
+    unsigned char hw = 0, hh = 0, floors = 0, hall = 0, hdoor = 0, wood = 0, hlv = 0;
 };
 
 inline double nearSeg(const Plan& p, const std::vector<Seg>& v, const std::vector<std::vector<int>>& B, int x, int y, int* wOut = nullptr) {
@@ -393,8 +425,15 @@ inline bool townCell(const Plan& p, const Settle& t, int x, int y, Cell& c) {
         return true;
     }
     const bool border = qx == 0 || qy == 0 || qx == w - 1 || qy == h - 1;
+    const int side = (int)(hash01(s, bx, by, 73) * 4);   // сторона двери
+    const double v = hash01(s, bx, by, 83);
+    const bool hall = v < (t.kind == 2 ? 0.35 : 0.12), twoFloors = !hall && v < (t.kind == 0 ? 0.3 : 0.7);
+    // для слоя кубов: в деревне 1–2 этажа, в городе 2–3 (решение владельца 2026-11-16), зал — один высокий
+    c.hx = (signed char)qx; c.hy = (signed char)qy; c.hw = (unsigned char)w; c.hh = (unsigned char)h;
+    c.floors = (unsigned char)(hall ? 1 : (t.kind == 0 ? 1 : 2) + twoFloors);
+    c.hall = hall; c.hdoor = (unsigned char)side; c.wood = t.kind == 0; c.hlv = (unsigned char)lv;
     if (border) {
-        const int side = (int)(hash01(s, bx, by, 73) * 4), mid = side < 2 ? w / 2 : h / 2;   // дверь посередине стороны
+        const int mid = side < 2 ? w / 2 : h / 2;   // дверь посередине стороны
         const bool door = (side == 0 && qy == 0 && qx == mid) || (side == 1 && qy == h - 1 && qx == mid) || (side == 2 && qx == 0 && qy == mid) ||
                           (side == 3 && qx == w - 1 && qy == mid);
         if (door) c.door = hash01(s, bx, by, 79) < 0.65 ? 1 : 2;
@@ -404,8 +443,6 @@ inline bool townCell(const Plan& p, const Settle& t, int x, int y, Cell& c) {
         }
         return true;
     }
-    const double v = hash01(s, bx, by, 83);
-    const bool hall = v < (t.kind == 2 ? 0.35 : 0.12), twoFloors = !hall && v < (t.kind == 0 ? 0.3 : 0.7);
     if (hall) c.deck = (unsigned char)std::min(9, lv + 2);   // зал: потолок на 20 фт
     else if (twoFloors) {
         c.deck = (unsigned char)std::min(9, lv + 1);   // второй этаж (пол — потолок первого) и лестница в углу
@@ -519,6 +556,8 @@ struct RegionDesc {
     std::string settle;           // вид поселения: хутор, деревня, село, город, крепость (замок), большой город, великий город
     int pop = 0;                  // жителей (размер поселения; 0 — по виду)
     std::string seed = "1";
+    int gx = -1, gy = -1;         // место клетки в регионе (по 200 клеток сцены; −1 — не задано): пещеры сходятся по краям
+    std::string wseed;            // зерно мира региона (общее для пещер всех участков)
 };
 inline uint64_t seedOfText(const std::string& t) {   // FNV-1a: зерно клетки из строки
     uint64_t h = 1469598103934665603ULL;

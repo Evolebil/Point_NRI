@@ -8,15 +8,15 @@ const ctx = vm.createContext({
   location: {search: ''}, URLSearchParams, $: () => ({}), toast: () => {}, console,
   hash: () => .5, lv36: (L, x, y) => { const c = L && L[y] && L[y][x]; return c ? parseInt(c, 36) || 0 : 0; }, FR: [], curIdx: 0, prevIdx: 0, G: {}, cam: {}, MAP: null, AW: 1, AH: 1
 });
-vm.runInContext(src + '\nglobalThis.T = {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx, r3Area, r3TopZ};', ctx);
-const {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx, r3Area, r3TopZ} = ctx.T;
+vm.runInContext(src + '\nglobalThis.T = {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx, r3Area, r3TopZ, r3VxMap};', ctx);
+const {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx, r3Area, r3TopZ, r3VxMap} = ctx.T;
 
 // карта 3×1 из слоёв: каждый слой — одна строка
-function build(layers, dyn = []){
-  const m = {aw: 3, ah: 1, theme: 0};
+function build(layers, dyn = [], extra = {}){
+  const m = Object.assign({aw: 3, ah: 1, theme: 0}, extra);
   for (const k of ['wall', 'pit', 'water', 'diff', 'climb', 'dark', 'height', 'tree', 'haz', 'ladder', 'deck', 'door', 'strong']) m[k] = [layers[k] || '000'];
   ctx.MAP = m; ctx.AW = 3; ctx.AH = 1;
-  R3.H = 32; R3.vox = new Uint8Array(3 * 32); R3.dynCells = r3DynMap(dyn);
+  R3.H = 32; R3.vox = new Uint8Array(3 * 32); R3.dynCells = r3DynMap(dyn); R3.vxo = r3VxMap();
   for (let x = 0; x < 3; x++) r3Column(x, 0);
 }
 const at = (x, z) => R3.vox[vIdx(x, 0, z)];
@@ -84,6 +84,17 @@ check('луч над стеной (выше 30 фт) проходит мимо',
   const cone = r3Area(2, 15, me, 5, 6, G), line = r3Area(3, 30, me, 5, 6, G);
   check('конус и линия упираются в стену', cone(4, 6, G) && !cone(4, 10, G) && line(5, 6, G) && !line(8, 6, G));
 }
+
+// Слой кубов карты (этап 4, World::vxo): в бою по кубам — поверх слоёв, как voxColumn в движке; в бою по слоям — не виден
+build({height: '600', wall: '010'}, [], {vox: 1, vx: [[0, 0, 2, '00.0'], [1, 0, VZ0, '5a0'], [2, 0, VZ0, 'ii1z']]});
+check('слой кубов: пещера в земле (воздух), «.» — как по слоям', at(0, 2) === 0 && at(0, 3) === 0 && at(0, 4) === VM.DIRT && at(0, 5) === 0 && at(0, VZ0 + 5) === VM.GRASS);
+check('слой кубов: стена дома — камень, крыша — доски, выше — воздух вместо стены 30 фт', at(1, VZ0) === VM.STONE && at(1, VZ0 + 1) === VM.PLANK && at(1, VZ0 + 2) === 0 && at(1, VZ0 + 5) === VM.STONE);
+check('слой кубов: лестница — свой материал, дно мира и чужой символ — не ставятся', at(2, VZ0) === VM.LADDV && at(2, VZ0 + 1) === VM.LADDV && at(2, VZ0 + 2) === 0 && at(2, VZ0 + 3) === 0);
+ctx.G.mode = 'move';
+let hl = r3Voxel({x: 2.5, y: VZ0 + 1.5, z: 3.5}, {x: 0, y: 0, z: -1}, 1e9);
+check('луч проходит сквозь лестницу (в режиме хода)', hl === null || hl.y !== 0 || hl.x !== 2, JSON.stringify(hl));
+build({height: '600'}, [], {vx: [[0, 0, 2, '00']]});
+check('бой по слоям: слой кубов не виден', at(0, 2) === VM.DIRT && at(0, 3) === VM.DIRT);
 
 console.log(`3D-вид: PASS ${pass}, FAIL ${fail}`);
 process.exit(fail ? 1 : 0);
