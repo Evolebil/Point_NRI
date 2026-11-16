@@ -559,7 +559,7 @@ function r3Role(fr, k, f, t, moved){
   const live = stepT0 > -1e8 && t < 1;
   if (live && moved) return Math.hypot(moved[0], moved[1]) > 3 ? 'run' : 'walk';
   if (live && fr.actor === k && /^(attack|ability|alt|legendary)/.test(fr.act || '')) return 'atk';
-  const a = FR[prevIdx] && FR[prevIdx].f[k]; if (live && a && f.hp < a.hp) return 'hit';
+  const a = FR[prevIdx] && FR[prevIdx].f[k]; if (live && a && !a.hid && f.hp < a.hp) return 'hit';
   return 'idle';
 }
 // свет бойцов (lt — радиус в футах, режим кубов) и тьма: боец под крышей без света рядом — темнее, как рельеф
@@ -577,6 +577,7 @@ function r3Lights(list){
 R3.syncFighters = function(fr, t, dt){
   const out = [], tiny = r3TinySlots(fr), T = THREE;
   R3.selfObj = null;
+  const meF = fr.f[G.req ? G.req.me : G.me], myTeam = meF ? meF.team : -1;
   fr.f.forEach((f, k) => {
     let m = R3.fm[k];
     if (!m){
@@ -597,14 +598,15 @@ R3.syncFighters = function(fr, t, dt){
       else { const e = r3Model(key); if (e.state === 'ok'){ m.mi = r3Inst(e, key, h, n); R3.scene.add(m.mi.outer); } if (e.state !== 'load') m.key = key; }   // загружается — капсула, попробуем в следующем кадре
     }
     const shown = m.mi || m.tok;
-    m.body.visible = m.shadow.visible = m.ghost.visible = !hide; m.mat.visible = !shown;   // капсула прозрачна для глаза, но ловит луч
+    m.body.visible = m.shadow.visible = !hide; m.mat.visible = !shown;   // капсула прозрачна для глаза, но ловит луч
+    m.ghost.visible = !hide && f.team === myTeam;   // силуэт сквозь стены — только у своей команды: чужих за стеной не видно
     if (m.mi) m.mi.outer.visible = !hide; if (m.tok) m.tok.visible = !hide;
     if (hide){   // свой боец не виден (1-е лицо, скрыт, пал) — но камера 1-го и 3-го лица стоит при нём, а не у бойца 0
-      if (k === (G.req ? G.req.me : G.me)){ const p = posAt(k, t), a = FR[prevIdx].f[k]; R3.selfObj = {k, f, X: p.x + n / 2, Y: a ? lerp(r3Z(a), r3Z(f), t) : r3Z(f), Z: p.y + n / 2, h, n}; }
+      if (k === (G.req ? G.req.me : G.me) && !f.hid){ const p = posAt(k, t), a = FR[prevIdx].f[k]; R3.selfObj = {k, f, X: p.x + n / 2, Y: a && !a.hid ? lerp(r3Z(a), r3Z(f), t) : r3Z(f), Z: p.y + n / 2, h, n}; }
       return;
     }
     const c = r3Colors(f); if (c !== m.col){ m.mat.color.set(c); m.gmat.color.set(c); m.col = c; if (m.tok) m.tok.userData.dim = -1; }
-    const p = posAt(k, t), a = FR[prevIdx].f[k], tele = FR[curIdx].act === 'teleport' && FR[curIdx].actor === k;
+    const p = posAt(k, t), a0 = FR[prevIdx].f[k], a = a0 && !a0.hid ? a0 : null, tele = FR[curIdx].act === 'teleport' && FR[curIdx].actor === k;   // из тумана — без скольжения
     const z = a && !tele ? lerp(r3Z(a), r3Z(f), t) : r3Z(f);
     const ts = tiny[k], X = p.x + n / 2 + (ts ? ts[0] : 0), Z = p.y + n / 2 + (ts ? ts[1] : 0);
     const A = fr.actor, act = k === A && stepT0 > -1e8 && t < 1;
@@ -940,7 +942,7 @@ R3.draw = function(now, t, tt){
   R3.ren.render(R3.scene, R3.camera);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
   const A = fr.actor;
-  if (A >= 0 && FR[prevIdx].f[A] && stepT0 > -1e8){   // след движения ходящего
+  if (A >= 0 && FR[prevIdx].f[A] && !FR[prevIdx].f[A].hid && !fr.f[A].hid && stepT0 > -1e8){   // след движения ходящего (не у скрытого)
     const p0 = FR[prevIdx].f[A], p1 = fr.f[A], n = p1.n || 1;
     if (p0.x !== p1.x || p0.y !== p1.y){ const a = r3P(p0.x + n / 2, r3Z(p0) + .05, p0.y + n / 2), b = r3P(p1.x + n / 2, r3Z(p1) + .05, p1.y + n / 2); if (a.ok && b.ok){ ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.setLineDash([5, 6]); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore(); } }
   }

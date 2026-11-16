@@ -459,14 +459,15 @@ const FLED_TXT = ['', 'вышел за край арены', 'оторвался
 const logRows = [];
 function frameLog(i){
   const fr = FR[i], pv = i > 0 ? FR[i-1] : null;
-  if (!pv) return {round:0, cls:'', lines:[`Расстановка. Дистанция между боссами ${distFt(fr.f[0], fr.f[1])} фт.`], evs:[]};
+  if (!pv) return {round:0, cls:'', lines:[fr.f[0].hid || fr.f[1].hid ? 'Расстановка. Противник не виден.' : `Расстановка. Дистанция между боссами ${distFt(fr.f[0], fr.f[1])} фт.`], evs:[]};
   const lines = [], evs = [], A = fr.actor, f = fr.f, p = pv.f;
-  // туман войны в живом бою: что делает невидимый боец — не видно (атака его выдаёт: тогда он уже не скрыт)
-  const unseen = k => typeof G !== 'undefined' && !G.over && f[k] && f[k].hid;
+  // туман войны в живом бою: что делает невидимый боец — не видно (атака его выдаёт: тогда он уже не скрыт); сервер его данных
+  // не присылает (пустой боец hid) — и после боя тоже
+  const unseen = k => typeof G !== 'undefined' && f[k] && f[k].hid;
   if (A >= 0 && f[A] && unseen(A)) lines.push('<span class="small">кто-то действует вне видимости</span>');
   else if (A >= 0 && f[A]){
     const me = nameOf(A, f), t = fr.target >= 0 ? nameOf(fr.target, f) : '';
-    const moved = p[A] ? Math.max(Math.abs(f[A].x - p[A].x), Math.abs(f[A].y - p[A].y)) * 5 : 0;
+    const moved = p[A] && !p[A].hid ? Math.max(Math.abs(f[A].x - p[A].x), Math.abs(f[A].y - p[A].y)) * 5 : 0;
     const sp = specOf(A, fr);
     let what = '';
     switch (fr.act){
@@ -491,7 +492,7 @@ function frameLog(i){
   }
   for (let k = 0; k < f.length; k++){
     const a = f[k], b = p[k];
-    if (unseen(k)) continue;
+    if (unseen(k) || (b && b.hid)) continue;   // показался из тумана: прежних ХП и состояний игрок не знал
     if (!b){ evs.push(`<span class="ev good">${nameOf(k, f)} появляется</span>`); continue; }
     const dh = a.hp + a.temp - (b.hp + b.temp);
     if (b.hp > 0 && a.hp <= 0) evs.push(`<span class="ev bad"><span class="dmg">−${Math.max(0, b.hp + b.temp - a.temp)}</span> ☠ ${nameOf(k, f)} повержен</span>`);
@@ -699,7 +700,9 @@ function spawnFx(i){
   const fr = FR[i], pv = FR[i-1], now = performance.now(), A = fr.actor, dur = ANIM_MS / speed;
   fr.f.forEach((f, k) => {
     const b = pv.f[k];
+    if (f.hid) return;   // туман войны: не видно — ни цифр, ни состояний
     if (!b){ fxs.push({t0: now, dur: 700, kind:'spawn', k}); return; }
+    if (b.hid) return;   // показался из тумана: прежних ХП игрок не знал
     const dh = f.hp + f.temp - (b.hp + b.temp);
     if (dh !== 0) fxs.push({t0: now + (A >= 0 && A !== k ? dur * .55 : dur * .3), dur: 1200, kind:'num', k, v: dh});
     f.cond.filter(c => !b.cond.includes(c)).forEach((c, n) => fxs.push({t0: now + dur * .6 + n * 150, dur: 1400, kind:'cond', k, text: c}));
@@ -729,7 +732,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 function posAt(k, t){
   const b = FR[curIdx].f[k], a = FR[prevIdx].f[k];
   if (!b) return null;
-  const useA = a && !(FR[curIdx].act === 'teleport' && FR[curIdx].actor === k) ? a : b;
+  const useA = a && !a.hid && !(FR[curIdx].act === 'teleport' && FR[curIdx].actor === k) ? a : b;
   return {x: lerp(useA.x, b.x, t), y: lerp(useA.y, b.y, t)};
 }
 const TOKEN_PORTRAITS = new Map();
@@ -851,12 +854,12 @@ function render(now){
     const a = posAt(0, t), b = posAt(1, t);
     if (a && b){ ctx.save(); ctx.strokeStyle = 'rgba(242,193,78,.9)'; ctx.setLineDash([10,7]); ctx.lineDashOffset = -now / 35; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(PX(a.x + .5), PY(a.y + .5)); ctx.lineTo(PX(b.x + .5), PY(b.y + .5)); ctx.stroke(); ctx.restore(); }
   }
-  if (A >= 0 && FR[prevIdx].f[A] && stepT0 > -1e8){
+  if (A >= 0 && FR[prevIdx].f[A] && !FR[prevIdx].f[A].hid && !fr.f[A].hid && stepT0 > -1e8){   // след хода (не у скрытого)
     const p0 = FR[prevIdx].f[A], p1 = fr.f[A];
     if (p0.x !== p1.x || p0.y !== p1.y){ ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.setLineDash([5,6]); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(PX(p0.x + .5), PY(p0.y + .5)); ctx.lineTo(PX(p1.x + .5), PY(p1.y + .5)); ctx.stroke(); ctx.restore(); }
   }
   [0,1].forEach(k => {
-    const f = fr.f[k]; if (f.hp <= 0 || !(BOSS[k].auraRad > 0)) return;
+    const f = fr.f[k]; if (f.hp <= 0 || f.hid || !(BOSS[k].auraRad > 0)) return;
     const p = posAt(k, t), r = BOSS[k].auraRad / 5 * cell;
     ctx.beginPath(); ctx.arc(PX(p.x + .5), PY(p.y + .5), r, 0, 7); ctx.fillStyle = k ? 'rgba(255,100,70,.12)' : 'rgba(90,160,255,.12)'; ctx.fill();
     ctx.strokeStyle = k ? 'rgba(255,120,90,.55)' : 'rgba(100,170,255,.55)'; ctx.lineWidth = 2; ctx.stroke();

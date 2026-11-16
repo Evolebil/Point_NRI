@@ -207,6 +207,76 @@ def fog_frames(frames, team):
     return out
 
 
+# Туман войны в данных (2026-11-16): чего игрок не видит, того нет и в ответе сервера — иначе всё читается в сетевых
+# ответах браузера. Скрытый (hid) боец — пустой: место в списке, сторона и команда, без координат, ХП, КД, состояний.
+HID_KEEP = ("kind", "team", "lead", "ld")
+HID_BLANK = {"hid": 1, "x": -1, "y": -1, "hp": 1, "maxHp": 1, "ac": 0, "temp": 0, "exh": 0, "dash": 0, "dashLim": 0, "spd": 0, "fled": 0, "cond": []}
+# события о скрытом бойце (кроме броска атаки по видимой цели) не уходят
+EV_WHO = ("who", "tgt", "prey")
+
+
+def _ev_hidden(e, hidden):
+    if not isinstance(e, dict):
+        return False
+    if e.get("k") == "roll":   # бросок атаки виден, если видна цель (атакующий себя выдаёт)
+        return e.get("tgt") in hidden
+    return any(e.get(k) in hidden for k in EV_WHO)
+
+
+def mask_hidden(frames, pend):
+    """Кадры для одного зрителя: скрытые бойцы пустые; ход скрытого — без действия, цели и клетки; его события убраны;
+    кубы, вырытые скрытым копателем, придержаны в pend (боец -> события vox), пока он не покажется."""
+    out = []
+    for fr in frames:
+        fs = fr.get("f") if isinstance(fr, dict) else None
+        if not isinstance(fs, list):
+            out.append(fr)
+            continue
+        hidden = {i for i, f in enumerate(fs) if isinstance(f, dict) and f.get("hid")}
+        if not hidden and not pend:
+            out.append(fr)
+            continue
+        fr = dict(fr)
+        fr["f"] = [dict(HID_BLANK, **{k: f[k] for k in HID_KEEP if k in f}) if i in hidden else f for i, f in enumerate(fs)]
+        ev = [e for e in (fr.get("ev") or [])]
+        a = fr.get("actor", -1)
+        if a in hidden:
+            pend.setdefault(a, []).extend(e for e in ev if isinstance(e, dict) and e.get("k") == "vox")
+            ev = [e for e in ev if not (isinstance(e, dict) and e.get("k") == "vox")]
+            fr.update(act="none", target=-1, abil=-1)
+            fr.pop("cell", None)
+            fr.pop("legendary", None)
+        ev = [e for e in ev if not _ev_hidden(e, hidden)]
+        for k in [k for k in pend if k not in hidden]:   # копатель показался — вырытое им видно
+            ev = pend.pop(k) + ev
+        fr["ev"] = ev
+        out.append(fr)
+    return out
+
+
+BOSS_SECRET = ("budget", "stats", "ac", "hp", "int", "main", "speed", "fly", "total", "items", "text")
+
+
+def mask_init(init, my_teams):
+    """Сборка противника — без чисел (ХП, КД, характеристики, покупки): в бою это узнают только по ходу боя."""
+    if not isinstance(init, dict) or not isinstance(init.get("bosses"), list):
+        return init
+    teams = init.get("team") if isinstance(init.get("team"), list) else None
+    def strip(b):
+        if not isinstance(b, dict):
+            return b
+        b = {k: v for k, v in b.items() if k not in BOSS_SECRET}
+        for k in ("minion", "form"):
+            if isinstance(b.get(k), dict):
+                b[k] = strip(b[k])
+        return b
+    bosses = []
+    for i, b in enumerate(init["bosses"]):
+        team = teams[i] if teams and i < len(teams) else i
+        bosses.append(b if team in my_teams else strip(b))
+    return dict(init, bosses=bosses)
+
+
 class Room:
     def __init__(self, code, host):
         self.code, self.host = code, host
@@ -238,11 +308,12 @@ class Room:
             for s, k in self.seats.items():
                 if k == self.pending["seat"]:
                     who = next((m["name"] for m in self.members if m["sid"] == s), "")
+        team = next((m["team"] for m in self.members if m["sid"] == sid), None)   # туман войны — по команде зрителя (с начала боя: придержанное копание)
         return {"type": "room", "code": self.code, "host": self.host == sid, "status": self.status, "err": self.err,
                 "members": [{"name": m["name"], "team": m["team"], "bot": m["bot"], "brain": m.get("brain", "rules"), "npc": bool(m.get("npc")), "me": m["sid"] == sid, "host": m["sid"] == self.host, "selected": bool(m.get("char")), "ready": bool(m.get("ready")) or m["bot"] is not None,
                              "i": i} for i, m in enumerate(self.members)],
-                "seat": self.seats.get(sid, -1), "init": self.init if self.init and since == 0 else None,
-                "frames": fog_frames(self.frames[since:], next((m["team"] for m in self.members if m["sid"] == sid), None)), "nframes": len(self.frames), "req": mine["req"] if mine else None,
+                "seat": self.seats.get(sid, -1), "init": mask_init(self.init, {team}) if self.init and since == 0 else None,
+                "frames": mask_hidden(fog_frames(self.frames, team), {})[since:], "nframes": len(self.frames), "req": mine["req"] if mine else None,
                 "waiting": who, "end": self.end, "opts": self.opts, "ver": self.ver,
                 "ptrs": [{"name": m["name"], "team": m["team"], "x": m["ptr"][0], "y": m["ptr"][1]} for m in self.members
                          if m.get("ptr") and m["sid"] != sid and time.time() - m["ptr"][2] < PTR_TTL]}
@@ -871,6 +942,7 @@ class Handler(BaseHTTPRequestHandler):
                             if 0 <= own < len(bosses):
                                 bosses[own]["portrait"] = str(char["portrait"])[:300]
                         s["in_game"] = out.get("type") == "turn"
+                        s["pend"], s["me"] = {}, int(msg.get("side", 0) or 0)
                     elif not s["in_game"]:
                         out = {"type": "error", "err": "игра не идёт"}
                     else:
@@ -882,6 +954,10 @@ class Handler(BaseHTTPRequestHandler):
                             raise Refuse("Бой прерван: движок перезапущен, начните новый бой.") from e
                         # ответ-ошибка (не тот ход) не обрывает бой — игрок просто ходит заново
                         s["in_game"] = out.get("type") in ("turn", "error")
+                    if isinstance(out.get("init"), dict):   # сборка противника — без чисел
+                        out["init"] = mask_init(out["init"], {int(out["init"].get("me", s.get("me", 0)))})
+                    if isinstance(out.get("frames"), list):   # туман войны в данных: невидимое игроку не уходит в браузер
+                        out["frames"] = mask_hidden(out["frames"], s.setdefault("pend", {}))
             elif cmd in ("catalog", "price", "preview", "genmap", "checkmap", "worldmap", "regionmap"):
                 with QUERY.lock:
                     out = QUERY.talk(msg)

@@ -158,8 +158,8 @@ function allyAt(c){
 function enemyAt(c){
   const fr = FR[curIdx]; let best = null, bd = 1e9;
   const gap = (a, n, b) => Math.max(0, b - (a + n - 1), a - b);   // клетка — до квадрата крупного (n×n от x, y)
-  fr.f.forEach((f, k) => { if (f.hp <= 0 || f.team === fr.f[G.me].team || f.fled) return; const n = f.n || 1, d = Math.max(gap(f.x, n, c.x), gap(f.y, n, c.y)); if (d <= 0 && d < bd){ bd = d; best = k; } });
-  if (best == null) fr.f.forEach((f, k) => { if (f.hp <= 0 || f.team === fr.f[G.me].team || f.fled) return; const n = f.n || 1, d = Math.hypot(f.x + (n - 1) / 2 - c.x, f.y + (n - 1) / 2 - c.y) - (n - 1) / 2; if (d < 1.6 && d < bd){ bd = d; best = k; } });
+  fr.f.forEach((f, k) => { if (f.hp <= 0 || f.hid || f.team === fr.f[G.me].team || f.fled) return; const n = f.n || 1, d = Math.max(gap(f.x, n, c.x), gap(f.y, n, c.y)); if (d <= 0 && d < bd){ bd = d; best = k; } });
+  if (best == null) fr.f.forEach((f, k) => { if (f.hp <= 0 || f.hid || f.team === fr.f[G.me].team || f.fled) return; const n = f.n || 1, d = Math.hypot(f.x + (n - 1) / 2 - c.x, f.y + (n - 1) / 2 - c.y) - (n - 1) / 2; if (d < 1.6 && d < bd){ bd = d; best = k; } });
   return best;
 }
 cv.addEventListener('click', e => {

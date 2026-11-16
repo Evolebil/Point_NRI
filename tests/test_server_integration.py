@@ -331,5 +331,82 @@ class TestRoomWithEngine(unittest.TestCase):
                 self.assertEqual(bool(f.get("hid")), f["team"] != team[sid], (sid, f))   # свой виден, чужой во тьме — нет
 
 
+class TestFogInData(unittest.TestCase):
+    """Туман войны в данных (2026-11-16): чего игрок не видит, того нет и в ответе сервера."""
+
+    def test_hidden_fighter_is_blank(self):
+        frames = [{"actor": 1, "act": "attack-melee", "target": 0, "abil": -1, "cell": [3, 4], "ev": [],
+                   "f": [{"x": 1, "y": 1, "hp": 50, "team": 0, "kind": 0, "cond": []},
+                         {"x": 9, "y": 7, "hp": 133, "maxHp": 133, "ac": 23, "team": 1, "kind": 1, "cond": ["невидим"], "ct": 4, "lt": 30, "z": 5, "hid": 1}]}]
+        out = ps.mask_hidden(frames, {})[0]
+        h = out["f"][1]
+        self.assertEqual((h["hid"], h["team"], h["kind"], h["x"], h["y"], h["hp"], h["cond"]), (1, 1, 1, -1, -1, 1, []))
+        for k in ("ct", "lt", "z", "ac"):
+            self.assertTrue(k not in h or h[k] == 0, k)
+        self.assertEqual((out["act"], out["target"], out["abil"]), ("none", -1, -1))   # ход скрытого — без действия и цели
+        self.assertNotIn("cell", out)
+        self.assertEqual(out["f"][0], frames[0]["f"][0])                              # видимый — как есть
+        self.assertEqual(frames[0]["f"][1]["hp"], 133)                                # исходный кадр не испорчен
+
+    def test_events_about_hidden_dropped(self):
+        ev = [{"k": "save", "who": 1}, {"k": "fall", "who": 1, "dmg": 3}, {"k": "roll", "who": 1, "tgt": 0, "d20": 12},
+              {"k": "roll", "who": 0, "tgt": 1, "d20": 5}, {"k": "order", "who": 2, "tgt": 1}, {"k": "door", "x": 1, "y": 2}]
+        out = ps.mask_hidden([{"actor": 0, "ev": ev, "f": [{"team": 0}, {"team": 1, "hid": 1}, {"team": 1}]}], {})[0]
+        kinds = [(e["k"], e.get("who")) for e in out["ev"]]
+        self.assertEqual(kinds, [("roll", 1), ("door", None)])   # остался бросок по видимой цели и дверь
+
+    def test_digging_held_until_seen(self):
+        dig = {"k": "vox", "x": 4, "y": 4, "z": 2, "m": 0}
+        pend = {}
+        f_hid = [{"team": 0}, {"team": 1, "hid": 1}]
+        a = ps.mask_hidden([{"actor": 1, "ev": [dig], "f": f_hid}], pend)[0]
+        b = ps.mask_hidden([{"actor": 0, "ev": [], "f": f_hid}], pend)[0]
+        c = ps.mask_hidden([{"actor": 0, "ev": [], "f": [{"team": 0}, {"team": 1}]}], pend)[0]
+        self.assertEqual((a["ev"], b["ev"], c["ev"], pend), ([], [], [dig], {}))   # ход копателя — когда он показался
+
+    def test_enemy_build_without_numbers(self):
+        boss = {"title": "Враг", "hp": 133, "ac": 23, "stats": [10] * 6, "items": [{"cost": 5}], "text": "…", "abil": [{"title": "Удар"}], "auraRad": 0,
+                "minion": {"title": "Приспешник", "hp": 20, "abil": []}}
+        init = ps.mask_init({"me": 0, "bosses": [dict(boss, title="Я"), boss]}, {0})
+        me, foe = init["bosses"]
+        self.assertEqual(me["hp"], 133)
+        for k in ("hp", "ac", "stats", "items", "text"):
+            self.assertNotIn(k, foe)
+        self.assertNotIn("hp", foe["minion"])
+        self.assertEqual((foe["title"], foe["abil"]), ("Враг", [{"title": "Удар"}]))   # имя и способности — для журнала
+
+    @need_engine
+    def test_solo_dark_fight_sends_no_hidden_data(self):
+        """Настоящий бой во тьме через сервер: у скрытых бойцов в ответах нет ни координат, ни ХП; сборка врага — без чисел."""
+        ps.SOLO.pop("it-fog", None)
+        mp = {"aw": 20, "ah": 14, "dark": ["1" * 20] * 14}
+        srv = ps.ThreadingHTTPServer(("127.0.0.1", 0), ps.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            def api(msg):
+                req = urllib.request.Request("http://127.0.0.1:%d/api" % srv.server_address[1], data=json.dumps(msg, ensure_ascii=False).encode(), headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    return json.loads(r.read())
+            out = api({"cmd": "start", "sid": "it-fog", "char": KNIGHT, "seed": 3, "map": mp, "opp": {"mode": "generator"}})
+            foe = out["init"]["bosses"][1 - out["init"]["me"]]
+            self.assertNotIn("hp", foe)
+            self.assertNotIn("items", foe)
+            hidden = 0
+            for _ in range(6):
+                for fr in out.get("frames", []):
+                    for f in fr["f"]:
+                        if f.get("hid"):
+                            hidden += 1
+                            self.assertEqual((f["x"], f["y"], f["hp"], f["cond"]), (-1, -1, 1, []), f)
+                if out["type"] != "turn":
+                    break
+                out = api({"cmd": "step", "sid": "it-fog", "c": "end"})
+            self.assertGreater(hidden, 0, "во тьме враг должен быть скрыт хоть в одном кадре")
+        finally:
+            srv.shutdown()
+            if "it-fog" in ps.SOLO:
+                ps.SOLO.pop("it-fog")["eng"].kill()
+
+
 if __name__ == "__main__":
     unittest.main()
