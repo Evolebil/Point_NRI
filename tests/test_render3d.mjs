@@ -11,8 +11,8 @@ const ctx = vm.createContext({
   hash: () => .5, lv36: (L, x, y) => { const c = L && L[y] && L[y][x]; return c ? parseInt(c, 36) || 0 : 0; }, FR: [], curIdx: 0, prevIdx: 0, G: {}, cam: {}, MAP: null, AW: 1, AH: 1
 });
 vm.runInContext(fs.readFileSync(new URL('../web/vendor/three-r159.min.js', import.meta.url), 'utf8'), ctx);
-vm.runInContext(src + '\nglobalThis.T = {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx, r3Area, r3TopZ, r3VxMap, r3Nets, r3Buf, r3Tree, r3Open, r3SoftAt, r3ModelKey, r3Role, R3MOD, R3CT};', ctx);
-const {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx, r3Area, r3TopZ, r3VxMap, r3Nets, r3Buf, r3Tree, r3Open, r3SoftAt, r3ModelKey, r3Role, R3MOD, R3CT} = ctx.T;
+vm.runInContext(src + '\nglobalThis.T = {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx, r3Area, r3TopZ, r3VxMap, r3Nets, r3Buf, r3Tree, r3Open, r3SoftAt, r3ModelKey, r3Role, R3MOD, R3CT, r3MeObj, r3Fit};', ctx);
+const {R3, VM, VZ0, r3Column, r3DynMap, r3Level, r3Z, r3Voxel, vIdx, r3Area, r3TopZ, r3VxMap, r3Nets, r3Buf, r3Tree, r3Open, r3SoftAt, r3ModelKey, r3Role, R3MOD, R3CT, r3MeObj, r3Fit} = ctx.T;
 
 // карта 3×1 из слоёв: каждый слой — одна строка
 function build(layers, dyn = [], extra = {}){
@@ -180,6 +180,17 @@ check('модель по типу: гуманоид, зверь, нежить, �
   check('анимация: шаг и бег, атака своего хода, удар по нему, смерть, стоит',
     r3Role(fr, 0, fr.f[0], .5, [1, 0]) === 'walk' && r3Role(fr, 0, fr.f[0], .5, [4, 2]) === 'run' && r3Role(fr, 0, fr.f[0], .5, null) === 'atk' &&
     r3Role(fr, 1, fr.f[1], .5, null) === 'hit' && r3Role(fr, 1, {hp: 0}, .5, null) === 'die' && r3Role(fr, 0, fr.f[0], 1, null) === 'idle');
+}
+
+// камеры (проверка на живом сайте 2026-11-16): 1-е лицо — у своего бойца, а не у бойца 0; «вся арена» — по высоте земли и экрану
+{
+  ctx.G.req = {me: 1}; R3.selfObj = {k: 1, X: 9.5, Y: 7, Z: 3.5};
+  const list = [{k: 0, X: 1.5, Y: 2, Z: 1.5}];
+  check('1-е лицо: камера у своего (скрытого) бойца, а не у бойца 0', r3MeObj(list) === R3.selfObj && r3MeObj([{k: 1, X: 0}, ...list]).k === 1);
+  R3.selfObj = null; ctx.G.req = null;
+  ctx.AW = 20; ctx.AH = 20; R3.gAvg = 21; R3.gMax = 25;
+  r3Fit(1.6); const wide = R3.view.dist, ty = R3.view.ty; r3Fit(.5);
+  check('«вся арена»: смотрит на среднюю высоту земли, на узком экране — дальше (арена по ширине)', ty === 21 && wide === 20 * 1.05 + 4 && Math.abs(R3.view.dist - (20 * 1.05 / .5 + 4)) < 1e-9, `${ty} ${wide} ${R3.view.dist}`);
 }
 
 console.log(`3D-вид: PASS ${pass}, FAIL ${fail}`);

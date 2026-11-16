@@ -14,6 +14,12 @@ struct BuyItem {
 
 static const char* DT_ADJ[DT_N] = {"Кислотный", "Дробящий", "Ледяной", "Огненный", "Силовой", "Грозовой", "Некротический", "Колющий", "Ядовитый", "Психический", "Лучистый", "Рубящий", "Звуковой"};
 
+// прилагательное мужского рода -> женского («Дробящий» -> «Дробящая», «Ледяной» -> «Ледяная»): к «волне»
+static std::string ruFem(const std::string& a) {
+    for (const char* e : {"ый", "ий", "ой"})
+        if (a.size() >= 4 && a.compare(a.size() - 4, 4, e) == 0) return a.substr(0, a.size() - 4) + "ая";
+    return a;
+}
 // Название способности по её свойствам (способности безымянные, а просмотрщику нужны имена)
 static std::string specTitle(const Spec& s) {
     if (!s.name.empty()) return s.name;
@@ -39,20 +45,22 @@ static std::string specTitle(const Spec& s) {
     else if (s.range > 5) noun = s.delivery == 2 ? "луч" : "залп";
     else noun = "удар";
     std::string t;
-    if (s.dmgN > 0) t = std::string(DT_ADJ[s.dtype]) + " " + noun;
+    const bool fem = noun == "волна";
+    auto adj = [&](const std::string& a) { return (fem ? ruFem(a) : a) + " " + noun; };   // род прилагательного — по существительному
+    if (s.dmgN > 0) t = adj(DT_ADJ[s.dtype]);
     else {
         switch (s.cond) {
             case C_PARAL: t = "Паралич"; break;
-            case C_STUN: t = "Оглушающий " + noun; break;
+            case C_STUN: t = adj("Оглушающий"); break;
             case C_RESTR: t = "Путы"; break;
             case C_GRAPPLE: t = "Хватка"; break;
             case C_FRIGHT: t = "Ужасающий рёв"; break;
-            case C_POISON: t = "Отравляющий " + noun; break;
+            case C_POISON: t = adj("Отравляющий"); break;
             case C_BLIND: t = "Слепящая вспышка"; break;
-            case C_SLOW: t = "Замедляющий " + noun; break;
+            case C_SLOW: t = adj("Замедляющий"); break;
             case C_PRONE: t = "Подсечка"; break;
             case C_CHARM: t = "Очарование"; break;
-            case C_WEAK: t = "Ослабляющий " + noun; break;
+            case C_WEAK: t = adj("Ослабляющий"); break;
             default: t = s.pushFt ? "Мощный толчок" : "Заклятие"; break;
         }
     }

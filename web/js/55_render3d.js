@@ -193,8 +193,15 @@ R3.setMap = function(){
   R3.U.uFog.value = new T.DataTexture(R3.fogData, AW, AH, T.RGBAFormat); R3.U.uFog.value.needsUpdate = true;
   R3.U.uSize.value.set(AW, AH);
   R3.setSky(MAP.day === 0);
-  const v = R3.view; v.tx = AW / 2; v.tz = AH / 2; v.ty = VZ0; v.dist = Math.max(AW, AH) * 1.05; v.fdist = Math.min(v.dist, 24);
+  let sum = 0, mx = 0; for (let k = 0; k < AW * AH; k++){ sum += R3.gtop[k]; mx = Math.max(mx, R3.gtop[k]); }
+  R3.gAvg = sum / (AW * AH); R3.gMax = mx;
+  const v = R3.view; r3Fit(cvW() / cvH()); v.fdist = Math.min(v.dist, 24);
 };
+// камера «вся арена»: в середину на средней высоте земли (горы — не в склоне), дальше на узком экране (арена — по ширине)
+function r3Fit(aspect){
+  const v = R3.view; v.tx = AW / 2; v.tz = AH / 2; v.ty = R3.gAvg || VZ0;
+  v.dist = Math.max(AW, AH) * 1.05 / Math.min(1, Math.max(.3, aspect || 1)) + ((R3.gMax || 0) - (R3.gAvg || 0));
+}
 // небо, свет и дымка: день — как в макете, ночь — тёмно-синее небо и луна
 R3.setSky = function(night){
   const top = night ? 0x0b1226 : 0x4f9fe6, hor = night ? 0x1f2a44 : 0xcfe9f6, D = Math.max(AW, AH);
@@ -569,6 +576,7 @@ function r3Lights(list){
 }
 R3.syncFighters = function(fr, t, dt){
   const out = [], tiny = r3TinySlots(fr), T = THREE;
+  R3.selfObj = null;
   fr.f.forEach((f, k) => {
     let m = R3.fm[k];
     if (!m){
@@ -591,7 +599,10 @@ R3.syncFighters = function(fr, t, dt){
     const shown = m.mi || m.tok;
     m.body.visible = m.shadow.visible = m.ghost.visible = !hide; m.mat.visible = !shown;   // капсула прозрачна для глаза, но ловит луч
     if (m.mi) m.mi.outer.visible = !hide; if (m.tok) m.tok.visible = !hide;
-    if (hide) return;
+    if (hide){   // свой боец не виден (1-е лицо, скрыт, пал) — но камера 1-го и 3-го лица стоит при нём, а не у бойца 0
+      if (k === (G.req ? G.req.me : G.me)){ const p = posAt(k, t), a = FR[prevIdx].f[k]; R3.selfObj = {k, f, X: p.x + n / 2, Y: a ? lerp(r3Z(a), r3Z(f), t) : r3Z(f), Z: p.y + n / 2, h, n}; }
+      return;
+    }
     const c = r3Colors(f); if (c !== m.col){ m.mat.color.set(c); m.gmat.color.set(c); m.col = c; if (m.tok) m.tok.userData.dim = -1; }
     const p = posAt(k, t), a = FR[prevIdx].f[k], tele = FR[curIdx].act === 'teleport' && FR[curIdx].actor === k;
     const z = a && !tele ? lerp(r3Z(a), r3Z(f), t) : r3Z(f);
@@ -644,7 +655,7 @@ if ($('tokSeg') && $('tokSeg').addEventListener){
 
 // ---- камера: тактическая (вращение, наклон, приближение); режимы кнопки «Камера» — те же, что у 2D ----
 // своя фигура для камер от первого и третьего лица: свой боец (в реплее — первый)
-function r3MeObj(list){ const me = G.req ? G.req.me : G.me; return list.find(o => o.k === me) || list.find(o => o.k === 0); }
+function r3MeObj(list){ const me = G.req ? G.req.me : G.me; return list.find(o => o.k === me) || (R3.selfObj && R3.selfObj.k === me ? R3.selfObj : null) || list.find(o => o.k === 0); }
 R3.camUpdate = function(list){
   const v = R3.view, W = cvW(), H = cvH(), C = R3.camera, o = v.kind !== 'tac' ? r3MeObj(list) : null;
   if (o){   // 3-е лицо — за спиной героя на расстоянии pd, 1-е — из глаз; мышь — поворот (yaw) и наклон (pp / fp)
@@ -659,7 +670,7 @@ R3.camUpdate = function(list){
     if (C.aspect !== W / H){ C.aspect = W / H; C.updateProjectionMatrix(); }
     return;
   }
-  if (cam.mode === 'fit'){ v.tx = AW / 2; v.tz = AH / 2; v.ty = VZ0; v.dist = Math.max(AW, AH) * 1.05; }
+  if (cam.mode === 'fit') r3Fit(W / H);
   else if (cam.mode === 'follow'){
     const fr = FR[curIdx], A = fr.actor, me = G.req ? G.req.me : G.me;
     const who = list.find(o => o.k === (A >= 0 && stepT0 > -1e8 && playing ? A : me)) || list.find(o => o.k === me);

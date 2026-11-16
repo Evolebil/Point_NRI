@@ -587,7 +587,7 @@ function buildTerrain(){
     [[0,1],[1,0],[0,-1],[-1,0]].forEach(([dx,dy]) => { if (h - hAt(x+dx,y+dy) >= 3 && x+dx >= 0 && y+dy >= 0 && x+dx < AW && y+dy < AH){ t.fillStyle = 'rgba(10,6,2,.75)';
       if (dy === 1) t.fillRect(x*TC, (y+1)*TC - Math.max(3,TC*.2), TC, Math.max(3,TC*.2)); else if (dy === -1) t.fillRect(x*TC, y*TC, TC, Math.max(3,TC*.2));
       else if (dx === 1) t.fillRect((x+1)*TC - Math.max(3,TC*.2), y*TC, Math.max(3,TC*.2), TC); else t.fillRect(x*TC, y*TC, Math.max(3,TC*.2), TC); } });
-    if (h >= 2 && TC >= 14){ t.fillStyle = 'rgba(255,255,255,.55)'; t.font = `700 ${Math.round(TC*.32)}px system-ui`; t.textAlign = 'right'; t.textBaseline = 'top'; if ((x+y)%4 === 0) t.fillText(h*10, (x+1)*TC - 2, y*TC + 1); }
+    if (h >= 2 && TC >= 14){ t.fillStyle = 'rgba(255,255,255,.55)'; t.font = `700 ${Math.round(TC*.32)}px system-ui`; t.textAlign = 'right'; t.textBaseline = 'top'; if ((x+y)%4 === 0) t.fillText(h*5, (x+1)*TC - 2, y*TC + 1); }   // высота в футах: уровень — 5 фт (ветка 3d)
   }
   for (let y=0;y<AH;y++) for (let x=0;x<AW;x++){   // лестницы
     if (!(MAP.ladder && MAP.ladder[y] && MAP.ladder[y][x] === '1')) continue;
