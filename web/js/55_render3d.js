@@ -530,11 +530,23 @@ function r3AreaPreview(list, ga, me, cx, cy, cz){
     if (h) r3Circle(o.X, o.Y + .05, o.Z, .45 * o.n + .15, f.team === me.f.team ? '#ffd35a' : '#ff5d5d', 'rgba(255,90,60,.18)', null, 4);
   });
 }
+// клетки, куда дойдёт за этот ход: первый узел каждой клетки в дереве путей с ценой не больше остатка движения
+function r3Reach(q){
+  const t = q.vt, seen = new Set();
+  for (let i = 5; i < t.length; i += 5){
+    if (t[i + 4] > q.speedLeft) continue;
+    const k = t[i] + ',' + t[i + 1]; if (seen.has(k)) continue; seen.add(k);
+    r3Square(t[i], t[i + 1], t[i + 2] + .02, 1, 'rgba(95,208,138,.35)', 'rgba(95,208,138,.16)');
+  }
+}
 // подсветка своего хода: дальность движения и оружия, цели, клетка под курсором с расстоянием
 function r3Turn(list, now){
   if (!G.req || G.busy || G.over) return;
   const q = G.req, me = list.find(o => o.k === q.me); if (!me) return;
-  if (G.mode === 'move' && q.speedLeft >= 5) r3Circle(me.X, me.Y + .04, me.Z, q.speedLeft / 5, 'rgba(95,208,138,.75)', 'rgba(95,208,138,.10)', [8, 6]);
+  if (G.mode === 'move' && q.speedLeft >= 5){
+    if (q.vt) r3Reach(q);   // режим кубов: досягаемость по дереву путей движка (подъёмы, обходы, тоннели)
+    else r3Circle(me.X, me.Y + .04, me.Z, q.speedLeft / 5, 'rgba(95,208,138,.75)', 'rgba(95,208,138,.10)', [8, 6]);
+  }
   let range = 0;
   if (G.mode === 'attack') range = q.weapon.range; else if (G.mode.startsWith('attack:')){ const a = (q.alts || []).find(x => x.k === +G.mode.slice(7)); range = a ? a.range : 5; } else if (G.mode.startsWith('spell:')){ const a = q.abils[+G.mode.slice(6)]; range = a.self ? (a.ally ? a.range : 0) : a.range; }
   const ga = G.mode.startsWith('spell:') ? q.abils[+G.mode.slice(6)] : null;
