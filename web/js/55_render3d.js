@@ -555,7 +555,7 @@ function r3Turn(list, now){
       for (let i = -Math.floor((ga.wallLen - 1) / 2); i <= Math.floor(ga.wallLen / 2); i++){ const x = h.x + px * i, y = h.y + py * i; if (x < 0 || y < 0 || x >= AW || y >= AH) continue; r3Square(x, y, h.top, 1, '#d6c4ff', 'rgba(190,160,255,.45)'); }
     }
   }
-  const path = G.mode === 'move' ? pathPreview(q, h.x, h.y) : null;   // путь под мышью (как в 2D)
+  const path = G.mode === 'move' ? pathPreview(q, h.x, h.y, h.z) : null;   // путь под мышью (как в 2D; в кубах — с высотой щелчка)
   if (path){ const pts = [r3P(me.X, me.Y + .08, me.Z), ...path.cells.map(c => r3P(c.x + .5, r3Z(c) + .08, c.y + .5))]; if (pts.every(p => p.ok)) pathStroke(pts, path.cells, q.speedLeft); }
   r3Square(h.x, h.y, h.top, 1, 'rgba(255,255,255,.95)', 'rgba(255,255,255,.12)');
   const n = me.n, gap = (a, b) => Math.max(0, b - (a + n - 1), a - b), d = path ? pathLabel(path, q.speedLeft) : 5 * Math.max(gap(me.f.x, h.x), gap(me.f.y, h.y)) + ' фт', p = r3P(h.x + 1, h.top, h.y);

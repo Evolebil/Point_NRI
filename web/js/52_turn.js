@@ -242,7 +242,17 @@ function fogCanvas(){
 // затем настила). По этому же дереву движок ведёт ход игрока — что показано, то и будет пройдено
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 let ptKey = '', ptPar = null, ptFt = null;
-function pathPreview(q, x, y){
+// режим кубов: дерево путей движка q.vt — [x, y, z, предок, футы] по узлам в порядке поиска; без высоты — первый узел клетки
+// (туда же придёт ход движка), с высотой щелчка (z) — именно этот куб
+function pathPreviewVox(q, x, y, z){
+  const t = q.vt; let k = -1;
+  for (let i = 0; i < t.length; i += 5) if (t[i] === x && t[i + 1] === y && (z == null || t[i + 2] === z)){ k = i / 5; break; }
+  if (k <= 0) return null;
+  const cells = []; for (let c = k; c > 0 && cells.length <= t.length / 5; c = t[5 * c + 3]) cells.push({x: t[5 * c], y: t[5 * c + 1], z: t[5 * c + 2], ft: t[5 * c + 4]});
+  return {cells: cells.reverse(), ft: t[5 * k + 4]};
+}
+function pathPreview(q, x, y, z){
+  if (q && q.vt) return pathPreviewVox(q, x, y, z);
   const N = AW * AH;
   if (!q || !q.pt || x < 0 || y < 0 || x >= AW || y >= AH || q.pt.length !== 3 * N * (q.ptL || 1)) return null;
   if (q.pt !== ptKey){

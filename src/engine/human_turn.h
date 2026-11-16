@@ -142,7 +142,8 @@ static std::string humanRequest(World& w, int idx, const TurnState& ts, const st
     o += "]";
     if (me.b.fly && !w.vx)   // летун: высота (уровни по 5 фт; режим кубов — летит ходом в куб), потолок над ним, может ли сейчас держаться в воздухе
         o += ",\"fly\":{\"alt\":" + std::to_string(me.alt) + ",\"max\":" + std::to_string(maxAltAt(w, me, me.x, me.y, me.up)) + ",\"can\":" + (canStayAloft(me) ? "1" : "0") + "}";
-    if (fpFull(me) == 1 && !w.vx) o += pathTreeJson(w, me);   // пути под мышью (режим кубов — пока без них)
+    if (w.vx) o += vxPathTreeJson(w, me, std::clamp(2 * ts.speed, 30, 120));   // режим кубов: дерево путей по кубам (вдвое дальше остатка)
+    else if (fpFull(me) == 1) o += pathTreeJson(w, me);   // пути под мышью
     o += ",\"vis\":\"" + visMask(w, me.team) + "\",\"visW\":" + std::to_string(w.aw) + ",\"visH\":" + std::to_string(w.ah);   // туман войны на карте
     o += ",\"enemies\":[";
     bool first = true;

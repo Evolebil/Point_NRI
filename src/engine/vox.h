@@ -276,12 +276,18 @@ inline int vxStepCost(const World& w, const Fighter& f, int x, int y, int z, int
 // Путь в клетку (tx, ty) — Дейкстра по узлам-кубам (цена — футы, при равенстве — меньше клеток зон); известных врагов
 // обходит (кроме того, кто стоит в цели). Цель — любой узел клетки, а если игрок щёлкнул по высоте (g_vxTz) — этот куб;
 // не дойти — как можно ближе к цели (как прежний pathTo)
-void vxPathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PStep>& path) {
+// Дейкстра по узлам-кубам от f (общая для пути и дерева путей): цена — 64 × футы + клетки зон; известных врагов обходит (кроме
+// того, кто стоит в (tx, ty); tx < 0 — никого не исключать). visit(c, цена, x, y, z) — при извлечении узла, true — стоп.
+// Массивы цены и предков — VXD (живут до следующего поиска)
+struct VxDijk { std::vector<int> cost, prev, stamp; int cur = 0, SX = 0, SY = 0; };
+static thread_local VxDijk VXD;
+template <class Visit>
+void vxDijkstra(const World& w, const Fighter& f, int tx, int ty, Visit&& visit) {
     const VoxWorld& v = *w.vx;
     const int SX = v.sx, SY = v.sy, SZ = v.sz, N = SX * SY * SZ;
     if (f.x < 0 || f.y < 0 || f.x >= SX || f.y >= SY || f.z < 0 || f.z >= SZ) return;
-    static thread_local std::vector<int> cost, prev, stamp;
-    static thread_local int cur = 0;
+    auto& cost = VXD.cost; auto& prev = VXD.prev; auto& stamp = VXD.stamp; auto& cur = VXD.cur;
+    VXD.SX = SX; VXD.SY = SY;
     if ((int)cost.size() < N) {
         cost.assign((size_t)N, 0);
         prev.assign((size_t)N, -1);
@@ -297,7 +303,7 @@ void vxPathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PSte
     std::vector<int> foes;
     for (size_t i = 0; i < w.f.size(); i++) {
         const Fighter& g = w.f[i];
-        if (g.hp > 0 && g.team != f.team && (!inWorld || isKnown(w, f.team, (int)i)) && !fpOverlap(g.x, g.y, fpN(g), tx, ty, 1)) foes.push_back((int)i);
+        if (g.hp > 0 && g.team != f.team && (!inWorld || isKnown(w, f.team, (int)i)) && !(tx >= 0 && fpOverlap(g.x, g.y, fpN(g), tx, ty, 1))) foes.push_back((int)i);
     }
     const int from = id(f.x, f.y, f.z);
     std::vector<std::pair<int, int>> q;
@@ -305,19 +311,13 @@ void vxPathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PSte
     cost[(size_t)from] = 0;
     prev[(size_t)from] = -1;
     q.push_back({0, from});
-    int end = -1, best = from, bestGap = 1 << 20, bestCost = 0;
     while (!q.empty()) {
         std::pop_heap(q.begin(), q.end(), std::greater<>());
         const auto [c0, c] = q.back();
         q.pop_back();
         if (c0 != cost[(size_t)c]) continue;
         const int x = c % SX, y = (c / SX) % SY, z = c / (SX * SY);
-        if (x == tx && y == ty && c != from && (g_vxTz < 0 || z == g_vxTz)) {
-            end = c;
-            break;
-        }
-        const int gp = std::max(std::abs(x - tx), std::abs(y - ty));
-        if (gp < bestGap || (gp == bestGap && c0 < bestCost)) best = c, bestGap = gp, bestCost = c0;
+        if (visit(c, c0, x, y, z)) return;
         for (int dz = -2; dz <= 2; dz++)
             for (int dy = -1; dy <= 1; dy++)
                 for (int dx = -1; dx <= 1; dx++) {
@@ -337,10 +337,47 @@ void vxPathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PSte
                     }
                 }
     }
+}
+void vxPathTo(const World& w, const Fighter& f, int tx, int ty, std::vector<PStep>& path) {
+    const VoxWorld& v = *w.vx;
+    const int SX = v.sx, SY = v.sy;
+    if (f.x < 0 || f.y < 0 || f.x >= SX || f.y >= SY || f.z < 0 || f.z >= v.sz) return;
+    const int from = (f.z * SY + f.y) * SX + f.x;
+    int end = -1, best = from, bestGap = 1 << 20, bestCost = 0;
+    vxDijkstra(w, f, tx, ty, [&](int c, int c0, int x, int y, int z) {
+        if (x == tx && y == ty && c != from && (g_vxTz < 0 || z == g_vxTz)) {
+            end = c;
+            return true;
+        }
+        const int gp = std::max(std::abs(x - tx), std::abs(y - ty));
+        if (gp < bestGap || (gp == bestGap && c0 < bestCost)) best = c, bestGap = gp, bestCost = c0;
+        return false;
+    });
     if (end < 0) end = best;
     if (end == from) return;
-    for (int c = end; c != from; c = prev[(size_t)c]) path.push_back({c % SX, (c / SX) % SY, c / (SX * SY)});
+    for (int c = end; c != from; c = VXD.prev[(size_t)c]) path.push_back({c % SX, (c / SX) % SY, c / (SX * SY)});
     std::reverse(path.begin(), path.end());
+}
+// Дерево путей игрока в режиме кубов (путь под мышью): та же Дейкстра, что у хода; узлы в порядке извлечения (первый узел
+// клетки — тот, куда придёт ход без высоты), до maxFt футов. JSON: [x, y, z, номер предка (−1), футы, …]
+std::string vxPathTreeJson(const World& w, const Fighter& f, int maxFt) {
+    std::vector<int> order;
+    std::unordered_map<int, int> num;
+    vxDijkstra(w, f, -1, -1, [&](int c, int c0, int, int, int) {
+        if (c0 > 64 * maxFt + 63) return true;
+        num[c] = (int)order.size();
+        order.push_back(c);
+        return false;
+    });
+    std::string o = ",\"vt\":[";
+    const int SX = VXD.SX, SY = VXD.SY;
+    for (size_t i = 0; i < order.size(); i++) {
+        const int c = order[i], p = VXD.prev[(size_t)c];
+        const auto it = p >= 0 ? num.find(p) : num.end();
+        o += (i ? "," : "") + std::to_string(c % SX) + "," + std::to_string((c / SX) % SY) + "," + std::to_string(c / (SX * SY)) + "," +
+             std::to_string(it != num.end() ? it->second : -1) + "," + std::to_string(VXD.cost[(size_t)c] / 64);
+    }
+    return o + "]";
 }
 // Луч по кубам (Amanatides–Woo) от точки a к точке b (координаты в кубах); кубы самих концов не считаются. f(материал) —
 // код куба на луче: 0 — пропустить, ≥ 100 — преграда (дальше не идём). Возвращает наибольший код
