@@ -339,6 +339,7 @@ int main(int argc, char** argv) {
 #include "audit/19_T229_vysoty_5ft.inc"
 #include "audit/20_T230-T237_mir_kubov.inc"
 #include "audit/21_T238-T239_tma_kopatel.inc"
+#include "audit/22_T240_kadr_vida.inc"
     blkTime();
     if (g_shards > 1)
         printf("#ИТОГ %d %d\n", g_pass, g_fail);

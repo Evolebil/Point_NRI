@@ -189,6 +189,9 @@ std::string fighterJson(const Fighter& f, int kind, bool hid = false) {
         std::string r = buf;
         r.insert(r.size() - 1, ",\"z\":" + std::to_string(f.z) + (fpN(f) > 1 ? ",\"n\":" + std::to_string(fpN(f)) : std::string()) +
                                    (f.b.size < 2 ? ",\"sz\":" + std::to_string(f.b.size) : std::string()));   // крошечный 0, маленький 1: рост капсулы
+        // только для вида (модель по типу существа, летун, свет во тьме без неба): правила их не читают
+        const int lt = std::max(f.b.lightR, f.lightRounds > 0 ? f.lightR : 0);
+        r.insert(r.size() - 1, ",\"ct\":" + std::to_string(f.b.ctype) + (f.b.fly ? ",\"fl\":1" : "") + (lt > 0 ? ",\"lt\":" + std::to_string(lt) : std::string()));
         return r;
     }
     if (fpN(f) > 1 || f.alt > 0) {   // крупный: квадрат n×n от (x, y); летун: высота (уровни по 5 фт)

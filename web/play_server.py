@@ -27,7 +27,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # корень проекта (сервер лежит в web/)
 WEB = os.path.join(HERE, "web")
-VENDOR = {"/vendor/three-r159.min.js": "three-r159.min.js"}   # путь в адресе -> файл в web/vendor (версия в имени: кэш на год)
+VENDOR = {"/vendor/three-r159.min.js": "three-r159.min.js", "/vendor/three-r159-gltf.js": "three-r159-gltf.js"}   # путь в адресе -> файл в web/vendor (версия в имени: кэш на год)
+MODEL_RE = re.compile(r"^/assets/models/([a-z0-9_]{1,40})\.glb$")   # модели бойцов 3D-вида (CC0, web/assets/LICENSES.md)
 STATE = os.path.join(HERE, "state")   # игроки и журналы — не в git
 os.makedirs(STATE, exist_ok=True)
 ENGINE = os.path.join(HERE, "build", "arena_play")
@@ -746,6 +747,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 with open(os.path.join(WEB, "vendor", VENDOR[path]), "rb") as f:
                     self._send(200, f.read(), "text/javascript; charset=utf-8", "public, max-age=31536000, immutable")
+            except OSError:
+                self._send(404, "не найдено", "text/plain; charset=utf-8")
+        elif MODEL_RE.match(path):
+            try:
+                with open(os.path.join(WEB, "assets", "models", MODEL_RE.match(path).group(1) + ".glb"), "rb") as f:
+                    self._send(200, f.read(), "model/gltf-binary", "public, max-age=86400")
             except OSError:
                 self._send(404, "не найдено", "text/plain; charset=utf-8")
         elif path == "/demo3d":   # макет вида 3D (решение №15 в docs/TZ_3d.md): в меню не показан, только для согласования стиля
