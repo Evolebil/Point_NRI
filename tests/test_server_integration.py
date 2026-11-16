@@ -301,6 +301,35 @@ class TestRoomWithEngine(unittest.TestCase):
         ps.room_cmd1({"cmd": "room_ptr", "code": code, "on": False}, "s1")
         self.assertEqual(ps.room_cmd1({"cmd": "room_poll", "code": code}, "s2")["ptrs"], [])
 
+    def test_rematch_and_leave(self):
+        """QA 2026-11-16: после боя комната — снова лобби (бот, реванш, новый номер боя); выход будит опрос остальных."""
+        code = ps.room_cmd1({"cmd": "room_create", "name": "Хозяин"}, "h1")["code"]
+        ps.room_cmd1({"cmd": "room_join", "code": code, "name": "Гость"}, "g1")
+        for sid in ("h1", "g1"):
+            ps.room_cmd1({"cmd": "room_set", "code": code, "char": KNIGHT}, sid)
+        ps.room_cmd1({"cmd": "room_set", "code": code, "team": 1}, "g1")
+        r = ps.ROOMS[code]
+        for n in (1, 2):
+            v = ps.room_cmd1({"cmd": "room_start", "code": code, "seed": 5, "rounds": 1, "map": {"aw": 12, "ah": 10}}, "h1")
+            self.assertEqual((v["err"], v["fid"]), ("", n))
+            for _ in range(20):
+                if r.status != "fight" or not r.pending:
+                    break
+                sid = next(s for s, k in r.seats.items() if k == r.pending["seat"])
+                ps.room_cmd1({"cmd": "room_step", "code": code, "c": "end"}, sid)
+            self.assertEqual(r.status, "end")
+            late = ps.room_cmd1({"cmd": "room_poll", "code": code, "since": 9999}, "g1")
+            self.assertEqual(late["fid"], n)   # по номеру боя гость понимает, что бой новый, и опрашивает с нуля
+            self.assertIsNotNone(ps.room_cmd1({"cmd": "room_poll", "code": code, "since": 0}, "g1")["init"])
+        v = ps.room_cmd1({"cmd": "room_bot", "code": code, "budget": 300}, "h1")   # после боя хозяин меняет состав
+        self.assertEqual(v["type"], "room", v)
+        self.assertEqual(len(r.members), 3)
+        ver = r.ver
+        ps.room_cmd({"cmd": "room_leave", "code": code}, "h1")
+        self.assertGreater(r.ver, ver)   # опрос гостя проснётся сразу
+        self.assertEqual(r.host, "g1")   # хозяином стал оставшийся игрок
+        r.eng and r.eng.kill()
+
     def test_fog_two_players(self):
         """Туман войны в бою двух людей: кадр общий, но каждому — своя копия; скрытый от его команды боец помечен hid."""
         frames = [{"f": [{"x": 1, "team": 0}, {"x": 9, "team": 1, "hT": [0]}]}, {"f": [{"x": 2, "team": 0}]}]

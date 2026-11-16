@@ -29,7 +29,10 @@ function meToJson(m = ME){
   if (vx.length) o.vx = vx;
   return o;
 }
-function meMsg(t, cls = ''){ $('meMsg').innerHTML = t ? `<div class="${cls || 'hint'}">${esc(t)}</div>` : ''; }
+function meMsg(t, cls = ''){
+  $('meMsg').innerHTML = t ? `<div class="${cls || 'hint'}">${esc(t)}</div>` : '';
+  if (t && !$('meMsg').offsetParent) toast(t, 4000, cls === 'err');   // узкий экран: панель «Параметры» скрыта — иначе ответа не видно
+}
 function meShow(){
   if (!ME){ const names = Object.keys(MAPS); ME = names.length ? meFromJson(MAPS[names[0]], names[0]) : meNew(20, 14); }
   $('meName').value = ME.name; $('meW').value = ME.aw; $('meH').value = ME.ah; $('meTheme').value = ME.theme;

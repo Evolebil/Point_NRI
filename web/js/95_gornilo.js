@@ -37,6 +37,7 @@ function setActive(p){
   S = fullChar(p.character); LS.set('dnd_char', JSON.stringify(S));
   // форма конструктора — под нового персонажа сразу: иначе пересчёт цены (syncForm) допишет в него поля от прежнего
   if (CAT) buildForm();
+  lastPrice = null; queuePrice();   // цена — нового персонажа: прежний ответ (например, «не собран» у удалённого) не годится
 }
 // правка в конструкторе сразу попадает в активного персонажа (save() зовётся на каждое изменение)
 const baseSave = save;
@@ -155,6 +156,8 @@ async function profilePrice(p){
 // ---- быстрый бой ----
 const Q = {budget: +LS.get('dnd_match_budget', '1600') || 1600, char: '', searching: false, pollT: 0, gen: 0};
 if (!BUDGETS.includes(Q.budget)) Q.budget = 1600;
+// почему «Найти бой» недоступна: персонаж не собран или его нет — пишется рядом с кнопкой
+function quickWhy(p, ok){ $('qWhy').textContent = !p ? 'Создайте персонажа на эту сумму.' : ok ? '' : `«${p.name}» не собран — исправьте его в «Мои персонажи» или выберите другого.`; }
 const quickProfile = budget => { const l = readProfiles().filter(p => +p.budget === budget); return l.find(p => p.id === Q.char) || l.find(p => p.id === activeId()) || l[0] || null; };
 function renderQuick(){
   const list = readProfiles();
@@ -165,7 +168,7 @@ function renderQuick(){
   Q.char = pick ? pick.id : '';
   $('qChars').innerHTML = mine.length ? mine.map(p => `<button type="button" class="list-row pick${p.id === Q.char ? ' on' : ''}" data-qchar="${esc(p.id)}"><span class="name"><b>${esc(p.name)}</b></span><span class="meta" data-hp>…</span><span class="meta" data-ac></span><span></span></button>`).join('')
     : '<div class="empty">Нет персонажа на эту сумму — создайте его.</div>';
-  $('qFind').disabled = true;
+  $('qFind').disabled = true; quickWhy(pick, true);
   const gen = ++Q.gen;
   mine.forEach(async p => {
     const d = await profilePrice(p); if (gen !== Q.gen) return;
@@ -173,14 +176,14 @@ function renderQuick(){
     row.dataset.ok = d && d.ok ? '1' : '0';
     row.querySelector('[data-hp]').textContent = d && d.ok ? d.boss.hp + ' ХП' : (d ? 'не собран' : 'нет связи');
     row.querySelector('[data-ac]').textContent = d && d.ok ? 'КД ' + d.boss.ac : '';
-    if (p.id === Q.char) $('qFind').disabled = !(d && d.ok);
+    if (p.id === Q.char){ $('qFind').disabled = !(d && d.ok); quickWhy(p, !!(d && d.ok)); }
   });
 }
 $('qBudgets').addEventListener('click', e => { const b = e.target.closest('[data-budget]'); if (!b) return; Q.budget = +b.dataset.budget; LS.set('dnd_match_budget', Q.budget); renderQuick(); });
 $('qChars').addEventListener('click', e => {
   const b = e.target.closest('[data-qchar]'); if (!b) return;
   Q.char = b.dataset.qchar; $('qChars').querySelectorAll('[data-qchar]').forEach(x => x.classList.toggle('on', x === b));
-  $('qFind').disabled = b.dataset.ok !== '1';
+  $('qFind').disabled = b.dataset.ok !== '1'; quickWhy(readProfiles().find(x => x.id === Q.char), b.dataset.ok !== '0');
   if (b.dataset.ok === '0') toast('Персонаж не собран: откройте его в «Мои персонажи» и исправьте', 5000, true);
 });
 $('qCreate').onclick = () => createCharacter(Q.budget, 'quick');

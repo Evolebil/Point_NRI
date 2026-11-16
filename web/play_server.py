@@ -281,7 +281,8 @@ class Room:
     def __init__(self, code, host):
         self.code, self.host = code, host
         self.members = []      # {"sid", "name", "team", "char", "bot": бюджет или None}
-        self.status = "lobby"  # lobby | fight | end
+        self.status = "lobby"  # lobby | fight | end (после боя — как лобби: можно менять состав и начать снова)
+        self.fid = 0           # номер боя комнаты: новый бой — новый номер (участники по нему заходят в него с начала)
         self.eng = None
         self.init = None
         self.frames = []
@@ -314,7 +315,7 @@ class Room:
                              "i": i} for i, m in enumerate(self.members)],
                 "seat": self.seats.get(sid, -1), "init": mask_init(self.init, {team}) if self.init and since == 0 else None,
                 "frames": mask_hidden(fog_frames(self.frames, team), {})[since:], "nframes": len(self.frames), "req": mine["req"] if mine else None,
-                "waiting": who, "end": self.end, "opts": self.opts, "ver": self.ver,
+                "waiting": who, "end": self.end, "opts": self.opts, "ver": self.ver, "fid": self.fid,
                 "ptrs": [{"name": m["name"], "team": m["team"], "x": m["ptr"][0], "y": m["ptr"][1]} for m in self.members
                          if m.get("ptr") and m["sid"] != sid and time.time() - m["ptr"][2] < PTR_TTL]}
 
@@ -370,6 +371,9 @@ def room_cmd(msg, sid):
     out = room_cmd1(msg, sid)
     cmd = msg.get("cmd")
     r = ROOMS.get(str(msg.get("code", "")).upper().strip()) or (ROOMS.get(out.get("code", "")) if isinstance(out, dict) else None)
+    if r is not None and cmd == "room_leave" and out.get("type") == "left":
+        r.bump()   # ушёл (и, может быть, сменился хозяин): остальные узнают сразу, а не через 20 с ожидания
+        return out
     if r is None or out.get("type") != "room":
         return out
     if cmd != "room_poll":
@@ -459,8 +463,8 @@ def room_cmd1(msg, sid):
                 target["char"] = msg["char"]
                 target["ready"] = bool(msg["char"])
             if "brain" in msg:
-                if target.get("bot") is None or target.get("npc") or r.host != sid or r.status != "lobby":
-                    return {"type": "error", "err": "выбирать, кто ведёт бота, может хозяин комнаты до боя"}
+                if target.get("bot") is None or target.get("npc") or r.host != sid or r.status == "fight":
+                    return {"type": "error", "err": "выбирать, кто ведёт бота, может хозяин комнаты не во время боя"}
                 target["brain"] = "net" if msg["brain"] == "net" else "rules"
             if "ready" in msg:
                 if msg["ready"] and not target.get("char"):
@@ -469,27 +473,27 @@ def room_cmd1(msg, sid):
             if msg.get("name"):
                 me["name"] = str(msg["name"]).strip()[:24]
         elif cmd == "room_bot":
-            if r.host != sid or r.status != "lobby":
-                return {"type": "error", "err": "ботов добавляет хозяин комнаты до боя"}
+            if r.host != sid or r.status == "fight":
+                return {"type": "error", "err": "ботов добавляет хозяин комнаты не во время боя"}
             r.members.append({"sid": "bot%d" % random.randint(0, 1 << 30), "name": "Бот %d" % (1 + sum(m["bot"] is not None for m in r.members)),
                               "team": max(0, min(63, int(msg.get("team", 1)))), "char": None, "bot": max(20, min(100000, int(msg.get("budget", 500)))),
                               "brain": "net" if msg.get("brain") == "net" else "rules"})
         elif cmd == "room_npc":   # противник из карточки (кампания, задача Б-2): персонаж без игрока — им ходит бот или сеть по ИНТ
-            if r.host != sid or r.status != "lobby":
-                return {"type": "error", "err": "противников добавляет хозяин комнаты до боя"}
+            if r.host != sid or r.status == "fight":
+                return {"type": "error", "err": "противников добавляет хозяин комнаты не во время боя"}
             if not isinstance(msg.get("char"), dict):
                 return {"type": "error", "err": "нужна карточка персонажа (char)"}
             r.members.append({"sid": "npc%d" % random.randint(0, 1 << 30), "name": str(msg.get("name") or msg["char"].get("name") or "Противник")[:40],
                               "team": max(0, min(63, int(msg.get("team", 1)))), "char": msg["char"], "bot": 0, "npc": True})
         elif cmd == "room_kick":
-            if r.host != sid or r.status != "lobby":
-                return {"type": "error", "err": "убирает хозяин до боя"}
+            if r.host != sid or r.status == "fight":
+                return {"type": "error", "err": "убирает хозяин не во время боя"}
             i = int(msg.get("i", -1))
             if 0 <= i < len(r.members) and r.members[i]["sid"] != sid:
                 r.members.pop(i)
         elif cmd == "room_host":
-            if r.host != sid or r.status != "lobby":
-                return {"type": "error", "err": "Передать комнату может только хозяин до боя."}
+            if r.host != sid or r.status == "fight":
+                return {"type": "error", "err": "Передать комнату может только хозяин не во время боя."}
             i = int(msg.get("i", -1))
             if not (0 <= i < len(r.members)) or r.members[i].get("bot") is not None:
                 return {"type": "error", "err": "Выберите игрока, которому передать комнату."}
@@ -523,6 +527,7 @@ def room_cmd1(msg, sid):
             opts = {k: msg[k] for k in ("seed", "rounds", "map", "world", "vox") if k in msg}
             r.opts = {k: v for k, v in opts.items() if k in ("seed", "rounds", "vox")}
             r.status, r.err, r.frames, r.init, r.end, r.pending = "fight", "", [], None, None, None
+            r.fid += 1
             if r.eng:
                 r.eng.kill()
             r.eng = Engine()

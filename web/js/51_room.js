@@ -39,8 +39,12 @@ function roomFeed(v){
     return;
   }
   if (v.type !== 'room') return;
+  // новый бой в той же комнате (реванш): у всех участников — заново, с начальных данных боя (их сервер шлёт опросу с нуля)
+  if (ROOM.fid != null && v.fid !== ROOM.fid && v.status === 'fight' && !v.init){ ROOM.fid = v.fid; ROOM.n = 0; G.room = ''; ROOM.v = null; return; }
+  ROOM.fid = v.fid;
   ROOM.v = v; ROOM.code = v.code;
-  if (v.status === 'lobby' || (!G.room && !v.init)) roomLobby(v);
+  const free = v.status !== 'fight';   // до боя и после него комната — лобби: состав, боты, «Начать бой»
+  if (free && (v.status === 'lobby' || G.over || !G.room) || (!G.room && !v.init)) roomLobby(v);
   if (v.init && G.room !== v.code){   // бой начался: экран боя
     G.room = v.code; G.wNames = null; G.active = false; G.over = false; G.busy = false; G.mode = 'move'; G.logged = 0; G.shown = null; G.pending = null; G.req = G.lastReq = null;
     $('log').innerHTML = ''; $('result').classList.remove('on');
@@ -87,21 +91,21 @@ function roomLobby(v){
   const nT = Math.max(2, ...v.members.map(m => m.team + 2));
   const teamSel = m => `<select class="team" data-rmteam="${m.i}" ${m.me || host ? '' : 'disabled'} aria-label="Команда">${[...Array(Math.min(64, nT)).keys()].map(t => `<option value="${t}" ${t === m.team ? 'selected' : ''}>команда ${t + 1}</option>`).join('')}</select>`;
   const brainSel = m => m.bot == null || m.npc ? `<span class="brain muted">${m.npc ? 'противник-бот' : esc(m.charName || '')}</span>` :
-    `<select class="brain" data-rmbrain="${m.i}" ${host && v.status === 'lobby' ? '' : 'disabled'} aria-label="Кто ведёт бота"><option value="net" ${m.brain === 'net' ? 'selected' : ''}>Нейросеть</option><option value="rules" ${m.brain !== 'net' ? 'selected' : ''}>Алгоритм</option></select>`;
+    `<select class="brain" data-rmbrain="${m.i}" ${host && v.status !== 'fight' ? '' : 'disabled'} aria-label="Кто ведёт бота"><option value="net" ${m.brain === 'net' ? 'selected' : ''}>Нейросеть</option><option value="rules" ${m.brain !== 'net' ? 'selected' : ''}>Алгоритм</option></select>`;
   const who = m => m.bot != null && !m.npc ? `${esc(m.name)} <span class="small">· ${m.bot} оч.</span>` : `${esc(m.name)}${m.me ? ' <span class="small">(вы)</span>' : ''}${m.host ? ' <span class="small">· хозяин</span>' : ''}`;
   const rows = v.members.map((m, k) => `<div class="member${m.me ? ' me' : ''}">
       <span class="num" style="background:${teamCol(m.team)}">${k + 1}</span><span class="nm" title="${esc(m.name)}">${who(m)}</span>${brainSel(m)}${teamSel(m)}
       <span class="ready${m.ready ? '' : ' no'}">${m.ready ? 'готов' : (m.selected ? 'не готов' : 'нет героя')}</span>
-      ${host && !m.me && v.status === 'lobby' ? `<button class="danger kick" data-rmkick="${m.i}" title="Убрать" aria-label="Убрать ${esc(m.name)}">✕</button>` : '<span></span>'}</div>`).join('');
+      ${host && !m.me && v.status !== 'fight' ? `<button class="danger kick" data-rmkick="${m.i}" title="Убрать" aria-label="Убрать ${esc(m.name)}">✕</button>` : '<span></span>'}</div>`).join('');
   const state = v.status === 'fight' ? 'идёт бой' : v.status === 'end' ? 'бой окончен' : 'ждём игроков';
   let h = `<div class="room-head"><h1>Комната</h1><span class="room-code">${esc(v.code)}</span><button id="rmCopy" type="button">Скопировать код</button>
     <span class="room-state">${state} · ${host ? 'вы — хозяин' : 'хозяин начинает бой'}</span></div>${v.err ? `<div class="err">${esc(v.err)}</div>` : ''}
     <div class="room-cols"><div>
-      <div class="panel"><h2>Участники</h2>${rows}${v.status === 'lobby' ? '<div class="member-free">Свободное место — ждём друзей</div>' : ''}</div>
+      <div class="panel"><h2>Участники</h2>${rows}${v.status !== 'fight' ? '<div class="member-free">Свободное место — ждём друзей</div>' : ''}</div>
       <div class="panel room-tools">
-        <select id="rmChar" ${mine && v.status === 'lobby' ? '' : 'disabled'} aria-label="Мой персонаж">${roomCharOptions(ROOM.charId, mine && mine.selected)}</select>
+        <select id="rmChar" ${mine && v.status !== 'fight' ? '' : 'disabled'} aria-label="Мой персонаж">${roomCharOptions(ROOM.charId, mine && mine.selected)}</select>
         ${mine && mine.selected ? `<button id="rmReady" type="button" class="${mine.ready ? '' : 'primary'}">${mine.ready ? 'Не готов' : 'Готов'}</button>` : ''}
-        ${host && v.status === 'lobby' ? `<span class="sep"></span><span class="muted">Бот:</span><div class="seg" id="rmBotSeg"><button type="button" data-brain="rules">Алгоритм</button><button type="button" data-brain="net" class="on">Нейросеть</button></div>
+        ${host && v.status !== 'fight' ? `<span class="sep"></span><span class="muted">Бот:</span><div class="seg" id="rmBotSeg"><button type="button" data-brain="rules">Алгоритм</button><button type="button" data-brain="net" class="on">Нейросеть</button></div>
         <span class="muted">бюджет</span><input type="number" id="rmBotB" value="${(lastPrice && lastPrice.ok && S.budget) || 1600}" min="20" max="100000" aria-label="Бюджет бота"><button id="rmBot" type="button">+ Добавить бота</button>` : ''}
       </div></div>
       <div class="panel room-map"><h2>Карта</h2>
@@ -116,7 +120,7 @@ function roomLobby(v){
       </div></div>
     <div class="room-foot"><span class="small">${host ? 'Нужны две команды и готовые игроки.' : 'Начать бой может только хозяин комнаты.'}</span>
       ${v.status === 'fight' && !G.room ? '<button id="rmBack" type="button" class="primary">Вернуться в бой</button>' : ''}
-      ${host ? `<button class="btn-accent btn-xl" id="rmStart" type="button" ${v.status !== 'lobby' || v.members.some(m => m.bot == null && !m.ready) || new Set(v.members.map(m => m.team)).size < 2 ? 'disabled' : ''}>Начать бой</button>` : ''}</div>`;
+      ${host ? `<button class="btn-accent btn-xl" id="rmStart" type="button" ${v.status === 'fight' || v.members.some(m => m.bot == null && !m.ready) || new Set(v.members.map(m => m.team)).size < 2 ? 'disabled' : ''}>Начать бой</button>` : ''}</div>`;
   if (ROOM.lobbyHtml !== h){   // перерисовать, только если что-то изменилось (иначе стирается ввод)
     const fo = document.activeElement && document.activeElement.id, val = fo && $(fo) ? $(fo).value : null;
     ROOM.lobbyHtml = h; $('rmBox').innerHTML = h;
@@ -295,7 +299,7 @@ function showEnd(r){
       <p>${r.reason === 5 ? 'Предел раундов — победа по очкам (доля хитов команды + убитые враги)' : 'Осталась одна команда'}</p><p class="small">${r.rounds} раундов</p>${sc}
       <div class="btns"><button class="primary" id="rLobby">В комнату</button><button id="rHide">Посмотреть поле</button></div>`;
     $('result').classList.add('on');
-    $('rLobby').onclick = () => { $('result').classList.remove('on'); showTab(6); }; $('rHide').onclick = () => $('result').classList.remove('on');
+    $('rLobby').onclick = () => { $('result').classList.remove('on'); ROOM.lobbyHtml = ''; if (ROOM.v) roomLobby(ROOM.v); showTab(6); };   // лобби — по свежему состоянию $('rHide').onclick = () => $('result').classList.remove('on');
     return;
   }
   const win = r.result === G.me, draw = r.result === 2;
@@ -333,7 +337,8 @@ async function leaveFight(){
 }
 ROUTE_BACK.battle = leaveFight;
 ROUTE_BACK.coop = async () => { if (!ROOM.code) return go('home'); if (await confirmBox('Выйти из комнаты?' + (v0().status === 'fight' ? ' Ваш герой останется в бою, его ходы будут завершаться сами.' : ''), 'Выйти', true)) await roomLeave(); };
-ROUTE_ENTER.coop = prev => { if (prev === 'worlds' && ROOM.v && ROOM.v.status === 'lobby' && !G.room){ ROOM.lobbyHtml = ''; roomLobby(ROOM.v); } if (!ROOM.code){ $('rmJoin').hidden = false; $('rmBox').innerHTML = ''; ROOM.lobbyHtml = ''; } const n = playerName(); if (n && !$('rmName').value) $('rmName').value = n; roomJoinValidity(); };
+// вернулся в раздел (из «Миров», «Моих персонажей»…) — лобби по свежим данным: новые персонажи в списке
+ROUTE_ENTER.coop = prev => { if (prev !== 'coop' && ROOM.v && ROOM.v.status !== 'fight' && (!G.room || G.over)){ ROOM.lobbyHtml = ''; roomLobby(ROOM.v); } if (!ROOM.code){ $('rmJoin').hidden = false; $('rmBox').innerHTML = ''; ROOM.lobbyHtml = ''; } const n = playerName(); if (n && !$('rmName').value) $('rmName').value = n; roomJoinValidity(); };
 // ---- указка (как в Owlbear): пока игрок держит Q, остальные в комнате видят точку под его мышью ----
 const PTR = {on: false, x: -1, y: -1, sent: 0, got: 0};
 function ptrSend(on){

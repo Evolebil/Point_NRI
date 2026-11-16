@@ -120,7 +120,9 @@ main{position:relative;z-index:1}
 .page{max-width:1600px;margin:0 auto;padding:26px 50px 40px}
 .page-title{font-size:42px;font-weight:800;margin:6px 0 10px;letter-spacing:-.01em}
 .page-sub{color:var(--muted);font-size:18px;margin:0 0 30px}
-.page-foot{display:flex;justify-content:flex-end;margin-top:26px}
+.page-foot{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:26px}
+#qWhy:empty{display:none}
+#qWhy{text-align:right}
 .panel{background:var(--glass);border:1px solid var(--line2);border-radius:16px;padding:24px 28px;box-shadow:var(--shadow);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
 .panel h2{font-size:26px;font-weight:700;margin:2px 0 16px}
 .panel p{font-size:17px;line-height:1.55}
@@ -568,3 +570,9 @@ table{border-collapse:collapse}
 .hud-panel.hud-off>.hud-min{opacity:.9}
 body.hud-all-off .hud-panel{display:none!important}
 .hud-back{position:fixed;right:16px;bottom:16px;z-index:50}
+@media (max-width:430px){   /* узкий телефон: логотип и «назад» в одну строку, не за краем экрана */
+  .topbar{gap:10px}
+  .logo,body.route-home .logo{font-size:24px}
+  .back{padding:6px 10px;font-size:13px}
+  .who{display:none}
+}

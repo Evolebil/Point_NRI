@@ -515,7 +515,11 @@ function r3GhostMat(col){
 }
 // убрать модель и жетон бойца (свои материалы и текстура портрета освобождаются; геометрия и клипы — общие у модели)
 function r3DropView(m){
-  if (m.mi){ R3.scene.remove(m.mi.outer); m.mi.mixer.stopAllAction(); m.mi.mixer.uncacheRoot(m.mi.mixer.getRoot()); m.mi.mats.forEach(([c]) => c.dispose()); m.mi = null; }
+  if (m.mi){
+    R3.scene.remove(m.mi.outer); m.mi.mixer.stopAllAction(); m.mi.mixer.uncacheRoot(m.mi.mixer.getRoot()); m.mi.mats.forEach(([c]) => c.dispose());
+    m.mi.outer.traverse(o => { if (o.isSkinnedMesh && o.skeleton) o.skeleton.dispose(); });   // скелет копии свой: его текстура костей — тоже освободить
+    m.mi = null;
+  }
   if (m.tok){ R3.scene.remove(m.tok); m.tok.children.forEach(o => { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }); m.tok = null; }
   m.key = '';
 }
