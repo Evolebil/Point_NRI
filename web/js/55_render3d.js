@@ -9,7 +9,7 @@ const R3 = {
   on: false, ready: false, failed: false, loading: false,
   map: null, vox: null, H: 0, NX: 0, NY: 0, NZ: 0, chunks: [], dynFr: null, dynKey: '', dynCells: new Map(),
   fm: [], capGeo: new Map(), fogKey: '', dragged: false, hit: null, voxEd: new Map(), voxAt: 0,   // voxEd — правки кубов боя по клеткам
-  view: {tx: 0, ty: 0, tz: 0, yaw: .65, pitch: .95, dist: 30, fdist: 22},
+  view: {tx: 0, ty: 0, tz: 0, yaw: .65, pitch: .95, dist: 30, fdist: 22, kind: 'tac', pp: .45, pd: 5, fp: .25},   // kind: tac / third / first (решение №2)
   fps: 0, fpsN: 0, fpsT0: 0
 };
 const VZ0 = 2;      // кубов под уровнем «0» нынешней карты: дно ущелья
@@ -37,7 +37,7 @@ R3.load = function(){
   document.head.appendChild(s);
 };
 if (R3.want) R3.load();
-R3.fail = function(msg){ R3.failed = true; R3.on = false; if (R3.cv) R3.cv.style.display = 'none'; console.error(msg); toast(msg + ' — показан 2D-вид.'); r3SyncSeg(); };
+R3.fail = function(msg){ R3.failed = true; R3.on = false; if (R3.cv) R3.cv.style.display = 'none'; console.error(msg); toast(msg + ' — показан 2D-вид.'); r3SyncSeg(); R3.syncCamBtn(); };
 // Настройка «Вид боя»: 3D — следующий бой в режиме кубов (путь, обзор, области — по кубам), идущий бой — 3D-видом сразу;
 // 2D — прежний вид и прежний бой по слоям
 R3.setWant = function(v){
@@ -45,7 +45,7 @@ R3.setWant = function(v){
   try { localStorage.setItem('dnd_view', v ? '3d' : '2d'); } catch (e) {}
   if (v && !R3.ready) R3.load();
   else if (R3.ready){ R3.on = v; R3.cv.style.display = v ? 'block' : 'none'; cam.snap = true; R3.hit = null; $('view3dBtn').textContent = v ? 'Вид: 3D' : 'Вид: 2D'; }
-  r3SyncSeg();
+  r3SyncSeg(); if (R3.ready) R3.syncCamBtn();
 };
 function r3SyncSeg(){
   const seg = $('viewSeg'); if (!seg || !seg.querySelectorAll) return;
@@ -85,6 +85,7 @@ R3.init = function(){
   R3.bindInput();
   R3.ready = true; R3.on = R3.want;
   if (!R3.on) R3.cv.style.display = 'none';
+  R3.syncCamBtn();
   const b = $('view3dBtn'); if (b){ b.hidden = false; b.textContent = R3.on ? 'Вид: 3D' : 'Вид: 2D'; }
   r3SyncSeg();
 };
@@ -287,7 +288,7 @@ R3.syncFighters = function(fr, t){
     }
     const n = f.n || 1, boss = f.ld != null ? !!f.ld : f.kind < 2;
     if (m.n !== n || m.sz !== f.sz){ m.body.geometry = m.ghost.geometry = r3Cap(n, f.sz); m.n = n; m.sz = f.sz; }
-    const hide = (f.hid && typeof G !== 'undefined') || (f.hp <= 0 && !boss);
+    const hide = (f.hid && typeof G !== 'undefined') || (f.hp <= 0 && !boss) || (R3.view.kind === 'first' && k === (G.req ? G.req.me : G.me));   // 1-е лицо: себя не видно
     m.body.visible = m.shadow.visible = m.ghost.visible = !hide; if (hide) return;
     const c = r3Colors(f); if (c !== m.col){ m.mat.color.set(c); m.gmat.color.set(c); m.col = c; }
     const p = posAt(k, t), a = FR[prevIdx].f[k], tele = FR[curIdx].act === 'teleport' && FR[curIdx].actor === k;
@@ -306,8 +307,22 @@ R3.syncFighters = function(fr, t){
 };
 
 // ---- камера: тактическая (вращение, наклон, приближение); режимы кнопки «Камера» — те же, что у 2D ----
+// своя фигура для камер от первого и третьего лица: свой боец (в реплее — первый)
+function r3MeObj(list){ const me = G.req ? G.req.me : G.me; return list.find(o => o.k === me) || list.find(o => o.k === 0); }
 R3.camUpdate = function(list){
-  const v = R3.view, W = cvW(), H = cvH();
+  const v = R3.view, W = cvW(), H = cvH(), C = R3.camera, o = v.kind !== 'tac' ? r3MeObj(list) : null;
+  if (o){   // 3-е лицо — за спиной героя на расстоянии pd, 1-е — из глаз; мышь — поворот (yaw) и наклон (pp / fp)
+    const fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
+    if (v.kind === 'third'){
+      const ty = o.Y + o.h * .8, c = Math.cos(v.pp), s = Math.sin(v.pp);
+      C.position.set(o.X + v.pd * c * fx, ty + v.pd * s + .3, o.Z + v.pd * c * fz); C.lookAt(o.X, ty, o.Z);
+    } else {
+      const ey = o.Y + r3Eye(o.f), c = Math.cos(v.fp);
+      C.position.set(o.X, ey, o.Z); C.lookAt(o.X - fx * c, ey - Math.sin(v.fp), o.Z - fz * c);
+    }
+    if (C.aspect !== W / H){ C.aspect = W / H; C.updateProjectionMatrix(); }
+    return;
+  }
   if (cam.mode === 'fit'){ v.tx = AW / 2; v.tz = AH / 2; v.ty = VZ0; v.dist = Math.max(AW, AH) * 1.05; }
   else if (cam.mode === 'follow'){
     const fr = FR[curIdx], A = fr.actor, me = G.req ? G.req.me : G.me;
@@ -316,7 +331,7 @@ R3.camUpdate = function(list){
     v.dist = v.fdist;
   }
   cam.snap = false;
-  const cp = Math.cos(v.pitch), sp = Math.sin(v.pitch), C = R3.camera;
+  const cp = Math.cos(v.pitch), sp = Math.sin(v.pitch);
   C.position.set(v.tx + v.dist * cp * Math.sin(v.yaw), v.ty + v.dist * sp, v.tz + v.dist * cp * Math.cos(v.yaw));
   C.lookAt(v.tx, v.ty, v.tz);
   if (C.aspect !== W / H){ C.aspect = W / H; C.updateProjectionMatrix(); }
@@ -342,6 +357,8 @@ R3.bindInput = function(){
       if (pinch > 0) R3.zoom(pinch / Math.max(1, d)); pinch = d; R3.pan(dx / 2, dy / 2); return;
     }
     if (!R3.dragged) return;
+    if (v.kind === 'third'){ v.yaw -= dx * .008; v.pp = Math.max(.05, Math.min(1.3, v.pp + dy * .006)); return; }
+    if (v.kind === 'first'){ v.yaw -= dx * .006; v.fp = Math.max(-1.2, Math.min(1.2, v.fp + dy * .005)); return; }
     if (last.b === 2 || last.b === 1 || last.sh) R3.pan(dx, dy);
     else { v.yaw -= dx * .008; v.pitch = Math.max(.22, Math.min(1.5, v.pitch + dy * .006)); }
   });
@@ -349,10 +366,14 @@ R3.bindInput = function(){
   cv.addEventListener('wheel', e => { if (!R3.on) return; e.preventDefault(); R3.zoom(e.deltaY < 0 ? 1 / 1.12 : 1.12); }, {passive: false});
 };
 R3.zoom = function(f){
-  const v = R3.view; if (cam.mode === 'fit') setCamMode('free');
+  const v = R3.view;
+  if (v.kind === 'third'){ v.pd = Math.max(2, Math.min(14, v.pd * f)); return; }
+  if (v.kind === 'first') return;
+  if (cam.mode === 'fit') setCamMode('free');
   v.dist = Math.max(4, Math.min(Math.max(AW, AH) * 2.4, v.dist * f)); if (cam.mode === 'follow') v.fdist = v.dist;
 };
 R3.pan = function(dx, dy){
+  if (R3.view.kind !== 'tac') return;   // камера привязана к герою
   const v = R3.view, k = v.dist * .0016, c = Math.cos(v.yaw), s = Math.sin(v.yaw);
   if (cam.mode !== 'free') setCamMode('free');
   v.tx = Math.max(0, Math.min(AW, v.tx - (dx * c + dy * s) * k)); v.tz = Math.max(0, Math.min(AH, v.tz - (-dx * s + dy * c) * k));
@@ -568,10 +589,27 @@ R3.draw = function(now, t, tt){
 // переключатель вида в бою (виден после загрузки библиотеки): только на этот бой, настройку не меняет; 2D остаётся запасным
 $('view3dBtn').onclick = () => {
   if (!R3.ready || R3.failed) return;
-  R3.on = !R3.on; R3.cv.style.display = R3.on ? 'block' : 'none'; cam.snap = true; R3.hit = null;
+  R3.on = !R3.on; R3.cv.style.display = R3.on ? 'block' : 'none'; cam.snap = true; R3.hit = null; R3.syncCamBtn();
   $('view3dBtn').textContent = R3.on ? 'Вид: 3D' : 'Вид: 2D';
 };
 if ($('viewSeg') && $('viewSeg').addEventListener){
   $('viewSeg').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) R3.setWant(b.dataset.view === '3d'); });
   r3SyncSeg();
+}
+// камера (решение №2): тактика → 3-е лицо → 1-е лицо; кнопка в бою и клавиша V (только в 3D)
+const CAMK = {tac: '🎯 Тактика', third: '🧍 3-е лицо', first: '👁 1-е лицо'};
+R3.setCamKind = function(k){
+  R3.view.kind = k; R3.hit = null;
+  if (k !== 'tac'){ R3.view.pp = .45; R3.view.fp = .25; }   // наклон — заново, поворот (yaw) — тот же, что у тактики
+  const b = $('camKindBtn'); if (b && b.textContent != null) b.textContent = CAMK[k];
+  try { localStorage.setItem('dnd_cam3d', k); } catch (e) {}
+};
+R3.syncCamBtn = function(){ const b = $('camKindBtn'); if (b && 'hidden' in b) b.hidden = !R3.on; };
+if ($('camKindBtn') && $('camKindBtn').addEventListener){
+  $('camKindBtn').addEventListener('click', () => R3.setCamKind(R3.view.kind === 'tac' ? 'third' : (R3.view.kind === 'third' ? 'first' : 'tac')));
+  document.addEventListener('keydown', e => {
+    if (!R3.on || e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || '')) return;
+    if (e.key === 'v' || e.key === 'V' || e.key === 'м' || e.key === 'М') $('camKindBtn').click();
+  });
+  try { const k = localStorage.getItem('dnd_cam3d'); if (CAMK[k]) R3.setCamKind(k); } catch (e) {}
 }
