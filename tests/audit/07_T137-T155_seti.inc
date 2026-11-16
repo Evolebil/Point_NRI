@@ -426,7 +426,7 @@
         std::string err;
         const bool good = parseCustomMap(parseJson(mk2(12, 9, "", -1, ",\"starts\":[[1,4],[10,4]]")), m, err);
         const bool small = !parseCustomMap(parseJson(mk2(4, 9, "", -1, "")), m, err);
-        const bool split = !parseCustomMap(parseJson(mk2(12, 9, "", 6, "")), m, err);
+        const bool split = parseCustomMap(parseJson(mk2(12, 9, "", 6, "")), m, err) && m.on;   // разделена стеной — можно (решение владельца 2026-11-16)
         const bool badStart = !parseCustomMap(parseJson(mk2(12, 9, "", 6, ",\"starts\":[[6,2],[10,4]]")), m, err);
         const bool oneStart = !parseCustomMap(parseJson(mk2(12, 9, "", -1, ",\"starts\":[[1,4]]")), m, err);
         parseCustomMap(parseJson(mk2(12, 9, "", -1, ",\"starts\":[[1,4],[10,4]]")), g_customMap, err);
@@ -439,6 +439,6 @@
         g_customMap = CustomMap();
         bool startsOk = !frames.empty() && frames[0].find("\"x\":1,\"y\":4,") != std::string::npos && frames[0].find("\"x\":10,\"y\":4,") != std::string::npos;
         const bool sizeOk = mapJson.find("\"aw\":12,\"ah\":9") != std::string::npos;
-        T("T155", "§карта игрока: размер 5–100, свободные клетки связаны, начальные клетки свободны и заданы парой; бой идёт на этой карте с этих клеток", good && small && split && badStart && oneStart && startsOk && sizeOk && r >= 0,
-          fmt("верная %d, мала %d, разделена %d, старт на стене %d, одна стартовая %d, бой на 12×9 %d, старт на местах %d", good, small, split, badStart, oneStart, sizeOk, startsOk));
+        T("T155", "§карта игрока: размер 5–100, разделённая на части — годится, начальные клетки свободны и заданы парой; бой идёт на этой карте с этих клеток", good && small && split && badStart && oneStart && startsOk && sizeOk && r >= 0,
+          fmt("верная %d, мала %d, разделённая принята %d, старт на стене %d, одна стартовая %d, бой на 12×9 %d, старт на местах %d", good, small, split, badStart, oneStart, sizeOk, startsOk));
     }

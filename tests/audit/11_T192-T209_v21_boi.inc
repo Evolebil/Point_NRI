@@ -382,7 +382,7 @@
         pushAway(w, w.f[1], w.f[0], 10);
         const bool pushOff = !w.f[0].up && w.f[0].y == 14 && w.f[0].hp < hp0;
         g_curW = nullptr;
-        // карта игрока: обрыв без лестницы — разделена, с лестницей — годится
+        // карта игрока: обрыв без лестницы (две части) и с лестницей — обе годятся (связность не требуется, решение владельца 2026-11-16)
         auto mapJ = [](bool lad) {
             std::string h = "[", l = "[";
             for (int y = 0; y < 8; y++) {
@@ -394,11 +394,11 @@
         CustomMap cm;
         std::string err1, err2;
         bool okJ = true;
-        const bool bad = !parseCustomMap(parseJson(mapJ(false), &okJ), cm, err1), good = parseCustomMap(parseJson(mapJ(true), &okJ), cm, err2);
+        const bool twoParts = parseCustomMap(parseJson(mapJ(false), &okJ), cm, err1), good = parseCustomMap(parseJson(mapJ(true), &okJ), cm, err2);
         T("T198", "§v21 высоты и ярусы: обрыв (пешком нет, лестница, летун под небом), рост под настилом, путь на настил, обзор сквозь настил, обрушение, толчок с настила, проверка карты",
-          cliff && ladder && clearance && roofFly && onDeckPath && dUpDown == 20 && slab && col && pushOff && bad && good,
-          fmt("обрыв %d, лестница %d, рост %d, летун под навесом %d, путь на настил %d, на настиле↔внизу %d фт, обзор закрыт %d, обрушение %d, толчок с настила %d, карта: без лестницы «%s», с лестницей %d",
-              cliff, ladder, clearance, roofFly, onDeckPath, dUpDown, slab, col, pushOff, err1.substr(0, 40).c_str(), good));
+          cliff && ladder && clearance && roofFly && onDeckPath && dUpDown == 20 && slab && col && pushOff && twoParts && good,
+          fmt("обрыв %d, лестница %d, рост %d, летун под навесом %d, путь на настил %d, на настиле↔внизу %d фт, обзор закрыт %d, обрушение %d, толчок с настила %d, карта: без лестницы %d «%s», с лестницей %d",
+              cliff, ladder, clearance, roofFly, onDeckPath, dUpDown, slab, col, pushOff, twoParts, err1.substr(0, 40).c_str(), good));
     }
     // T199: мир из шума — участок определяется зерном мира и координатами: тот же мир, построенный заново, и любое окно кэша
     // дают те же клетки; другое зерно — другой мир

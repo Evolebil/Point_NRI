@@ -129,7 +129,7 @@ int main() {
             g_volGen = true;
             regionArena(rw, d, cmd["w"].num(200), cmd["h"].num(200));
             g_volGen = false;
-            emitLine("{\"type\":\"map\",\"map\":{\"parts\":1," + mapToJson(rw).substr(1) + "}");
+            emitLine("{\"type\":\"map\",\"map\":" + mapToJson(rw) + "}");
         } else if (c == "checkmap") {
             CustomMap m;
             std::string err;

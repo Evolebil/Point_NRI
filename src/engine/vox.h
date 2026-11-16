@@ -248,6 +248,24 @@ inline bool vxStandEx(const World& w, const Fighter& f, int x, int y, int z, boo
     return sup;
 }
 inline bool vxStand(const World& w, const Fighter& f, int x, int y, int z) { return vxStandEx(w, f, x, y, z, f.b.fly); }
+// Тьма под крышей и под землёй (решение владельца 2026-11-16): над каждой клеткой квадрата бойца выше головы есть твёрдый
+// непрозрачный куб (листва, лёд, барьер небо не закрывают) — неба нет, там темно, как в тьме по D&D (canSee: без тёмного или
+// истинного зрения и без света цель не видна), и солнце не светит
+inline bool vxNoSky(const World& w, const Fighter& f) {
+    if (!w.vx) return false;
+    const VoxWorld& v = *w.vx;
+    const int n = fpFull(f);
+    for (int dy = 0; dy < n; dy++)
+        for (int dx = 0; dx < n; dx++) {
+            bool roof = false;
+            for (int z = f.z + std::max(1, n); z < v.sz && !roof; z++) {
+                const unsigned char m = v.at(f.x + dx, f.y + dy, z);
+                roof = MAT[m].solid && !MAT[m].seeThru;
+            }
+            if (!roof) return false;
+        }
+    return true;
+}
 // тело f в кубе z свободно (воздух или жидкость; копателю — и копаемое; крупному — хотя бы протиснувшись): туда можно упасть
 inline bool vxBodyFree(const World& w, const Fighter& f, int x, int y, int z) { return vxFitN(w, f, x, y, z) > 0; }
 // у клетки (x, y) на высоте z — дерево (ствол или крона) в ней или с какой-нибудь стороны: по нему лезут вверх и вниз
@@ -335,7 +353,10 @@ void vxDijkstra(const World& w, const Fighter& f, int tx, int ty, Visit&& visit)
                     for (int i : foes) foe = foe || touchesAt(w, f, nx, ny, nz, w.f[i]);
                     if (foe) continue;
                     const int n = id(nx, ny, nz), haz = w.haz[ny][nx] && nz == vxTopZ(w, nx, ny) && !(f.b.fly && HAZ[w.haz[ny][nx]].flySafe) ? 1 : 0;
-                    const int nv = c0 + 64 * vxStepCost(w, f, x, y, z, nx, ny, nz) + haz;
+                    // копатель держится под самой поверхностью: глубже второго куба под землёй — +1 к цене (меньше фута): из
+                    // равных путей — мелкий, а не до дна мира
+                    const int deep = f.b.burrowS && nz < VZ0 + w.height[ny][nx] - 2 ? 1 : 0;
+                    const int nv = c0 + 64 * vxStepCost(w, f, x, y, z, nx, ny, nz) + haz + deep;
                     if (stamp[(size_t)n] != cur || nv < cost[(size_t)n]) {
                         stamp[(size_t)n] = cur;
                         cost[(size_t)n] = nv;

@@ -66,7 +66,6 @@ struct CustomMap {
     bool on = false;
     int aw = 0, ah = 0, theme = 0;
     bool old = false;   // старая карта: уровни по 10 фт (без "hz":5)
-    bool parts = false;   // карта из генератора (участок по местности): несвязные карманы можно, бой — в самой большой части
     std::vector<std::string> wall, climb, diff, dark, water, pit, height, tree, haz, ladder, deck, door, strong;
     int start[2][2] = {{-1, -1}, {-1, -1}};
     std::map<int, std::pair<int, std::string>> vx;   // слой кубов (World::vxo): ключ y·W + x
@@ -83,13 +82,12 @@ static void readLayer(const Json& j, std::vector<std::string>& out, int aw, int 
 }
 
 static void applyCustomMap(World& w, const CustomMap& m);
-// Разбор и проверка пользовательской карты. Правила: размер 5–100, свободные клетки связаны, начальные клетки свободны
+// Разбор и проверка пользовательской карты. Правила: размер 5–100, связная часть для боя не крошечная (карманы можно), начальные клетки свободны
 static bool parseCustomMap(const Json& j, CustomMap& m, std::string& err) {
     m = CustomMap();
     m.aw = j["aw"].num(0);
     m.ah = j["ah"].num(0);
     m.theme = j["theme"].num(0) ? 1 : 0;
-    m.parts = j["parts"].flag(false);
     m.old = j["hz"].num(10) != 5;
     if (m.aw < 5 || m.ah < 5 || m.aw > W || m.ah > W) { err = "размер карты от 5×5 до " + std::to_string(W) + "×" + std::to_string(W) + " клеток"; return false; }
     readLayer(j["wall"], m.wall, m.aw, m.ah);
@@ -126,16 +124,14 @@ static bool parseCustomMap(const Json& j, CustomMap& m, std::string& err) {
     }
     if ((m.start[0][0] >= 0) != (m.start[1][0] >= 0)) { err = "задайте обе начальные клетки (A и B) или ни одной"; return false; }
     if (m.hasStarts() && m.start[0][0] == m.start[1][0] && m.start[0][1] == m.start[1][1]) { err = "начальные клетки A и B совпадают"; return false; }
-    // связность: средний пешеход по правилам движка (обрывы — только лестницей, на дерево — залезть, под настилом — по росту)
-    // доходит от любой клетки земли до любой; настил без доступа — просто потолок
+    // свободные клетки и основная часть: средний пешеход по правилам движка (обрывы — только лестницей, на дерево — залезть,
+    // под настилом — по росту); настил без доступа — просто потолок
     static thread_local World tw;
     m.on = true;
     applyCustomMap(tw, m);
     m.on = false;
     Fighter walker;
     walker.b.size = 2;
-    std::vector<char> seen((size_t)m.aw * m.ah * 2, 0);
-    auto id = [&](int x, int y, int l) { return (l * m.ah + y) * m.aw + x; };
     int freeN = 0, sx = -1, sy = -1;
     for (int y = 0; y < m.ah; y++)
         for (int x = 0; x < m.aw; x++)
@@ -144,35 +140,10 @@ static bool parseCustomMap(const Json& j, CustomMap& m, std::string& err) {
                 if (sx < 0 && !tw.tree[y][x]) { sx = x; sy = y; }
             }
     if (freeN < 4 || sx < 0) { err = "на карте меньше четырёх свободных клеток"; return false; }
-    if (m.parts) {   // как арены из мира: обрезанные окном дома и замкнутые уступы — карманы; бой идёт в основной части
-        if (markMain(tw) < std::max(4, freeN / 5) || startCellsN(tw) < 2) { err = "на участке мало связного места для боя"; return false; }
-        m.on = true;
-        return true;
-    }
-    std::vector<std::array<int, 3>> st{{sx, sy, 0}};
-    seen[id(sx, sy, 0)] = 1;
-    int reach = 0;
-    while (!st.empty()) {
-        const auto c = st.back();
-        st.pop_back();
-        if (!c[2]) reach++;
-        for (int dy = -1; dy <= 1; dy++)
-            for (int dx = -1; dx <= 1; dx++)
-                for (int nl = 0; nl < 2; nl++) {
-                    const int nx = c[0] + dx, ny = c[1] + dy;
-                    if ((!dx && !dy) || nx < 0 || ny < 0 || nx >= m.aw || ny >= m.ah || seen[id(nx, ny, nl)] || !stepOK(tw, walker, c[0], c[1], c[2], nx, ny, nl)) continue;
-                    seen[id(nx, ny, nl)] = 1;
-                    st.push_back({nx, ny, nl});
-                }
-    }
-    if (reach != freeN) {
-        int ux = -1, uy = -1;
-        for (int y = 0; y < m.ah && ux < 0; y++)
-            for (int x = 0; x < m.aw; x++)
-                if (nodeOK(tw, walker, x, y, 0) && !seen[id(x, y, 0)]) { ux = x; uy = y; break; }
-        err = "карта разделена на части: " + std::to_string(freeN - reach) + " клеток недостижимы пешком (например, клетка " + std::to_string(ux) + "," + std::to_string(uy) + "). Добавьте проход, мост, подъём уступами или лестницу у обрыва";
-        return false;
-    }
+    // связность не требуется (решение владельца 2026-11-16): карманы, куда пешком не дойти (обрыв без лестницы, замкнутый
+    // уступ, обрезанный дом), — можно, бой идёт в самой большой связной части (markMain), как на участке мира; нужно лишь,
+    // чтобы она не была крошкой
+    if (markMain(tw) < std::max(4, freeN / 5) || startCellsN(tw) < 2) { err = "на карте мало связного места для боя"; return false; }
     m.on = true;
     return true;
 }

@@ -289,6 +289,7 @@ bool canSee(const World& w, const Fighter& v, const Fighter& t) {
     const bool ts = v.b.truesight >= d && !v.cond[C_BLIND];   // истинное зрение (v21): невидимых и сквозь тьму
     if (v.cond[C_BLIND] || t.hidden || (t.invisRounds > 0 && !ts)) return false;
     if (w.dark[t.y][t.x] && v.b.dv < d && !ts) return false;
+    if (w.vx && v.b.dv < d && !ts && vxNoSky(w, t) && !litAt(w, t)) return false;   // режим кубов: под крышей и под землёй темно
     if (fogLine(w, v.x, v.y, zF(w, v), t.x, t.y, zF(w, t))) return false;   // дым или туман между ними (или вокруг одного)
     // ночь (пакет атомов 2, свет): без тёмного зрения неосвещённое видно не дальше 30 фт
     if (!w.day && d > 30 && v.b.dv < d && !ts && !litAt(w, t)) return false;
@@ -344,8 +345,8 @@ bool isKnown(const World& w, int team, int i) {
     const auto& k = w.known[team][i];
     return k[2] >= 0 && k[0] == e.x && k[1] == e.y && k[2] >= g_curRound - 1;
 }
-// на солнце: день, клетка не во тьме и не под навесом (стоящий на настиле — под небом)
-inline bool inSun(const World& w, const Fighter& f) { return w.day && !w.dark[f.y][f.x] && (f.up || !w.deck[f.y][f.x]); }
+// на солнце: день, клетка не во тьме и не под навесом (стоящий на настиле — под небом); в кубах — небо над головой
+inline bool inSun(const World& w, const Fighter& f) { return w.day && !w.dark[f.y][f.x] && (f.up || !w.deck[f.y][f.x]) && !vxNoSky(w, f); }
 void advState(const World& w, const Fighter& a, const Fighter& d, int range, bool& adv, bool& dis) {
     // не видят меня — преимущество; не вижу цель — помеха
     adv = !canSee(w, d, a);
