@@ -342,12 +342,20 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
             if (k) fr += ",";
             const int ht = g_human.ask && g_human.idx >= 0 && g_human.idx < (int)w.f.size() ? w.f[g_human.idx].team : g_fogTeam;
             const int kind = duel ? ((int)k < 2 ? (int)k : 2 + w.f[k].team) : ((int)k < N ? w.f[k].team % 2 : 2 + w.f[k].team % 2);   // команды: цвет — по team
-            std::string fj = fighterJson(w.f[k], kind, !g_human.multi && ht >= 0 && w.f[k].team != ht && !isKnown(w, ht, (int)k));
+            const bool hid = !g_human.multi && ht >= 0 && w.f[k].team != ht && !isKnown(w, ht, (int)k);
+            std::string fj = fighterJson(w.f[k], kind, hid);
+            // живой бой: известен (где стоит), но сейчас не виден — ns; сервер вырезает его ХП, КД и состояния (видно только видимое)
+            if (g_human.ask && !g_human.multi && ht >= 0 && !hid && w.f[k].team != ht && w.f[k].hp > 0 && !teamSees(w, ht, w.f[k]))
+                fj.insert(fj.size() - 1, ",\"ns\":1");
             if (g_human.multi && w.f[k].hp > 0) {   // несколько игроков: кадр общий — команды, от которых боец скрыт (сервер ставит hid каждому)
-                std::string ht2;
-                for (int t = 0; t < nT; t++)
-                    if (t != w.f[k].team && !isKnown(w, t, (int)k)) ht2 += (ht2.empty() ? "" : ",") + std::to_string(t);
+                std::string ht2, ns2;   // ns2 — команды, которые знают, где он, но не видят его
+                for (int t = 0; t < nT; t++) {
+                    if (t == w.f[k].team) continue;
+                    if (!isKnown(w, t, (int)k)) ht2 += (ht2.empty() ? "" : ",") + std::to_string(t);
+                    else if (!teamSees(w, t, w.f[k])) ns2 += (ns2.empty() ? "" : ",") + std::to_string(t);
+                }
                 if (!ht2.empty()) fj.insert(fj.size() - 1, ",\"hT\":[" + ht2 + "]");
+                if (!ns2.empty()) fj.insert(fj.size() - 1, ",\"nsT\":[" + ns2 + "]");
             }
             if (!duel) fj.insert(fj.size() - 1, ",\"lead\":" + std::to_string((int)k < N ? (int)k : w.f[k].summoner) + ",\"ld\":" + ((int)k < N ? "1" : "0"));   // команды: чей это боец
             fr += fj;

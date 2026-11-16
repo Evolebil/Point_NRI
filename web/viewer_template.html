@@ -492,7 +492,7 @@ function frameLog(i){
   }
   for (let k = 0; k < f.length; k++){
     const a = f[k], b = p[k];
-    if (unseen(k) || (b && b.hid)) continue;   // показался из тумана: прежних ХП и состояний игрок не знал
+    if (unseen(k) || (b && b.hid) || a.ns || (b && b.ns)) continue;   // не виден или только показался: его ХП и состояний игрок не знал
     if (!b){ evs.push(`<span class="ev good">${nameOf(k, f)} появляется</span>`); continue; }
     const dh = a.hp + a.temp - (b.hp + b.temp);
     if (b.hp > 0 && a.hp <= 0) evs.push(`<span class="ev bad"><span class="dmg">−${Math.max(0, b.hp + b.temp - a.temp)}</span> ☠ ${nameOf(k, f)} повержен</span>`);
@@ -700,9 +700,9 @@ function spawnFx(i){
   const fr = FR[i], pv = FR[i-1], now = performance.now(), A = fr.actor, dur = ANIM_MS / speed;
   fr.f.forEach((f, k) => {
     const b = pv.f[k];
-    if (f.hid) return;   // туман войны: не видно — ни цифр, ни состояний
+    if (f.hid || f.ns) return;   // туман войны: не видно — ни цифр, ни состояний
     if (!b){ fxs.push({t0: now, dur: 700, kind:'spawn', k}); return; }
-    if (b.hid) return;   // показался из тумана: прежних ХП игрок не знал
+    if (b.hid || b.ns) return;   // показался из тумана: прежних ХП игрок не знал
     const dh = f.hp + f.temp - (b.hp + b.temp);
     if (dh !== 0) fxs.push({t0: now + (A >= 0 && A !== k ? dur * .55 : dur * .3), dur: 1200, kind:'num', k, v: dh});
     f.cond.filter(c => !b.cond.includes(c)).forEach((c, n) => fxs.push({t0: now + dur * .6 + n * 150, dur: 1400, kind:'cond', k, text: c}));
@@ -752,6 +752,7 @@ function drawToken(f, px, py, isActor){
   if (f.hp <= 0 && !boss) return;
   ctx.save();
   if (f.hp <= 0) ctx.globalAlpha *= .55;
+  if (f.ns) ctx.globalAlpha *= .55;   // известен, но не виден: где-то тут, полупрозрачный
   if (isActor && f.hp > 0){ ctx.beginPath(); ctx.arc(px, py, r + 9, 0, 7); ctx.fillStyle = 'rgba(255,214,90,.30)'; ctx.fill(); }
   ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(px + 2, py + r * .8, r * .95, r * .4, 0, 0, 7); ctx.fill();
   const gr = ctx.createRadialGradient(px - r*.35, py - r*.35, r*.1, px, py, r);
@@ -762,7 +763,7 @@ function drawToken(f, px, py, isActor){
   ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `800 ${Math.round(r * (boss ? 1.1 : .95))}px system-ui`;
   ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.35)'; const glyph = f.hp <= 0 ? '✖' : (boss ? (tc ? String(f.team + 1) : SIDE[side]) : '•'); ctx.strokeText(glyph, px, py + 1); ctx.fillText(glyph, px, py + 1);
   if (f.fled && f.hp > 0){ ctx.font = '800 14px system-ui'; ctx.textBaseline = 'alphabetic'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.strokeText('сбежал', px, py - r - 26); ctx.fillText('сбежал', px, py - r - 26); }
-  if (f.hp > 0){
+  if (f.hp > 0 && !f.ns){   // не виден (известно лишь, где стоит) — ХП не показываются
     const bw = Math.max(boss ? 64 : 36, r * 2.4), bh = boss ? 9 : 6, bx = px - bw / 2, by = py - r - (boss ? 17 : 12);
     ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
     const p = Math.max(0, f.hp / f.maxHp); ctx.fillStyle = p > .5 ? '#5fd08a' : (p > .25 ? '#f2c14e' : '#ff5d5d'); ctx.fillRect(bx, by, bw * p, bh);

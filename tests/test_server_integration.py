@@ -377,6 +377,20 @@ class TestFogInData(unittest.TestCase):
         self.assertEqual(out["f"][0], frames[0]["f"][0])                              # видимый — как есть
         self.assertEqual(frames[0]["f"][1]["hp"], 133)                                # исходный кадр не испорчен
 
+    def test_known_but_unseen_only_position(self):
+        """Известен, где стоит, но не виден (ns): остаётся только положение — без ХП, КД, состояний, типа; события о нём не уходят."""
+        fr = [{"actor": 0, "ev": [{"k": "save", "who": 1}], "f": [{"x": 1, "y": 1, "hp": 5, "team": 0, "kind": 0, "cond": []},
+               {"x": 4, "y": 6, "z": 3, "hp": 90, "maxHp": 90, "ac": 17, "cond": ["отравлен"], "team": 1, "kind": 1, "ct": 4, "lt": 20, "ns": 1}]}]
+        f = ps.mask_hidden(fr, {})[0]
+        g = f["f"][1]
+        self.assertEqual((g["x"], g["y"], g["z"], g["ns"], g["hp"], g["ac"], g["cond"]), (4, 6, 3, 1, 1, 0, []))
+        self.assertNotIn("hid", g)
+        for k in ("ct", "lt"):
+            self.assertNotIn(k, g)
+        self.assertEqual(f["ev"], [])
+        room = ps.fog_frames([{"f": [{"team": 0}, {"team": 1, "hp": 50, "nsT": [0], "hT": [2]}]}], 0)[0]["f"][1]
+        self.assertEqual((room.get("ns"), "nsT" in room, "hT" in room), (1, False, False))   # комната: по команде зрителя
+
     def test_events_about_hidden_dropped(self):
         ev = [{"k": "save", "who": 1}, {"k": "fall", "who": 1, "dmg": 3}, {"k": "roll", "who": 1, "tgt": 0, "d20": 12},
               {"k": "roll", "who": 0, "tgt": 1, "d20": 5}, {"k": "order", "who": 2, "tgt": 1}, {"k": "door", "x": 1, "y": 2}]
@@ -427,6 +441,9 @@ class TestFogInData(unittest.TestCase):
                         if f.get("hid"):
                             hidden += 1
                             self.assertEqual((f["x"], f["y"], f["hp"], f["cond"]), (-1, -1, 1, []), f)
+                        elif f.get("ns"):   # известен, но не виден: только где стоит
+                            hidden += 1
+                            self.assertEqual((f["hp"], f["maxHp"], f["ac"], f["cond"]), (1, 1, 0, []), f)
                 if out["type"] != "turn":
                     break
                 out = api({"cmd": "step", "sid": "it-fog", "c": "end"})

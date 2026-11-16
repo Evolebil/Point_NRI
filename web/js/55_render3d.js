@@ -563,7 +563,7 @@ function r3Role(fr, k, f, t, moved){
   const live = stepT0 > -1e8 && t < 1;
   if (live && moved) return Math.hypot(moved[0], moved[1]) > 3 ? 'run' : 'walk';
   if (live && fr.actor === k && /^(attack|ability|alt|legendary)/.test(fr.act || '')) return 'atk';
-  const a = FR[prevIdx] && FR[prevIdx].f[k]; if (live && a && !a.hid && f.hp < a.hp) return 'hit';
+  const a = FR[prevIdx] && FR[prevIdx].f[k]; if (live && a && !a.hid && !a.ns && !f.ns && f.hp < a.hp) return 'hit';
   return 'idle';
 }
 // свет бойцов (lt — радиус в футах, режим кубов) и тьма: боец под крышей без света рядом — темнее, как рельеф
@@ -790,6 +790,7 @@ function r3Text(txt, x, y, font, fill, w = 4){ ctx.font = font; ctx.textAlign = 
 function r3Labels(list, fr){
   list.forEach(o => {
     const {f, boss} = o; if (f.hp <= 0 && !boss) return;
+    if (f.ns){ const p = r3P(o.X, o.Y + o.h + .15, o.Z); if (p.ok) r3Text('?', p.x, p.y, '800 16px system-ui', '#ddd'); return; }   // известен, но не виден: ХП не показываются
     const hd = r3P(o.X, o.Y + o.h + .15, o.Z); if (!hd.ok) return;
     const px = hd.x, py = hd.y;
     const img = tokenPortrait(f);

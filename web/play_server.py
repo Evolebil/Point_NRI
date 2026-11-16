@@ -192,16 +192,19 @@ def fog_frames(frames, team):
     out = []
     for fr in frames:
         fs = fr.get("f") if isinstance(fr, dict) else None
-        if not fs or not any("hT" in f for f in fs):
+        if not fs or not any("hT" in f or "nsT" in f for f in fs):
             out.append(fr)
             continue
         nf = []
         for f in fs:
-            if "hT" in f:
-                hidden = team is not None and team in f["hT"]
-                f = {k: v for k, v in f.items() if k != "hT"}
+            if "hT" in f or "nsT" in f:
+                hidden = team is not None and team in f.get("hT", [])
+                unseen = team is not None and team in f.get("nsT", [])   # знает, где он, но не видит
+                f = {k: v for k, v in f.items() if k not in ("hT", "nsT")}
                 if hidden:
                     f["hid"] = 1
+                elif unseen:
+                    f["ns"] = 1
             nf.append(f)
         out.append(dict(fr, f=nf))
     return out
@@ -210,7 +213,10 @@ def fog_frames(frames, team):
 # Туман войны в данных (2026-11-16): чего игрок не видит, того нет и в ответе сервера — иначе всё читается в сетевых
 # ответах браузера. Скрытый (hid) боец — пустой: место в списке, сторона и команда, без координат, ХП, КД, состояний.
 HID_KEEP = ("kind", "team", "lead", "ld")
+# известен, но не виден (ns): видно только, где он стоит
+NS_KEEP = HID_KEEP + ("x", "y", "z", "n", "sz", "up", "alt", "fled")
 HID_BLANK = {"hid": 1, "x": -1, "y": -1, "hp": 1, "maxHp": 1, "ac": 0, "temp": 0, "exh": 0, "dash": 0, "dashLim": 0, "spd": 0, "fled": 0, "cond": []}
+NS_BLANK = dict({k: v for k, v in HID_BLANK.items() if k not in ("hid", "x", "y")}, ns=1)
 # события о скрытом бойце (кроме броска атаки по видимой цели) не уходят
 EV_WHO = ("who", "tgt", "prey")
 
@@ -233,11 +239,13 @@ def mask_hidden(frames, pend):
             out.append(fr)
             continue
         hidden = {i for i, f in enumerate(fs) if isinstance(f, dict) and f.get("hid")}
-        if not hidden and not pend:
+        unseen = {i for i, f in enumerate(fs) if isinstance(f, dict) and f.get("ns") and not f.get("hid")}
+        if not hidden and not unseen and not pend:
             out.append(fr)
             continue
         fr = dict(fr)
-        fr["f"] = [dict(HID_BLANK, **{k: f[k] for k in HID_KEEP if k in f}) if i in hidden else f for i, f in enumerate(fs)]
+        fr["f"] = [dict(HID_BLANK, **{k: f[k] for k in HID_KEEP if k in f}) if i in hidden else
+                   dict(NS_BLANK, **{k: f[k] for k in NS_KEEP if k in f}) if i in unseen else f for i, f in enumerate(fs)]
         ev = [e for e in (fr.get("ev") or [])]
         a = fr.get("actor", -1)
         if a in hidden:
@@ -246,7 +254,7 @@ def mask_hidden(frames, pend):
             fr.update(act="none", target=-1, abil=-1)
             fr.pop("cell", None)
             fr.pop("legendary", None)
-        ev = [e for e in ev if not _ev_hidden(e, hidden)]
+        ev = [e for e in ev if not _ev_hidden(e, hidden | unseen)]
         for k in [k for k in pend if k not in hidden]:   # копатель показался — вырытое им видно
             ev = pend.pop(k) + ev
         fr["ev"] = ev
