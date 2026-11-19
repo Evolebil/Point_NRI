@@ -68,6 +68,7 @@ async function loadPlayer(name){
 }
 // вернуться туда, где был: комната (по имени) или незаконченный поиск быстрого боя
 async function resumeSession(name){
+  if (await resumeSolo()) return;   // одиночный бой, прерванный перезагрузкой
   const me = await api({cmd:'player_load', name});
   if (me && me.room){
     ROOM.code = me.room; ROOM.n = 0; G.room = '';
@@ -84,9 +85,13 @@ async function resumeSession(name){
 function askName(required){
   const cur = playerName();
   const m = modal(required ? 'Как вас зовут?' : 'Сменить имя', `<label class="field">Имя игрока<input id="nmIn" maxlength="24" value="${esc(cur)}" autocomplete="nickname"></label>
-    <div class="small">От 1 до 24 символов. Под этим именем сохраняются персонажи, место в комнате и кампании — войдите с ним на любом устройстве.</div><div class="form-err" id="nmErr"></div>`,
+    <div class="small">От 1 до 24 символов (<span id="nmCnt">0</span> / 24). Это ваш профиль без пароля: под этим именем сохраняются персонажи, место в комнате и кампании — войдите с ним на любом устройстве.</div><div class="form-err" id="nmErr"></div>`,
     `${required ? '' : '<button data-close>Отмена</button>'}<button class="primary" id="nmOk">Сохранить</button>`, {required});
   const input = m.q('#nmIn');
+  const cnt = () => { m.q('#nmCnt').textContent = input.value.length; m.q('#nmErr').textContent = ''; };   // прежняя ошибка уходит при вводе
+  input.addEventListener('input', cnt); cnt();
+  // вставка длиннее 24 знаков обрезается полем молча — сказать об этом
+  input.addEventListener('paste', e => { const t = (e.clipboardData || {}).getData ? e.clipboardData.getData('text') : ''; if (t && input.value.length - (input.selectionEnd - input.selectionStart) + t.trim().length > 24) setTimeout(() => { m.q('#nmErr').textContent = 'Имя длиннее 24 символов — лишнее отрезано.'; }, 0); });
   const ok = async () => {
     const v = input.value.trim(); if (!v || v.length > 24){ m.q('#nmErr').textContent = 'Введите имя от 1 до 24 символов.'; input.focus(); return; }
     m.q('#nmOk').disabled = true;
@@ -204,7 +209,7 @@ function openSearch(budget, elapsed){
   stopSearch();
   const p = quickProfile(budget), price = lastPrice && lastPrice.ok ? lastPrice.boss : null;
   searchModal = modal('', `<div class="spinner" aria-hidden="true"></div><h2>Ищем соперника на ${budget} очков</h2><div class="search-clock tnum"><span id="srClock">0:00</span> <small>/ 1:00</small></div>
-    <div class="progress"><i id="srBar"></i></div><p class="muted">Если никто не найдётся, подберём бота-нейросеть на те же ${budget} очков.</p>
+    <div class="progress"><i id="srBar"></i></div><p class="muted">Если никто не найдётся, подберём бота на те же ${budget} очков.</p>
     <div class="chip-row"><span>${esc(p ? p.name : S.name)}</span><span class="muted">${price ? price.hp + ' ХП · КД ' + price.ac : ''}</span></div>
     <button class="danger" id="srCancel" type="button">Отмена</button>`, '', {required: true, cls: 'search'});
   Q.searching = true; showSearch(elapsed);
@@ -274,7 +279,8 @@ function budgetOf(el){
   return v;
 }
 function createCharacter(budget, from, presetK){
-  const c = clone(DEFAULT_CHAR); c.budget = budget; c.name = 'Новый персонаж';
+  const c = clone(DEFAULT_CHAR), used = new Set(readProfiles().map(p => p.name)); c.budget = budget; c.name = 'Новый персонаж';
+  for (let k = 2; used.has(c.name); k++) c.name = 'Новый персонаж ' + k;   // три «Новых персонажа» подряд не различить
   const list = readProfiles(), p = {id: newId(), name: c.name, budget, character: c}; list.push(p); writeProfiles(list);
   setActive(p); openEditorFor(p.id, from);
   if (presetK != null){ applyCharPreset(presetK); }
@@ -330,8 +336,14 @@ ROUTE_ENTER.editor = () => { if (!activeProfile()){ go('characters'); return; } 
 ROUTE_BACK.editor = () => $('edSave').click();
 $('edSave').onclick = () => {
   save();
-  if (lastPrice && !lastPrice.ok) toast('Сохранено, но персонаж пока не готов к бою: ' + (lastPrice.err || ''), 6000, true);
-  else toast('Персонаж сохранён');
+  if (lastPrice && !lastPrice.ok){   // не готов к бою: сохранено, но предложить сразу открыть шаг с ошибкой
+    const k = stepIssue(), m = modal('Персонаж пока не готов к бою', `<p>Сохранено. Ошибка: ${esc(lastPrice.err || '')}</p>`,
+      `<button id="edLeave">Выйти без исправления</button><button class="primary" id="edFix">${k >= 0 ? `Открыть шаг «${esc(STEPS[k].label || STEPS[k].n)}»` : 'Исправить'}</button>`);
+    m.q('#edLeave').onclick = () => { m.close(); go(edReturn); };
+    m.q('#edFix').onclick = () => { m.close(); if (k >= 0) goStep(k); };
+    return;
+  }
+  toast('Персонаж сохранён');
   go(edReturn);
 };
 $('stepBar').addEventListener('click', e => { const b = e.target.closest('[data-step]'); if (b) goStep(+b.dataset.step); });
@@ -395,7 +407,7 @@ function roomCharPack(id){
 
 // ---- настройки ----
 const THEMES = [['system', 'Как в системе'], ['dark', 'Тёмная'], ['light', 'Светлая'], ['red-black', 'Красно-чёрная'], ['red-navy', 'Красно-тёмно-синяя'], ['forest', 'Лесная']];
-$('themeGrid').innerHTML = THEMES.map(([v, n]) => `<button type="button" class="theme-tile" data-theme="${v}"><i class="sw tt-${v}"></i><span>${n}</span></button>`).join('');
+$('themeGrid').innerHTML = THEMES.map(([v, n]) => `<button type="button" class="theme-tile" data-theme="${v}" aria-label="Тема: ${n}" title="Тема: ${n}"><i class="sw tt-${v}" aria-hidden="true"></i><span>${n}</span></button>`).join('');
 function renderSettings(){
   $('setName').textContent = playerName() || 'не задано';
   $('setNameBtn').disabled = !!ROOM.code || G.active; $('setNameBtn').title = $('setNameBtn').disabled ? 'Сначала выйдите из комнаты или боя' : '';
@@ -453,9 +465,9 @@ function wdDraw(){
 }
 const wdMark = () => wsSaved($('wdSavedInd'), wdDirty() ? 'dirty' : 'ok');   // индикатор сохранения (В-04)
 function wdFromInputs(){
-  const name = $('wdName').value.trim().slice(0, 40), seed = Math.max(1, Math.trunc(+$('wdSeed').value) || 0), cells = +$('wdSize').value;
+  const name = $('wdName').value.trim().slice(0, 40), sv = +$('wdSeed').value, seed = Math.trunc(sv), cells = +$('wdSize').value;
   if (!name){ toast('Назовите мир', 4000, true); return null; }
-  if (!seed){ toast('Зерно — целое число больше нуля', 4000, true); return null; }
+  if (!Number.isFinite(sv) || seed !== sv || seed < 1){ toast('Зерно — целое число больше нуля', 4000, true); $('wdSeed').focus(); return null; }
   return {id: 'world-' + Date.now().toString(36), name, seed: String(seed), cells, theme: +$('wdTheme').value || 0};
 }
 ROUTE_ENTER.worlds = () => { wdList(); if (!WD.cur){ const l = readWorlds(); if (l[0]) wdOpen(l[0]); else { const w = wdFromInputs(); if (w){ w.id = ''; wdOpen(w); } } } else requestAnimationFrame(wdDraw); };

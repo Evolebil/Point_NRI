@@ -528,7 +528,7 @@ async function meValidate(){
   if (r.type === 'mapcheck'){ meMsg(r.ok ? 'Карта подходит для боя.' : r.err, r.ok ? 'ok' : 'err'); return r.ok; }
   meMsg(r.err || 'ошибка', 'err'); return false;
 }
-$('meCheck').onclick = meValidate;
+$('meCheck').onclick = async () => { const ok = await meValidate(); toast($('meMsg').textContent || (ok ? 'Карта подходит для боя.' : 'Карта не подходит'), 4500, !ok); };   // итог проверки — всегда на виду
 async function meSaveNow(){
   ME.name = ($('meName').value || '').trim().slice(0, 60) || 'Без названия'; $('meName').value = ME.name;
   if (!(await meValidate())) return false;

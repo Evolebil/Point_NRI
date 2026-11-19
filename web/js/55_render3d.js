@@ -12,7 +12,7 @@ const R3 = {
   map: null, vox: null, H: 0, NX: 0, NY: 0, NZ: 0, chunks: [], dynFr: null, dynKey: '', dynCells: new Map(),
   fm: [], capGeo: new Map(), fogKey: '', dragged: false, hit: null, voxEd: new Map(), voxAt: 0,   // voxEd — правки кубов боя по клеткам
   view: {tx: 0, ty: 0, tz: 0, yaw: .65, pitch: .95, dist: 30, fdist: 22, kind: 'tac', pp: .45, pd: 5, fp: .25},   // kind: tac / third / first (решение №2)
-  fps: 0, fpsN: 0, fpsT0: 0, models: new Map(), tokens: r3TokWant(), tLast: 0
+  fps: 0, fpsN: 0, fpsT0: 0, showFps: /[?&]fps=1/.test(location.search), models: new Map(), tokens: r3TokWant(), tLast: 0
 };
 const VZ0 = 2;      // кубов под уровнем «0» нынешней карты: дно ущелья
 const VCH = 16;     // чанк 16×16×16
@@ -60,6 +60,7 @@ R3.setWant = function(v){
 function r3SyncSeg(){
   const seg = $('viewSeg'); if (!seg || !seg.querySelectorAll) return;
   seg.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', (b.dataset.view === '3d') === R3.want));
+  const tok = $('tokSeg'), row = tok && tok.closest ? tok.closest('.set-row') : null; if (row) row.hidden = !R3.want;   // «Бойцы в 3D» — только при виде 3D
   const n = $('viewNote'); if (n) n.textContent = R3.failed ? '3D не включился на этом устройстве — показан 2D.' : (R3.want ? 'Бой — в объёмном мире из кубов (5×5×5 фт): высота, тоннели, копание, области не сквозь стены. Тяжелее для слабых устройств.' : 'Плоская карта сверху — лёгкий вид для любого устройства.');
 }
 
@@ -554,7 +555,7 @@ function r3TinySlots(fr){
   return slot;
 }
 function r3Colors(f){
-  const side = f.kind % 2, tc = f.lead != null && typeof teamCol === 'function' ? teamCol(f.team) : null;
+  const side = sideOf(f.kind % 2), tc = f.lead != null && typeof teamCol === 'function' ? teamCol(f.team) : null;
   return f.hp <= 0 ? '#8a8a8a' : (tc || (side ? '#e0644f' : '#4f8fe6'));
 }
 // роль анимации бойца k в кадре: смерть, движение, атака (свой ход: удар, выстрел, способность), получил урон, стоит
@@ -662,8 +663,17 @@ if ($('tokSeg') && $('tokSeg').addEventListener){
 // ---- камера: тактическая (вращение, наклон, приближение); режимы кнопки «Камера» — те же, что у 2D ----
 // своя фигура для камер от первого и третьего лица: свой боец (в реплее — первый)
 function r3MeObj(list){ const me = G.req ? G.req.me : G.me; return list.find(o => o.k === me) || (R3.selfObj && R3.selfObj.k === me ? R3.selfObj : null) || list.find(o => o.k === 0); }
+// тактическая камера: середина кадра — в свободной от панелей части поля (поля cam.st/sb ставит страница боя)
+function r3Offset(C, W, H, on){
+  if (typeof camSafeHook === 'function') camSafeHook();
+  const ox = on ? Math.round((cam.sl - cam.sr) / 2) : 0, oy = on ? Math.round((cam.st - cam.sb) / 2) : 0, k = W + 'x' + H + ':' + ox + ',' + oy;
+  if (C.userData.off === k) return; C.userData.off = k;
+  if (ox || oy) C.setViewOffset(W, H, -ox, -oy, W, H); else C.clearViewOffset();
+  C.aspect = W / H; C.updateProjectionMatrix();
+}
 R3.camUpdate = function(list){
   const v = R3.view, W = cvW(), H = cvH(), C = R3.camera, o = v.kind !== 'tac' ? r3MeObj(list) : null;
+  r3Offset(C, W, H, !o);
   if (o){   // 3-е лицо — за спиной героя на расстоянии pd, 1-е — из глаз; мышь — поворот (yaw) и наклон (pp / fp)
     const fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
     if (v.kind === 'third'){
@@ -951,13 +961,13 @@ R3.draw = function(now, t, tt){
     const p0 = FR[prevIdx].f[A], p1 = fr.f[A], n = p1.n || 1;
     if (p0.x !== p1.x || p0.y !== p1.y){ const a = r3P(p0.x + n / 2, r3Z(p0) + .05, p0.y + n / 2), b = r3P(p1.x + n / 2, r3Z(p1) + .05, p1.y + n / 2); if (a.ok && b.ok){ ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.setLineDash([5, 6]); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore(); } }
   }
-  [0, 1].forEach(k => { const o = list.find(x => x.k === k); if (o && o.f.hp > 0 && BOSS[k] && BOSS[k].auraRad > 0) r3Circle(o.X, o.Y + .04, o.Z, BOSS[k].auraRad / 5, k ? 'rgba(255,120,90,.6)' : 'rgba(100,170,255,.6)', k ? 'rgba(255,100,70,.10)' : 'rgba(90,160,255,.10)'); });
+  [0, 1].forEach(k => { const o = list.find(x => x.k === k), s = sideOf(k); if (o && o.f.hp > 0 && BOSS[k] && BOSS[k].auraRad > 0) r3Circle(o.X, o.Y + .04, o.Z, BOSS[k].auraRad / 5, s ? 'rgba(255,120,90,.6)' : 'rgba(100,170,255,.6)', s ? 'rgba(255,100,70,.10)' : 'rgba(90,160,255,.10)'); });
   r3Turn(list, now);
   r3Labels(list, fr);
   r3Fx(list, now);
   if (typeof ptrDraw === 'function') ptrDraw(now);   // указки игроков комнаты
   R3.fpsN++; if (now - R3.fpsT0 >= 1000){ R3.fps = Math.round(R3.fpsN * 1000 / (now - R3.fpsT0)); R3.fpsN = 0; R3.fpsT0 = now; }
-  ctx.save(); ctx.font = '700 11px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText(`3D · ${R3.fps} к/с${R3.low ? ' · телефон' : ''}`, 8, H - 6); ctx.restore();
+  ctx.save(); ctx.font = '700 11px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillStyle = 'rgba(255,255,255,.7)'; if (R3.showFps) ctx.fillText(`3D · ${R3.fps} к/с${R3.low ? ' · телефон' : ''}`, 8, H - 6); ctx.restore();   // счётчик кадров — только с ?fps=1
 };
 // переключатель вида в бою (виден после загрузки библиотеки): только на этот бой, настройку не меняет; 2D остаётся запасным
 $('view3dBtn').onclick = () => {

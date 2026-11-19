@@ -116,7 +116,7 @@ $('form').addEventListener('click', e => {
 $('form').addEventListener('change', e => {   // заготовки из выпадающего списка
   const el = e.target.closest('[data-presetsel]');
   if (el && el.value !== ''){ const v = el.value; el.value = '';
-    if (el.dataset.presetsel === 'char'){ if (confirm('Готовый персонаж заменит всё, что вы собрали (бюджет останется вашим). Продолжить?')) applyCharPreset(v); }
+    if (el.dataset.presetsel === 'char') confirmBox('Готовый персонаж заменит всё, что вы собрали (бюджет останется вашим). Продолжить?', 'Заменить').then(ok => { if (ok) applyCharPreset(v); });
     else addPreset(el.dataset.presetsel, v); return; }
   if (e.target.id === 'simpleMode'){ SIMPLE = e.target.checked; try { localStorage.setItem('dnd_simple', SIMPLE ? '1' : '0'); } catch (x) {} buildForm(); goStep(STEP); }
 });

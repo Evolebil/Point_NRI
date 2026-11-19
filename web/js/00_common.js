@@ -4,6 +4,8 @@
 const $ = id => document.getElementById(id);
 const ftToText = ft => { const m = (+ft * 0.3048).toFixed(1).replace('.', ',').replace(/,0$/, ''); return `${ft} фт (≈${m} м)`; };
 function pluralRu(n, one, few, many){ const x = Math.abs(+n) % 100, d = x % 10; return x >= 11 && x <= 14 ? many : d === 1 ? one : d >= 2 && d <= 4 ? few : many; }
+// описание способности словами движка — для игрока: без хвоста цены «-- N очк.», «2 копии» вместо «2 копий»
+const abilDesc = d => String(d || '').replace(/\s*--\s*-?\d+\s*очк\.?\s*$/, '').replace(/(\d+) копий/g, (m, n) => n + ' ' + pluralRu(n, 'копия', 'копии', 'копий')).trim();
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const UI_ICON_PATH = {
   character:'<circle cx="12" cy="8" r="3.5"/><path d="M5 20c.5-3.3 2.8-5 7-5s6.5 1.7 7 5"/>',

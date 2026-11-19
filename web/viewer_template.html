@@ -437,6 +437,8 @@ function showResult(animate){
 }
 
 /*RENDER_BEGIN*/
+// цвет стороны: в бою игрока свой — всегда синий (A), враг — красный (B), как в карточках; в реплее — по сторонам
+const sideOf = s => typeof G !== 'undefined' && G.active && !G.room && G.me === 1 ? 1 - s : s;
 // ---- кадры, события, журнал ----
 const distFt = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) * 5;
 const nameOf = (idx, f) => {
@@ -445,21 +447,21 @@ const nameOf = (idx, f) => {
     const col = typeof teamCol === 'function' ? teamCol(fi.team) : '';
     return `<span class="who" style="color:${col}">${fi.ld ? '' : 'приспешник: '}${esc(BOSS[fi.lead].title)}</span>`;
   }
-  if (fi.kind < 2) return `<span class="who ${SIDE[fi.kind]}">${esc(BOSS[fi.kind].title)}</span>`;
-  return `<span class="who ${SIDE[fi.kind-2]}">приспешник ${SIDE[fi.kind-2]}</span>`;
+  if (fi.kind < 2) return `<span class="who ${SIDE[sideOf(fi.kind)]}">${esc(BOSS[fi.kind].title)}</span>`;
+  return `<span class="who ${SIDE[sideOf(fi.kind-2)]}">приспешник: ${esc(BOSS[fi.kind-2].title)}</span>`;
 };
 function specOf(idx, fr){
   const f = fr.f[idx]; if (!f || fr.abil < 0) return null;
   const b = f.lead != null ? (f.ld ? BOSS[f.lead] : (BOSS[f.lead] && BOSS[f.lead].minion) || null) : (f.kind < 2 ? BOSS[f.kind] : (BOSS[f.kind-2].minion || null));
   return b && b.abil[fr.abil] ? b.abil[fr.abil] : null;
 }
-const COND_HELP = {'опутан':'не может двигаться','сбит с ног':'лежит','испуган':'боится','оглушён':'не действует','парализован':'не действует','ослеплён':'не видит','отравлен':'помеха','замедлен':'скорость вдвое','схвачен':'скорость 0'};
+const COND_HELP = {'опутан':'не может двигаться','сбит с ног':'лежит','испуган':'боится','оглушён':'не действует','парализован':'не действует','ослеплён':'не видит','отравлен':'помеха','замедлен':'скорость вдвое','схвачен':'не может двигаться (скорость 0), пока не вырвется'};
 const EXH_TXT = ['', 'помеха на проверки', 'скорость вдвое', 'помеха на атаки и спасброски', 'максимум ХП вдвое', 'скорость 0'];
 const FLED_TXT = ['', 'вышел за край арены', 'оторвался от преследователя', 'преследователь выбился из сил'];
 const logRows = [];
 function frameLog(i){
   const fr = FR[i], pv = i > 0 ? FR[i-1] : null;
-  if (!pv) return {round:0, cls:'', lines:[fr.f[0].hid || fr.f[1].hid ? 'Расстановка. Противник не виден.' : `Расстановка. Дистанция между боссами ${distFt(fr.f[0], fr.f[1])} фт.`], evs:[]};
+  if (!pv) return {round:0, cls:'', lines:[fr.f[0].hid || fr.f[1].hid ? 'Расстановка. Противник не виден.' : `Расстановка. Дистанция между бойцами ${distFt(fr.f[0], fr.f[1])} фт.`], evs:[]};
   const lines = [], evs = [], A = fr.actor, f = fr.f, p = pv.f;
   // туман войны в живом бою: что делает невидимый боец — не видно (атака его выдаёт: тогда он уже не скрыт); сервер его данных
   // не присылает (пустой боец hid) — и после боя тоже
@@ -551,7 +553,7 @@ function frameLog(i){
     }
   }
   if (!lines.length && evs.length) lines.push('<span class="small">конец раунда</span>');
-  return {round: fr.round, cls: A >= 0 && f[A] ? SIDE[f[A].kind % 2] : '', lines, evs};
+  return {round: fr.round, cls: A >= 0 && f[A] ? SIDE[sideOf(f[A].kind % 2)] : '', lines, evs};
 }
 function hash(x,y){ let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ 0x5bd1e995; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 function ch(layer, x, y){ const c = layer && layer[y] && layer[y][x]; return !!c && c !== '0'; }   // слой есть в клетке (дерево хранит свою высоту)
@@ -663,29 +665,32 @@ function fitStage(){
   cam.snap = true;
 }
 // ---- камера: вся арена или слежение за боссами ----
-const cam = {x: 0, y: 0, cell: 10, mode: 'fit', snap: true};
+// sl, st, sr, sb — поля холста под панелями (страница боя ставит их сама): центр и масштаб — по свободной части
+const cam = {x: 0, y: 0, cell: 10, mode: 'fit', snap: true, sl: 0, st: 0, sr: 0, sb: 0};
 function camReset(){ cam.x = AW / 2; cam.y = AH / 2; cam.mode = Math.max(AW, AH) > 30 ? 'follow' : 'fit'; cam.snap = true; }
 const cvW = () => cv.width / dpr, cvH = () => cv.height / dpr;
-const fitCell = () => Math.max(2, Math.min((cvW() - 36) / AW, (cvH() - 36) / AH));
+const camCX = () => (cam.sl + cvW() - cam.sr) / 2, camCY = () => (cam.st + cvH() - cam.sb) / 2;   // середина свободной части
+const fitCell = () => Math.max(2, Math.min((cvW() - cam.sl - cam.sr - 36) / AW, (cvH() - cam.st - cam.sb - 36) / AH));
 function camTarget(){
   if (cam.mode === 'fit') return {x: AW/2, y: AH/2, cell: fitCell()};
   if (cam.mode === 'free') return {x: cam.fx, y: cam.fy, cell: cam.fcell};   // свободный обзор: куда сдвинул игрок
   const fr = FR[curIdx], pv = FR[prevIdx], pts = [];
-  [0,1].forEach(k => { const f = fr.f[k]; if (f && !f.fled) { pts.push([f.x, f.y]); const p = pv.f[k]; if (p) pts.push([p.x, p.y]); } });
+  [0,1].forEach(k => { const f = fr.f[k]; if (f && !f.fled && !f.hid && f.x >= 0) { pts.push([f.x, f.y]); const p = pv.f[k]; if (p && !p.hid && p.x >= 0) pts.push([p.x, p.y]); } });   // скрытый (x = -1) — не в кадр
   if (!pts.length) return {x: AW/2, y: AH/2, cell: fitCell()};
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
   const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
   const spanX = Math.max(14, maxx - minx + 8), spanY = Math.max(14, maxy - miny + 8);
-  const c = Math.max(fitCell(), Math.min(cvW() / spanX, cvH() / spanY, 64));
+  const c = Math.max(fitCell(), Math.min((cvW() - cam.sl - cam.sr) / spanX, (cvH() - cam.st - cam.sb) / spanY, 64));
   return {x: (minx + maxx) / 2 + .5, y: (miny + maxy) / 2 + .5, cell: c};
 }
 function camUpdate(){
+  if (typeof camSafeHook === 'function') camSafeHook();
   const t = camTarget();
   if (cam.snap){ cam.x = t.x; cam.y = t.y; cam.cell = t.cell; cam.snap = false; return; }
   const k = .14; cam.x += (t.x - cam.x) * k; cam.y += (t.y - cam.y) * k; cam.cell += (t.cell - cam.cell) * k;
 }
-const PX = x => cvW() / 2 + (x - cam.x) * cam.cell;      // клетка (с дробной частью) -> пиксель
-const PY = y => cvH() / 2 + (y - cam.y) * cam.cell;
+const PX = x => camCX() + (x - cam.x) * cam.cell;      // клетка (с дробной частью) -> пиксель
+const PY = y => camCY() + (y - cam.y) * cam.cell;
 const cc = f => [PX(f.x + .5), PY(f.y + .5)];             // центр клетки бойца
 function setCamMode(m){
   if (m === 'free' && cam.mode !== 'free'){ cam.fx = cam.x; cam.fy = cam.y; cam.fcell = cam.cell; }
@@ -743,11 +748,11 @@ function tokenPortrait(f){
 function drawToken(f, px, py, isActor){
   const n = f.n || 1, boss = f.ld != null ? !!f.ld : f.kind < 2, r0 = boss ? RB() : RM(), r = n > 1 ? Math.max(r0, n * cam.cell * .42) : r0;   // крупный — на свой квадрат
   if (n > 1 && f.hp > 0){   // квадрат, который он занимает
-    const side = f.kind % 2, h = n * cam.cell / 2;
+    const side = sideOf(f.kind % 2), h = n * cam.cell / 2;
     ctx.save(); ctx.fillStyle = side ? 'rgba(255,110,90,.13)' : 'rgba(90,160,255,.13)'; ctx.strokeStyle = side ? 'rgba(255,140,120,.7)' : 'rgba(130,190,255,.7)';
     ctx.lineWidth = 1.5; ctx.setLineDash([6,4]); ctx.fillRect(px - h, py - h, 2*h, 2*h); ctx.strokeRect(px - h + .75, py - h + .75, 2*h - 1.5, 2*h - 1.5); ctx.restore();
   }
-  const side = f.kind % 2, tc = f.lead != null && typeof teamCol === 'function' ? teamCol(f.team) : null;   // бой команд — цвет команды
+  const side = sideOf(f.kind % 2), tc = f.lead != null && typeof teamCol === 'function' ? teamCol(f.team) : null;   // бой команд — цвет команды
   const c1 = tc ? tc : (side ? '#ff9a85' : '#7cbcff'), c2 = tc ? 'rgba(0,0,0,.55)' : (side ? '#a82c1a' : '#1a54a8');
   if (f.hp <= 0 && !boss) return;
   ctx.save();
@@ -862,8 +867,8 @@ function render(now){
   [0,1].forEach(k => {
     const f = fr.f[k]; if (f.hp <= 0 || f.hid || !(BOSS[k].auraRad > 0)) return;
     const p = posAt(k, t), r = BOSS[k].auraRad / 5 * cell;
-    ctx.beginPath(); ctx.arc(PX(p.x + .5), PY(p.y + .5), r, 0, 7); ctx.fillStyle = k ? 'rgba(255,100,70,.12)' : 'rgba(90,160,255,.12)'; ctx.fill();
-    ctx.strokeStyle = k ? 'rgba(255,120,90,.55)' : 'rgba(100,170,255,.55)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(PX(p.x + .5), PY(p.y + .5), r, 0, 7); ctx.fillStyle = sideOf(k) ? 'rgba(255,100,70,.12)' : 'rgba(90,160,255,.12)'; ctx.fill();
+    ctx.strokeStyle = sideOf(k) ? 'rgba(255,120,90,.55)' : 'rgba(100,170,255,.55)'; ctx.lineWidth = 2; ctx.stroke();
   });
   const order = fr.f.map((f, k) => k).sort((a, b) => (fr.f[a].kind < 2) - (fr.f[b].kind < 2));
   order.forEach(k => {

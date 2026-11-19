@@ -49,7 +49,7 @@ function seenHTML(){
   const z = G.seen; if (!z) return '';
   const r = [];
   if (z.melee || z.ranged) r.push('⚔ бьёт оружием' + (z.melee && z.ranged ? ' вблизи и издали' : (z.melee ? ' вблизи' : ' издали')));
-  Object.values(z.abil).forEach(sp => r.push(`✨ «${esc(sp.title)}»${sp.desc ? ` <span class="small">— ${esc(sp.desc)}</span>` : ''}`));
+  Object.values(z.abil).forEach(sp => r.push(`✨ «${esc(sp.title)}»${abilDesc(sp.desc) ? ` <span class="small">— ${esc(abilDesc(sp.desc))}</span>` : ''}`));
   return `<div class="seen"><div class="small">Замечено в бою:</div>${r.length ? r.map(x => `<div>${x}</div>`).join('') : '<div class="small">пока ничего</div>'}</div>`;
 }
 // карточки бойцов поверх поля: слева — вы, справа — враг (в бою команд — своя команда и противники)
@@ -70,7 +70,7 @@ function drawCards(i){
     const f = fr.f[k], b = BOSS[k], el = $(id), mine = k === me;
     el.className = `fx ${pos} glass pcard ${mine ? 'A' : 'B'}`;
     const mins = fr.f.filter((m, idx) => idx >= 2 && m.kind - 2 === k && m.hp > 0 && (mine || !m.hid)).length;   // у врага — только видимые
-    const conds = f.cond.map(c => `<span class="pill">${esc(c)}</span>`).join('') + (f.exh ? `<span class="pill">истощение ${f.exh}</span>` : '');
+    const conds = f.cond.map(c => COND_HELP[c] ? `<span class="pill" title="${esc(c + ': ' + COND_HELP[c])}">${esc(c)} <small>· ${esc(COND_HELP[c])}</small></span>` : `<span class="pill">${esc(c)}</span>`).join('') + (f.exh ? `<span class="pill">истощение ${f.exh}</span>` : '');
     const sub = [!mine && G.enemyBrain ? 'играет ' + esc(G.enemyBrain) : '', conds || f.hid || f.ns ? '' : 'без состояний', b.minion ? (mine ? 'приспешников ' : 'видно приспешников ') + mins : ''].filter(Boolean).join(' · ');
     el.innerHTML = `<h4>${face(b)}<span class="chip ${mine ? 'A' : 'B'}">${mine ? 'вы' : 'враг'}</span><span class="ttl">${esc(b.title)}${f.hp <= 0 ? ' ☠' : ''}</span></h4>${hp(f, mine ? 'A' : 'B')}
       <div class="stats-line tnum">${f.hid || f.ns ? UNSEEN : `${Math.max(0, f.hp)} / ${f.maxHp} ХП${f.temp ? ` (+${f.temp})` : ''} · КД ${f.ac} · ${f.spd} фт`}</div>

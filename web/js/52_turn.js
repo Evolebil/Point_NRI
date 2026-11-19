@@ -22,11 +22,12 @@ function renderTurn(){
   // сколько атак по выбранной цели сразу: из доступных в этом действии (остальные — потом, по другим целям)
   const atkMax = G.mode === 'attack' ? (q.weapon.atkLeft > 0 ? q.weapon.atkLeft : q.weapon.attacks)
     : (G.mode.startsWith('attack:') ? (a => a ? (a.left > 0 ? a.left : a.att) : 1)((q.alts || []).find(x => x.k === +G.mode.slice(7))) : 1);
-  if (atkMax > 1){ G.atkN = Math.min(Math.max(1, G.atkN || 1), atkMax); h += `<label class="small" title="Сколько атак по цели одним щелчком">атак по цели <input type="number" id="atkN" min="1" max="${atkMax}" value="${G.atkN}" style="width:56px"> из ${atkMax}</label>`; }
+  // поле «атак по цели» — в конце ряда (ниже): появится при выборе оружия и не сдвинет кнопки под мышью
+  const atkNh = atkMax > 1 ? (G.atkN = Math.min(Math.max(1, G.atkN || 1), atkMax), `<label class="small" title="Сколько атак по цели одним щелчком">атак по цели <input type="number" id="atkN" min="1" max="${atkMax}" value="${G.atkN}" style="width:56px"> из ${atkMax}</label>`) : '';
   q.abils.forEach(a => {
     const sp = a.title ? a : BOSS[G.me].abil[a.k];
     const tag = [a.react ? 'реакция, сама' : (a.bonus ? 'бонус' : 'действие'), a.self ? (a.tele ? 'прыжок ' + a.tele + ' фт' : 'на себя') : (a.ground ? 'по клетке, ' : '') + a.range + ' фт' + (a.radius ? ', радиус ' + a.radius : '') + (a.wallLen ? ', барьер ' + a.wallLen + ' кл.' : ''), a.slot ? 'ячейка ' + a.slot + ' ур.' : '', a.uses >= 0 ? 'осталось ' + a.uses : ''].filter(Boolean).join(' · ');
-    h += `<button class="sp ${G.mode === 'spell:' + a.k ? 'sel' : ''}" data-spell="${a.k}" ${a.avail ? '' : 'disabled'} title="${esc(a.why || ((S.abilities[a.k] || {})._desc ? S.abilities[a.k]._desc + ' — ' : '') + (sp.desc || ''))} (клавиша ${a.k + 1})"><span>✨ ${esc(sp.title)}${a.slot ? ` <i class="slot-tag" title="Тратит ячейку ${a.slot} ур. или выше">${a.slot}</i>` : ''}</span><small>${esc(tag)}</small></button>`;
+    h += `<button class="sp ${G.mode === 'spell:' + a.k ? 'sel' : ''}" data-spell="${a.k}" ${a.avail ? '' : 'disabled'} title="${esc(a.why || ((S.abilities[a.k] || {})._desc ? S.abilities[a.k]._desc + ' — ' : '') + abilDesc(sp.desc))} (клавиша ${a.k + 1})"><span>✨ ${esc(sp.title)}${a.slot ? ` <i class="slot-tag" title="Тратит ячейку ${a.slot} ур. или выше">${a.slot}</i>` : ''}</span><small>${esc(tag)}</small></button>`;
   });
   if (q.alts && q.alts.length){
     // оружие мультиатаки: удары в том же действии «Атака», что и основное (укус + когти)
@@ -47,7 +48,7 @@ function renderTurn(){
     ${q.conc >= 0 ? `<button data-c="dropconc" title="Бесплатно: эффекты концентрации снимаются">Снять концентрацию</button>` : ''}
     <button data-c="toward" title="Идти к ближайшему врагу">К врагу</button>
     ${(q.doors || []).map(d => `<button data-door="${d[0]},${d[1]}" title="Взаимодействие: первое за ход бесплатно, дальше — действием">🚪 ${d[2] === 1 ? 'Открыть' : 'Закрыть'} дверь</button>`).join('')}
-    ${q.fly ? `<button data-alt="1" ${q.fly.can && q.fly.alt < q.fly.max && q.speedLeft >= 5 ? '' : 'disabled'} title="Выше на 5 фт (5 фт движения); уход вверх из досягаемости ближника провоцирует атаку">🪽 Выше</button><button data-alt="-1" ${q.fly.alt > 0 && q.speedLeft >= 5 ? '' : 'disabled'} title="Ниже на 5 фт (5 фт движения)">⬇ Ниже</button><span class="tag" title="Высота полёта над землёй">${q.fly.alt ? 'в воздухе ' + q.fly.alt * 5 + ' фт' : 'на земле'}</span>` : ''}${q.vfly ? `<span class="tag" title="Летун в 3D: клавиши R и F поднимают и опускают точку хода над клеткой под мышью (по 5 фт)">🪽 R / F — высота хода</span>` : ''}</div>
+    ${q.fly ? `<button data-alt="1" ${q.fly.can && q.fly.alt < q.fly.max && q.speedLeft >= 5 ? '' : 'disabled'} title="Выше на 5 фт (5 фт движения); уход вверх из досягаемости ближника провоцирует атаку">🪽 Выше</button><button data-alt="-1" ${q.fly.alt > 0 && q.speedLeft >= 5 ? '' : 'disabled'} title="Ниже на 5 фт (5 фт движения)">⬇ Ниже</button><span class="tag" title="Высота полёта над землёй">${q.fly.alt ? 'в воздухе ' + q.fly.alt * 5 + ' фт' : 'на земле'}</span>` : ''}${q.vfly ? `<span class="tag" title="Летун в 3D: клавиши R и F поднимают и опускают точку хода над клеткой под мышью (по 5 фт)">🪽 R / F — высота хода</span>` : ''}${atkNh}</div>
     </div><div class="msg" id="tmsg"></div><div class="hint">${modeHint()}</div>`;
   el.innerHTML = h;
   const actionHelp = {
@@ -75,7 +76,11 @@ function startTurnTimer(){
     const left = Math.ceil(tt - (performance.now() - t0) / 1000), el = $('timer');
     if (G.busy || !G.req || G.over || !G.active){ clearInterval(turnTimer); return; }
     if (el){ el.textContent = Math.max(0, left) + ' с'; el.classList.toggle('low', left <= 5); }
-    if (left <= 0){ clearInterval(turnTimer); toast('Время хода вышло: ход передан сопернику.'); cmd({c:'end'}); }
+    if (left <= 0){
+      clearInterval(turnTimer); toast('Время хода вышло: ход передан сопернику.');
+      const host = $('log'); host.insertAdjacentHTML('beforeend', `<div class="ln mut"><span class="ev bad">⏱ Время хода (${tt} с) вышло — ход завершён автоматически</span></div>`); host.scrollTop = host.scrollHeight;
+      cmd({c:'end'});
+    }
   };
   tick(); turnTimer = setInterval(tick, 250);
 }
@@ -142,7 +147,7 @@ function weaponClick(){ const q = G.req; const ok = q.enemies.filter(en => !en.c
 function cellAt(e){
   if (R3.on) return R3.cellAt(e);   // 3D-вид: луч по кубам (может не попасть — тогда null)
   const r = cv.getBoundingClientRect(), px = (e.clientX - r.left) * (cvW() / r.width), py = (e.clientY - r.top) * (cvH() / r.height);
-  return {x: Math.floor((px - cvW() / 2) / cam.cell + cam.x), y: Math.floor((py - cvH() / 2) / cam.cell + cam.y)};
+  return {x: Math.floor((px - camCX()) / cam.cell + cam.x), y: Math.floor((py - camCY()) / cam.cell + cam.y)};
 }
 // имена оружия в бою: [в руках, запасные…]; смена меняет местами (как swapWeapon в движке)
 function wpnNames(){
@@ -173,20 +178,32 @@ cv.addEventListener('click', e => {
     cmd(mv); return; }
   if (G.mode.startsWith('attack:')){   // удар оружием мультиатаки
     const en = enemyAt(c); if (en == null){ toast('Щёлкните по врагу.'); return; }
+    const a = (q.alts || []).find(x => x.k === +G.mode.slice(7)); if (!targetOk(en, a ? a.range : 5)) return;
     cmd({c:'attack', tgt: en, wk: +G.mode.slice(7), n: G.atkN || 1}); return;
   }
   if (G.mode === 'attack'){
     const en = enemyAt(c);
     if (en == null){ if (c.oz != null) cmd({c:'hitobj', x:c.x, y:c.y, z:c.oz}); else if (isObjCell(c.x, c.y)) cmd({c:'hitobj', x:c.x, y:c.y}); else toast('Щёлкните по врагу или по объекту (стена, дерево, укрытие).'); return; }
+    if (!targetOk(en, q.weapon.range)) return;
     cmd({c:'attack', tgt: en, reckless: q.weapon.reckless, n: G.atkN || 1}); return;
   }
   if (G.mode.startsWith('spell:')){
     const k = +G.mode.slice(6), a = q.abils[k];
     if ((a.self && a.tele) || a.ground){ cmd(Object.assign({c:'spell', k, x:c.x, y:c.y}, c.z != null && a.ground ? {z: c.z} : {})); return; }   // режим кубов: центр области — куб, по верху которого щёлкнули
     if (a.self && a.ally){ const al = allyAt(c); if (al == null){ toast('Щёлкните себя или союзника.'); return; } cmd({c:'spell', k, tgt: al}); return; }
-    const en = enemyAt(c); if (en == null){ toast('Щёлкните по врагу.'); return; } cmd({c:'spell', k, tgt: en});
+    const en = enemyAt(c); if (en == null){ toast('Щёлкните по врагу.'); return; }
+    if (!targetOk(en, a.range)) return;
+    cmd({c:'spell', k, tgt: en});
   }
 });
+// цель в дальности и в прямой видимости (как красные кольца на поле); иначе — объяснение, ход не тратится
+function targetOk(en, range){
+  const E = G.req.enemies.find(x => x.i === en); if (!E) return true;   // нет сведений — решает движок
+  if (E.charm){ toast('По этой цели нельзя: вы очарованы ею.', 4500, true); return false; }
+  if (E.dist > range){ toast(`Цель далеко: ${E.dist} фт, а дальность — ${range} фт. Подойдите ближе (кнопка «К врагу» или щелчок по полю в режиме «Идти»).`, 5000, true); return false; }
+  if (!E.los){ toast('Цель не в прямой видимости: её закрывает стена или укрытие. Обойдите препятствие.', 5000, true); return false; }
+  return true;
+}
 // объект в клетке (стена, дерево, укрытие) и не разрушен (обломки — в изменениях арены, вид 4)
 function isObjCell(x, y){
   if (x < 0 || y < 0 || x >= AW || y >= AH) return false;
@@ -200,9 +217,9 @@ cv.addEventListener('wheel', e => {
   if (R3.on) return;   // 3D-вид приближает сам
   e.preventDefault(); setCamMode('free');
   const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
-  const wx = cam.fx + (mx - cvW() / 2) / cam.fcell, wy = cam.fy + (my - cvH() / 2) / cam.fcell;
+  const wx = cam.fx + (mx - camCX()) / cam.fcell, wy = cam.fy + (my - camCY()) / cam.fcell;
   cam.fcell = Math.max(2, Math.min(80, cam.fcell * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-  cam.fx = wx - (mx - cvW() / 2) / cam.fcell; cam.fy = wy - (my - cvH() / 2) / cam.fcell;
+  cam.fx = wx - (mx - camCX()) / cam.fcell; cam.fy = wy - (my - camCY()) / cam.fcell;
 }, {passive: false});
 let panFrom = null;
 cv.addEventListener('mousedown', e => { if (R3.on) return; if (e.button === 2 || e.shiftKey){ setCamMode('free'); panFrom = {x: e.clientX, y: e.clientY, fx: cam.fx, fy: cam.fy}; e.preventDefault(); } });
@@ -329,6 +346,24 @@ fitStage = function(){
   cam.snap = true;
 };
 function fitPlay(){ fitStage(); }
+// поля холста под панелями боя (раз в 300 мс): сверху — панели верхней половины, снизу — нижние, что заходят в середину
+// по ширине (журнал и камера в углах не в счёт); свободной части — не меньше 45 % высоты. Камера держит бойцов в ней
+let safeT = 0;
+function camSafeHook(){
+  const now = performance.now(); if (now - safeT < 300) return; safeT = now;
+  let t = 0, b = 0;
+  if (viewActive() && !document.body.classList.contains('hud-all-off')){
+    const S = stage.getBoundingClientRect(), x0 = S.left + S.width * .25, x1 = S.right - S.width * .25;
+    document.querySelectorAll('#stagebox > .fx').forEach(el => {
+      if (el.classList.contains('hud-off') || !el.offsetParent) return;
+      const r = el.getBoundingClientRect(); if (!r.height) return;
+      if ((r.top + r.bottom) / 2 < S.top + S.height / 2) t = Math.max(t, r.bottom - S.top + 8);
+      else if (r.right > x0 && r.left < x1) b = Math.max(b, S.bottom - r.top + 8);
+    });
+    const room = S.height * .55; if (t + b > room){ const k = room / (t + b); t *= k; b *= k; }
+  }
+  if (Math.abs(t - cam.st) > 2 || Math.abs(b - cam.sb) > 2){ cam.st = Math.round(t); cam.sb = Math.round(b); }
+}
 $('btnFight').onclick = startGame;
 $('tempo').onchange = () => { speed = 1.4 * +$('tempo').value; try { localStorage.setItem('dnd_tempo', $('tempo').value); } catch (e) {} };
 $('turnTime').onchange = () => { try { localStorage.setItem('dnd_turntime', $('turnTime').value); } catch (e) {} };

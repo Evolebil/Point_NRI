@@ -241,6 +241,41 @@ class TestHttpApi(unittest.TestCase):
         self.assertEqual(out["type"], "end", "бой не закончился за %d ходов" % MAX_TURNS)
         self.assertIn("result", out)
         self.assertEqual(self.api({"cmd": "step", "sid": sid, "c": "end"})[1]["err"], "игра не идёт")
+        self.assertEqual(self.api({"cmd": "solo_resume", "sid": sid})[1]["type"], "error")   # бой окончен — возвращать некуда
+
+    def test_solo_resume_after_reload(self):
+        """Перезагрузка страницы: solo_resume отдаёт начало боя, все кадры по порядку и тот же запрос хода."""
+        sid = "it-resume"
+        self.assertEqual(self.api({"cmd": "solo_resume", "sid": sid})[1]["type"], "error")   # боя ещё не было
+        out = self.api({"cmd": "start", "sid": sid, "char": KNIGHT, "seed": 11, "opp": {"mode": "generator"}})[1]
+        frames = list(out["frames"])
+        for _ in range(3):
+            if out["type"] != "turn":
+                break
+            out = self.api({"cmd": "step", "sid": sid, "c": "end"})[1]
+            frames += out.get("frames", [])
+        if out["type"] != "turn":
+            self.skipTest("бой кончился раньше трёх ходов")
+        back = self.api({"cmd": "solo_resume", "sid": sid})[1]
+        self.assertEqual(back["type"], "turn")
+        self.assertEqual(back["frames"], frames)
+        self.assertEqual(back["req"], out["req"])
+        self.assertEqual(back["init"]["me"], self.api({"cmd": "solo_resume", "sid": sid})[1]["init"]["me"])
+        nxt = self.api({"cmd": "step", "sid": sid, "c": "end"})[1]   # после возврата бой идёт дальше как обычно
+        self.assertIn(nxt["type"], ("turn", "end"))
+
+    def test_solo_quit_closes_fight(self):
+        """Сдался: бой закрыт — ни хода, ни возврата перезагрузкой; новый бой начинается с чистой истории."""
+        sid = "it-quit"
+        first = self.api({"cmd": "start", "sid": sid, "char": KNIGHT, "seed": 12, "opp": {"mode": "generator"}})[1]
+        if first["type"] != "turn":
+            self.skipTest("бой кончился сразу")
+        self.api({"cmd": "step", "sid": sid, "c": "end"})
+        self.assertEqual(self.api({"cmd": "solo_quit", "sid": sid})[1]["type"], "ok")
+        self.assertEqual(self.api({"cmd": "solo_resume", "sid": sid})[1]["type"], "error")
+        self.assertEqual(self.api({"cmd": "step", "sid": sid, "c": "end"})[1]["err"], "игра не идёт")
+        again = self.api({"cmd": "start", "sid": sid, "char": KNIGHT, "seed": 12, "opp": {"mode": "generator"}})[1]
+        self.assertEqual(self.api({"cmd": "solo_resume", "sid": sid})[1]["frames"], again["frames"])
 
 
 @need_engine

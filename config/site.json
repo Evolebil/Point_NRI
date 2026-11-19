@@ -1,12 +1,6 @@
 {
   "version": "0.1.0",
-  "developers": [
-    {
-      "name": "Демонстрационная карточка",
-      "role": "Замените сведения в config/site.json",
-      "links": []
-    }
-  ],
+  "developers": [],
   "templates": [
     { "id": "0", "name": "Рыцарь — меч и доспех, ближний бой", "preset_index": 0 },
     { "id": "1", "name": "Лучник — длинный лук, держит дистанцию", "preset_index": 1 },

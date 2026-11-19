@@ -187,6 +187,24 @@ def solo(sid):
         return s
 
 
+SOLO_HIST_MAX = 6000   # кадров боя для возврата после перезагрузки (бой длиннее — вернуть нельзя, но играть можно)
+
+
+def solo_hist(s, cmd, out):
+    """Что видел игрок в одиночном бою: начало и все кадры — для возврата в бой после перезагрузки страницы (solo_resume)."""
+    if out.get("type") == "error":
+        return
+    if cmd == "start":
+        s["hist"] = {"init": out.get("init"), "frames": [], "last": {}} if isinstance(out.get("init"), dict) else None
+    h = s.get("hist")
+    if not h:
+        return
+    h["frames"].extend(out.get("frames") or [])
+    h["last"] = {k: v for k, v in out.items() if k not in ("frames", "init")}
+    if len(h["frames"]) > SOLO_HIST_MAX or not s["in_game"]:
+        s["hist"] = None
+
+
 def fog_frames(frames, team):
     """Туман войны в бою нескольких игроков: кадр движка общий, у бойца — список команд, которые его не видят (hT).
     Каждому участнику — своя копия: скрытый от его команды боец помечен hid (не рисуется, его действия не в журнале)."""
@@ -977,6 +995,19 @@ class Handler(BaseHTTPRequestHandler):
                 out = {"type": "player_chars", "chars": p.get("chars", []), "active": p.get("activeChar", "")}
             elif cmd == "player_chars_save":
                 out = player_chars_set(msg.get("name"), msg.get("chars"), msg.get("active"))
+            elif cmd == "solo_resume":   # перезагрузка страницы в бою: начало боя и все кадры заново (как их видел игрок)
+                s = solo(sid)
+                h = s.get("hist")
+                if s["in_game"] and h:
+                    out = dict(h["last"], init=h["init"], frames=list(h["frames"]))
+                else:
+                    out = {"type": "error", "err": "нет боя"}
+            elif cmd == "solo_quit":   # сдался: бой закрыт, вернуть его перезагрузкой уже нельзя
+                s = solo(sid)
+                with s["eng"].lock:
+                    s["in_game"] = False
+                    s.pop("hist", None)
+                out = {"type": "ok"}
             elif cmd in ("start", "step"):
                 s = solo(sid)
                 with s["eng"].lock:
@@ -1006,6 +1037,7 @@ class Handler(BaseHTTPRequestHandler):
                         out["init"] = mask_init(out["init"], {int(out["init"].get("me", s.get("me", 0)))})
                     if isinstance(out.get("frames"), list):   # туман войны в данных: невидимое игроку не уходит в браузер
                         out["frames"] = mask_hidden(out["frames"], s.setdefault("pend", {}))
+                    solo_hist(s, cmd, out)
             elif cmd in ("catalog", "price", "preview", "genmap", "checkmap", "worldmap", "regionmap"):
                 with QUERY.lock:
                     out = QUERY.talk(msg)

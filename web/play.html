@@ -32,8 +32,8 @@
     <button class="menu-btn" data-go="settings">Настройки</button>
   </nav>
   <div class="menu-corner">
-    <button class="icon-btn" id="reportBtn" type="button" title="Сообщить о проблеме" aria-label="Сообщить о проблеме">!</button>
-    <button class="icon-btn" id="devBtn" type="button" title="Разработчики" aria-label="Разработчики"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><circle cx="9" cy="8" r="3.4"/><circle cx="17" cy="9.5" r="2.4"/><path d="M2.5 19.5c.4-3.6 2.8-5.6 6.5-5.6s6.1 2 6.5 5.6zM15.6 13.4c3.3-.4 5.5 1.3 5.9 4.6h-4.3c-.2-1.8-.7-3.4-1.6-4.6z"/></svg></button>
+    <button class="icon-btn icon-cap" id="reportBtn" type="button" title="Сообщить о проблеме" aria-label="Сообщить о проблеме"><b aria-hidden="true">!</b><small aria-hidden="true">Проблема</small></button>
+    <button class="icon-btn icon-cap" id="devBtn" type="button" title="Разработчики" aria-label="Разработчики"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><circle cx="9" cy="8" r="3.4"/><circle cx="17" cy="9.5" r="2.4"/><path d="M2.5 19.5c.4-3.6 2.8-5.6 6.5-5.6s6.1 2 6.5 5.6zM15.6 13.4c3.3-.4 5.5 1.3 5.9 4.6h-4.3c-.2-1.8-.7-3.4-1.6-4.6z"/></svg><small aria-hidden="true">Авторы</small></button>
   </div>
 </section>
 
@@ -41,7 +41,7 @@
 <section class="scene" id="s2" data-route="quick">
   <div class="page">
     <h1 class="page-title">Быстрый бой</h1>
-    <p class="page-sub">Поиск живого соперника. Если за минуту никто не найдётся, придёт бот-нейросеть на столько же очков, сколько у вашего персонажа.</p>
+    <p class="page-sub">Поиск живого соперника. Если за минуту никто не найдётся, придёт бот на столько же очков, сколько у вашего персонажа (в 2D им играет нейросеть, в 3D — бот по правилам).</p>
     <div class="cols cols-quick">
       <div class="panel">
         <h2>1. Сумма очков</h2>
@@ -54,7 +54,7 @@
         <h2>Как это работает</h2>
         <p>Вы нажимаете «Найти бой» и ждёте до минуты.</p>
         <p>Нашёлся игрок с такой же суммой очков — бой начинается.</p>
-        <p>Не нашёлся — вам даётся бот-нейросеть, собранный на те же очки.</p>
+        <p>Не нашёлся — вам даётся бот, собранный на те же очки.</p>
         <p class="muted small">Арена случайная.</p>
       </aside>
     </div>
@@ -103,13 +103,14 @@
     <div class="cols cols-2 coop-cards">
       <div class="panel panel-flex">
         <h2>Создать комнату</h2>
-        <p class="muted">Вы станете хозяином: выберете карту, добавите ботов и начнёте бой. Код из пяти знаков появится сразу после создания.</p>
+        <p class="muted">Вы станете хозяином: выберите карту, добавите ботов и начнёте бой. Код из пяти знаков появится сразу после создания.</p>
         <button class="btn btn-accent btn-lg wide" id="rmCreate" type="button">Создать и войти</button>
       </div>
       <div class="panel panel-flex">
         <h2>Войти по коду</h2>
         <p class="muted">Код из пяти знаков (латинские буквы и цифры) даёт хозяин комнаты.</p>
         <div class="code-line"><input type="text" id="rmCode" class="code-input" maxlength="5" autocomplete="off" spellcheck="false" placeholder="XXXXX" aria-label="Код комнаты"><button class="btn btn-accent btn-lg" id="rmEnter" type="button" disabled>Войти</button></div>
+        <p class="small muted" id="rmWhy" aria-live="polite"></p>
       </div>
     </div>
     <p class="muted small center">Комната без действий удаляется через 3 часа. Если вылетели — войдите снова под тем же именем, место сохранится.</p>

@@ -70,6 +70,8 @@ button.danger:hover:not(:disabled){background:color-mix(in srgb,var(--bad) 14%,t
 .btn-lg{min-height:52px;font-size:18px;padding:10px 22px}
 .btn-xl{min-height:64px;font-size:24px;padding:12px 64px;border-radius:14px}
 .icon-btn{width:54px;height:54px;min-height:0;padding:0;border-radius:6px;font-size:26px;font-weight:700;background:var(--glass2);border-color:var(--line2)}
+.icon-cap{width:74px;height:62px;display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;line-height:1}   /* значок с подписью */
+.icon-cap b{font-size:24px;line-height:22px}.icon-cap small{font-size:11px;font-weight:600;color:var(--muted)}
 
 /* поля ввода */
 input[type=text],input[type=number],input:not([type]),select,textarea{background:var(--field);border:1px solid var(--line2);border-radius:10px;padding:8px 12px;min-height:38px;min-width:0;color:var(--text)}
@@ -372,6 +374,7 @@ body.me-view #s5 .me-viewnote{display:block}
 .price-tag{color:var(--gold1);font-weight:700;font-size:13px;margin-left:6px}
 .statrow{display:grid;grid-template-columns:52px minmax(0,1fr) 84px 70px;gap:14px;align-items:center;margin:8px 0}
 .statrow .nm{font-weight:700}
+.statrow input[type=number]{width:100%!important;min-width:64px;padding:6px 4px 6px 10px}   /* двузначное число со стрелками не обрезается */
 .meter{height:12px;border-radius:6px;background:var(--field);overflow:hidden;display:flex;margin:8px 0}
 .meter i{display:block;height:100%}
 .items{display:flex;flex-direction:column;gap:5px}
@@ -428,6 +431,7 @@ table{border-collapse:collapse}
 .fx-me{left:26px;top:26px;width:374px;padding:14px 16px}
 .fx-enemy{right:26px;top:26px;width:374px;padding:14px 16px}
 .fx-round{left:50%;top:26px;transform:translateX(-50%);width:min(666px,calc(100% - 860px));min-width:280px;display:flex;align-items:center;gap:14px;padding:10px 18px;font-size:16px}
+.fx-round{pointer-events:none}.fx-round .hud-min{pointer-events:auto}   /* плашка раунда не перехватывает щелчок по полю под ней */
 .fx-round .order{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fx-round .order b{color:var(--hi)}
 .fx-log{left:26px;bottom:26px;width:270px;height:min(312px,40vh);padding:12px 16px;display:flex;flex-direction:column}

@@ -4,9 +4,18 @@ const ROOM = {code:'', n:0, timer:null, key:'', v:null, lobbyHtml:'', mapChoice:
 const TEAM_COL = ['#3d8bff','#ff5a45','#3fbf6a','#e5b83a','#b36bff','#30c5c5','#ff8ad8','#a0a0a0'];
 function teamCol(t){ return TEAM_COL[t % TEAM_COL.length]; }
 try { $('rmName').value = localStorage.getItem('dnd_rmname') || ''; } catch (e) {}
-function roomJoinValidity(){const name=$('rmName').value.trim(),code=$('rmCode').value; $('rmCreate').disabled=!name||name.length>24;$('rmEnter').disabled=!name||name.length>24||code.length!==5;}
-$('rmName').addEventListener('input',roomJoinValidity);
-$('rmCode').addEventListener('input',()=>{$('rmCode').value=$('rmCode').value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5);roomJoinValidity();});
+// почему «Войти» недоступна — под полем кода (а не молча)
+function roomJoinValidity(note){
+  const name = $('rmName').value.trim(), code = $('rmCode').value;
+  $('rmCreate').disabled = !name || name.length > 24; $('rmEnter').disabled = !name || name.length > 24 || code.length !== 5;
+  $('rmWhy').textContent = note || (!name ? 'Чтобы войти или создать комнату, введите имя вверху.' : (code.length && code.length !== 5 ? `В коде ${code.length} из 5 знаков.` : ''));
+}
+$('rmName').addEventListener('input', () => roomJoinValidity());
+$('rmCode').addEventListener('input', () => {
+  const raw = $('rmCode').value, v = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+  $('rmCode').value = v;
+  roomJoinValidity(raw.toUpperCase().replace(/[^A-Z0-9]/g, '') !== raw.toUpperCase() ? 'В коде только латинские буквы и цифры — другие знаки убраны.' : '');
+});
 roomJoinValidity();
 async function roomCall(o){ const v = await api(Object.assign({code: ROOM.code, since: ROOM.n}, o)); roomFeed(v); return v; }
 // долгий опрос: сервер держит запрос, пока в комнате ничего не изменилось (до 20 с) — ответ приходит сразу после хода
@@ -245,17 +254,31 @@ async function startGame(){
   const r = await api(msg);
   $('btnFight').disabled = false;
   if (r.type === 'error'){ $('oppErr').innerHTML = `<div class="err">${esc(r.err)}</div>`; return false; }
-  // новая игра
+  soloBegin(r, false);
+  return true;
+}
+// бой идёт: перезагрузка страницы его не теряет — флаг в браузере, кадры у сервера (solo_resume)
+const soloMark = on => { try { if (on) localStorage.setItem('dnd_solo', '1'); else localStorage.removeItem('dnd_solo'); } catch (e) {} };
+addEventListener('beforeunload', e => { if (G.active && !G.over && !G.room){ e.preventDefault(); e.returnValue = ''; } });   // браузер спросит «Покинуть страницу?»
+async function resumeSolo(){
+  let on = false; try { on = localStorage.getItem('dnd_solo') === '1'; } catch (e) {}
+  if (!on) return false;
+  const r = await api({cmd:'solo_resume'});
+  if (!r || r.type === 'error' || !r.init || !(r.frames || []).length){ if (!/нет связи/.test((r && r.err) || '')) soloMark(false); return false; }
+  soloBegin(r, true); toast('Вы вернулись в бой');
+  return true;
+}
+// начало одиночного боя (или возврат в него, late: сразу последний кадр, без проигрывания)
+function soloBegin(r, late){
   G.active = false; G.over = false; G.busy = false; G.mode = 'move'; G.logged = 0; G.shown = null; G.pending = null; G.req = G.lastReq = null; G.wNames = null; $('log').innerHTML = ''; $('result').classList.remove('on');
   const ini = r.init;
   MAP = ini.map; AW = MAP.aw; AH = MAP.ah; BOSS = ini.bosses; G.me = ini.me; FR = []; terrain = null;
   BOSS.forEach((b, k) => { b.minion = b.minion || null; });
   G.enemyBrain = ini.enemyBrain || '';
-  FR = r.frames.slice(0, 1); G.active = true;
-  G.seen = {melee:false, ranged:false, abil:{}}; G.sentAt = 1;
-  showTab(3); fitPlay(); camReset(); setCamMode(cam.mode); seek(0);
-  receive(r, 1);
-  return true;
+  FR = r.frames.slice(0, late ? r.frames.length : 1); G.active = true; soloMark(true);
+  G.seen = {melee:false, ranged:false, abil:{}}; G.sentAt = FR.length;
+  showTab(3); fitPlay(); camReset(); setCamMode(cam.mode); seek(FR.length - 1);
+  if (late){ G.pending = r; onCaughtUp(); } else receive(r, 1);
 }
 // порция ответа движка: кадры добавляются, потом (когда рисовальщик всё показал) — ход игрока или итог
 function receive(r, skip = 0){
@@ -275,12 +298,15 @@ function onCaughtUp(){
   if (curIdx < FR.length - 1) return;
   G.shown = r;
   if (r.type === 'wait') { G.req = null; G.busy = true; $('turn').innerHTML = `<div class="hint">⏳ Ходит: <b>${esc(r.waiting || 'бот')}</b>… <button class="danger" data-leave="1">🚪 Выйти из боя</button></div>`; return; }
-  if (r.type === 'end') { clearInterval(turnTimer); showEnd(r); }
+  if (r.type === 'end') { clearInterval(turnTimer); if (!G.room) soloMark(false); showEnd(r); }
   else { G.req = G.lastReq = r.req; G.busy = false; renderTurn(); if (r.req.msg) toast(r.req.msg + altHint(r.req)); startTurnTimer(); }
 }
 async function cmd(c){
   if (G.busy || G.over) return;
   G.busy = true; clearInterval(turnTimer); toast('');
+  // ответ через туннель идёт до пары секунд: кнопки сразу гаснут и видно, что ход отправлен (иначе кажется, что щелчок не дошёл)
+  $('turn').querySelectorAll('button:not([data-leave]):not(.hud-min),input,select').forEach(b => { b.disabled = true; });
+  const tm = $('tmsg'); if (tm) tm.textContent = c.c === 'end' ? '⏳ Ход завершается…' : '⏳ Отправляю ход…';
   G.sentAt = FR.length;
   if (G.room){ const v = await api(Object.assign({cmd:'room_step', code:G.room, since:ROOM.n}, c)); roomFeed(v); return; }
   const r = await api(Object.assign({cmd:'step'}, c));
@@ -296,18 +322,18 @@ function showEnd(r){
     $('turn').innerHTML = `<div class="hint">Бой окончен.</div>`;
     const box = $('result').querySelector('.box');
     box.innerHTML = `<h2 style="color:${draw ? '#ddd' : (win ? '#5fd08a' : '#ff7b7b')}">${draw ? 'Ничья' : (win ? 'Победа команды!' : 'Победила команда ' + (r.result + 1))}</h2>
-      <p>${r.reason === 5 ? 'Предел раундов — победа по очкам (доля хитов команды + убитые враги)' : 'Осталась одна команда'}</p><p class="small">${r.rounds} раундов</p>${sc}
+      <p>${r.reason === 5 ? 'Предел раундов — победа по очкам (доля хитов команды + убитые враги)' : 'Осталась одна команда'}</p><p class="small">${r.rounds} ${pluralRu(r.rounds, "раунд", "раунда", "раундов")}</p>${sc}
       <div class="btns"><button class="primary" id="rLobby">В комнату</button><button id="rHide">Посмотреть поле</button></div>`;
     $('result').classList.add('on');
     $('rLobby').onclick = () => { $('result').classList.remove('on'); ROOM.lobbyHtml = ''; if (ROOM.v) roomLobby(ROOM.v); showTab(6); };   // лобби — по свежему состоянию $('rHide').onclick = () => $('result').classList.remove('on');
     return;
   }
   const win = r.result === G.me, draw = r.result === 2;
-  const why = ['Оба живы после предохранителя (500 раундов)', win ? 'Вы победили: соперник повержен' : 'Вы повержены', win ? 'Соперник вышел за край арены: побег — это поражение' : 'Вы вышли за край арены: побег — это поражение',
+  const why = r.reason === -1 ? 'Вы сдались' : ['Оба живы после предохранителя (500 раундов)', win ? 'Вы победили: соперник повержен' : 'Вы повержены', win ? 'Соперник вышел за край арены: побег — это поражение' : 'Вы вышли за край арены: побег — это поражение',
     win ? 'Соперник оторвался от погони: побег — это поражение' : 'Вы оторвались от погони: побег — это поражение', win ? 'Соперник выбился из сил: он «ушёл» и проиграл' : 'Вы ушли от выбившегося из сил соперника — и проиграли'][r.reason] || '';
   $('turn').innerHTML = `<div class="hint">Бой окончен.</div>`;
   const box = $('result').querySelector('.box');
-  box.innerHTML = `<h2 style="color:${draw ? '#ddd' : (win ? '#5fd08a' : '#ff7b7b')}">${draw ? 'Ничья' : (win ? 'Победа!' : 'Поражение')}</h2><p>${why}</p><p class="small">${r.rounds} раундов</p>
+  box.innerHTML = `<h2 style="color:${draw ? '#ddd' : (win ? '#5fd08a' : '#ff7b7b')}">${draw ? 'Ничья' : (win ? 'Победа!' : 'Поражение')}</h2><p>${why}</p><p class="small">${r.rounds} ${pluralRu(r.rounds, "раунд", "раунда", "раундов")}</p>
     <div class="btns"><button class="primary" id="rAgain">Ещё бой</button><button id="rSame">Тот же соперник</button><button id="rHide">Посмотреть поле</button><button id="rEdit">В главное меню</button></div>`;
   $('result').classList.add('on');
   $('rAgain').onclick = () => { $('seed').value = 1 + Math.floor(Math.random() * 99999); prevKey = ''; startGame(); };
@@ -320,7 +346,7 @@ function altHint(q){
   return me && me.alt && /дальше дальности/.test(q.msg || '') ? ` Вы на высоте ${me.alt * 5} фт — высота тоже входит в расстояние до цели, спуститесь ниже.` : '';
 }
 function fightBroken(err){
-  G.over = true; G.busy = true; G.req = null; clearInterval(turnTimer);
+  G.over = true; G.busy = true; G.req = null; clearInterval(turnTimer); if (!G.room) soloMark(false);
   $('turn').innerHTML = '<div class="hint">Бой прерван.</div>';
   const box = $('result').querySelector('.box');
   box.innerHTML = `<h2>Бой прерван</h2><p>${esc(err || 'Сервер перезапускался.')}</p><div class="btns"><button class="primary" id="rAgain">Новый бой</button><button id="rEdit">В главное меню</button></div>`;
@@ -333,7 +359,9 @@ async function leaveFight(){
   if (G.over){ G.active = false; go(G.room ? 'coop' : 'home'); return; }
   if (G.room){ if (await confirmBox('Выйти из боя? Ваш герой останется, его ходы будут завершаться сами.', 'Выйти', true)) await roomLeave(); return; }
   if (!(await confirmBox('Сдаться и выйти из боя? Бой будет засчитан как поражение.', 'Сдаться', true))) return;
-  G.active = false; G.over = true; clearInterval(turnTimer); G.req = null; $('turn').innerHTML = '<div class="hint">Бой брошен.</div>'; go('home');
+  if (G.over) return;   // бой кончился, пока было открыто окно
+  soloMark(false); api({cmd:'solo_quit'});
+  showEnd({result: 1 - G.me, reason: -1, rounds: (FR[FR.length - 1] || {}).round || 0});
 }
 ROUTE_BACK.battle = leaveFight;
 ROUTE_BACK.coop = async () => { if (!ROOM.code) return go('home'); if (await confirmBox('Выйти из комнаты?' + (v0().status === 'fight' ? ' Ваш герой останется в бою, его ходы будут завершаться сами.' : ''), 'Выйти', true)) await roomLeave(); };
