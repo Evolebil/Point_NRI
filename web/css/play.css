@@ -254,6 +254,10 @@ main{position:relative;z-index:1}
 .zoom-pct{min-width:54px;text-align:center;font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums}
 .ws-top{position:absolute;left:26px;right:26px;top:22px;display:flex;align-items:center;gap:16px;padding:9px 16px;z-index:4;flex-wrap:wrap}
 .ws-title{font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw}
+.ws-saved{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);white-space:nowrap}
+.ws-saved i{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:0 0 auto}
+.ws-saved[data-state="dirty"] i{background:#f2c14e}.ws-saved[data-state="bad"] i{background:var(--bad)}
+.btn-icon{min-width:40px;padding-left:8px;padding-right:8px;font-size:18px;line-height:1}
 .ws-left,.ws-right{position:absolute;top:106px;z-index:4;padding:16px;overflow:auto;max-height:calc(100% - 210px)}
 .ws-left{left:26px;width:312px}
 .ws-right{right:26px;width:312px;display:flex;flex-direction:column;gap:12px}

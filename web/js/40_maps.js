@@ -54,7 +54,7 @@ function meDraw(){
   meCS = Math.max(8, Math.min(40, Math.floor(2400 / Math.max(m.aw, m.ah))));
   if (cv2.width !== m.aw * meCS || cv2.height !== m.ah * meCS){ cv2.width = m.aw * meCS; cv2.height = m.ah * meCS; cv2.style.width = cv2.width + 'px'; cv2.style.height = cv2.height + 'px'; }
   paintMap(cv2.getContext('2d'), m, meCS);
-  $('meTitle').textContent = `${m.name || 'Моя арена'} · ${m.aw}×${m.ah}`;
+  $('meTitle').textContent = wsTitle(m.name || 'Моя арена', `${m.aw}×${m.ah}`);
   const key = m.aw + 'x' + m.ah + ':' + meCS;
   if (MV.key !== key){ MV.key = key; meFit(); }
 }
@@ -161,7 +161,7 @@ meStageEl.addEventListener('pointerdown', e => {
   if (MP.size > 1) return;
   if (e.button === 1 || (e.button === 0 && meSpace)){ e.preventDefault(); mePan = {x: e.clientX, y: e.clientY, ox: MV.x, oy: MV.y}; meStageEl.classList.add('panning'); return; }
   if (e.target !== meCvEl || (e.button !== 0 && e.button !== 2)) return;
-  mePainting = e.button === 2 ? 2 : 1; mePaint(e, mePainting === 2);
+  mePainting = e.button === 2 ? 2 : 1; UNDO.pend = meShot(); mePaint(e, mePainting === 2);
 });
 meStageEl.addEventListener('pointermove', e => {
   const r = meStageEl.getBoundingClientRect(); if (MP.has(e.pointerId)) MP.set(e.pointerId, {x: e.clientX - r.left, y: e.clientY - r.top});
@@ -172,7 +172,7 @@ meStageEl.addEventListener('pointermove', e => {
   if (mePan){ MV.x = mePan.ox + e.clientX - mePan.x; MV.y = mePan.oy + e.clientY - mePan.y; meView(); return; }
   if (mePainting) mePaint(e, mePainting === 2);
 });
-const meUp = e => { MP.delete(e.pointerId); if (MP.size < 2) mePinch = null; if (!MP.size){ mePainting = 0; mePan = null; meStageEl.classList.remove('panning'); } };
+const meUp = e => { MP.delete(e.pointerId); if (MP.size < 2) mePinch = null; if (!MP.size){ mePainting = 0; mePan = null; meStageEl.classList.remove('panning'); if (UNDO.pend){ meStep(UNDO.pend); UNDO.pend = null; } } };
 meStageEl.addEventListener('pointerup', meUp);
 meStageEl.addEventListener('pointercancel', meUp);
 meStageEl.addEventListener('wheel', e => { e.preventDefault(); const r = meStageEl.getBoundingClientRect(); meZoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX - r.left, e.clientY - r.top); }, {passive: false});
@@ -180,24 +180,24 @@ addEventListener('keydown', e => { if (e.code === 'Space' && ROUTE === 'workshop
 addEventListener('keyup', e => { if (e.code === 'Space'){ meSpace = false; meStageEl.classList.remove('grab'); } });
 const meZoomBtn = k => { const f = meStageEl.getBoundingClientRect(); meZoomAt(k, f.width / 2, f.height / 2); };
 $('meZoomIn').onclick = () => meZoomBtn(1.25); $('meZoomOut').onclick = () => meZoomBtn(0.8); $('meZoomFit').onclick = meFit;
-$('meName').oninput = () => { ME.name = $('meName').value; $('meTitle').textContent = `${ME.name || 'Моя арена'} · ${ME.aw}×${ME.ah}`; };
-$('meTheme').onchange = () => { ME.theme = +$('meTheme').value; meDraw(); };
+$('meName').oninput = () => { ME.name = $('meName').value; $('meTitle').textContent = wsTitle(ME.name || 'Моя арена', `${ME.aw}×${ME.ah}`); meChanged(); };
+$('meTheme').onchange = () => { const b = meShot(); ME.theme = +$('meTheme').value; meDraw(); meStep(b); };
 $('meResize').onclick = async () => {
   const aw = Math.max(5, Math.min(100, +$('meW').value || 20)), ah = Math.max(5, Math.min(100, +$('meH').value || 14));
   const losesCells=ME.aw>aw&&Array.from({length:ME.ah},(_,y)=>Array.from({length:ME.aw},(_,x)=>x>=aw&&LAYERS.some(k=>ME.L[k][y*ME.aw+x])).some(Boolean)).some(Boolean)||ME.ah>ah&&Array.from({length:ME.ah-ah},(_,dy)=>Array.from({length:ME.aw},(_,x)=>LAYERS.some(k=>ME.L[(ah+dy)*ME.aw+x])).some(Boolean)).some(Boolean)||ME.starts.some(s=>s&&(s[0]>=aw||s[1]>=ah));
   if (losesCells && !(await confirmBox('Клетки за новыми границами будут потеряны. Изменить размер?', 'Изменить'))) return;
-  const n = meNew(aw, ah, ME.theme); n.name = ME.name;
+  const b = meShot(), n = meNew(aw, ah, ME.theme); n.name = ME.name;
   for (let y = 0; y < Math.min(ah, ME.ah); y++) for (let x = 0; x < Math.min(aw, ME.aw); x++) LAYERS.forEach(k => n.L[k][y * aw + x] = ME.L[k][y * ME.aw + x]);
   n.starts = ME.starts.map(s => s && s[0] < aw && s[1] < ah ? s : null); if (!(n.starts[0] && n.starts[1])) n.starts = [null, null];
   (ME.vx || new Map()).forEach((c, k) => { if (c[0] < aw && c[1] < ah) n.vx.set(k, c); });
-  ME = n; meDraw(); meMsg('Размер изменён.');
+  ME = n; meDraw(); meStep(b); meMsg('Размер изменён.');
 };
-$('meClear').onclick = async () => { if (!(await confirmBox('Очистить карту?', 'Очистить', true))) return;const n = meNew(ME.aw, ME.ah, ME.theme); n.name = ME.name; ME = n; meDraw(); };
-$('meBorder').onclick = () => { for (let x = 0; x < ME.aw; x++){ ME.L.wall[x] = 1; ME.L.wall[(ME.ah - 1) * ME.aw + x] = 1; } for (let y = 0; y < ME.ah; y++){ ME.L.wall[y * ME.aw] = 1; ME.L.wall[y * ME.aw + ME.aw - 1] = 1; } meDraw(); };
+$('meClear').onclick = async () => { if (!(await confirmBox('Очистить карту?', 'Очистить', true))) return; const b = meShot(), n = meNew(ME.aw, ME.ah, ME.theme); n.name = ME.name; ME = n; meDraw(); meStep(b); };
+$('meBorder').onclick = () => { const b = meShot(); for (let x = 0; x < ME.aw; x++){ ME.L.wall[x] = 1; ME.L.wall[(ME.ah - 1) * ME.aw + x] = 1; } for (let y = 0; y < ME.ah; y++){ ME.L.wall[y * ME.aw] = 1; ME.L.wall[y * ME.aw + ME.aw - 1] = 1; } meDraw(); meStep(b); };
 $('meRandom').onclick = async () => {
   if (!(await confirmBox('Случайная заготовка заменит рисунок на карте. Продолжить?', 'Заменить'))) return;
-  const r = await api({cmd:'genmap', seed: 1 + Math.floor(Math.random() * 99999), w: +$('meW').value || 0, h: +$('meH').value || 0, theme: +$('meTheme').value});
-  if (r.type === 'map'){ ME = meFromJson(r.map, ME.name); meShow(); meMsg('Случайная заготовка: правьте как нужно.'); } else meMsg(r.err || 'ошибка', 'err');
+  const b = meShot(), r = await api({cmd:'genmap', seed: 1 + Math.floor(Math.random() * 99999), w: +$('meW').value || 0, h: +$('meH').value || 0, theme: +$('meTheme').value});
+  if (r.type === 'map'){ ME = meFromJson(r.map, ME.name); meShow(); meStep(b); meMsg('Случайная заготовка: правьте как нужно.'); } else meMsg(r.err || 'ошибка', 'err');
 };
 async function meValidate(){
   const r = await api({cmd:'checkmap', map: meToJson()});
@@ -209,14 +209,14 @@ async function meSaveNow(){
   ME.name = ($('meName').value || 'Моя арена').trim().slice(0, 40) || 'Моя арена';
   if (!(await meValidate())) return false;
   MAPS[ME.name] = meToJson();
-  try { localStorage.setItem('dnd_maps', JSON.stringify(MAPS)); } catch (e) { meMsg('Не удалось сохранить: в браузере закончилось место.', 'err'); return false; }
-  meList(); meSnap(); meMsg('Сохранено: ' + ME.name, 'ok'); toast('Карта сохранена'); return true;
+  try { localStorage.setItem('dnd_maps', JSON.stringify(MAPS)); } catch (e) { wsSaved($('meSavedInd'), 'bad'); meMsg('Не удалось сохранить: в браузере закончилось место.', 'err'); return false; }
+  meList(); meSnap(); meDraftDrop(); meChanged(); meMsg('Сохранено: ' + ME.name, 'ok'); toast('Карта сохранена'); return true;
 }
 $('meSave').onclick = meSaveNow;
 $('meList').addEventListener('change', async e => {
   const n = e.target.value; if (!n || !MAPS[n]) return;
   if (meDirty() && !(await confirmBox('В текущей карте есть несохранённые изменения. Открыть другую?', 'Открыть'))){ meList(); return; }
-  ME = meFromJson(MAPS[n], n); meSnap(); meShow();
+  ME = meFromJson(MAPS[n], n); meSnap(); meHistReset(); meShow(); meChanged();
 });
 $('meDel').onclick = async () => {
   if (!ME || !MAPS[ME.name] || !(await confirmBox(`Удалить карту «${ME.name}»? Это нельзя отменить.`, 'Удалить', true))) return;
@@ -226,20 +226,86 @@ $('meDel').onclick = async () => {
 let meSaved = '';
 const meSnap = () => { meSaved = ME ? JSON.stringify(Object.assign({n: ME.name}, meToJson())) : ''; };
 const meDirty = () => !!ME && JSON.stringify(Object.assign({n: ME.name}, meToJson())) !== meSaved;
-async function meExit(){
-  if (meDirty()){
-    const m = modal('Сохранить изменения?', '<p>В карте есть несохранённые изменения.</p>', '<button data-close>Отмена</button><button id="meExitNo">Не сохранять</button><button class="primary" id="meExitYes">Сохранить</button>');
-    m.q('#meExitNo').onclick = () => { m.close(); meSnap(); go('home'); };
-    m.q('#meExitYes').onclick = async () => { m.close(); if (await meSaveNow()) go('home'); };
-    return;
-  }
-  go('home');
+// уход из редактора карт (В-01, В-03): при несохранённых изменениях — «Сохранить / Не сохранять / Отмена»
+function meLeave(to){
+  if (meDirty()) wsLeaveDialog(meSaveNow, meDiscard, () => go(to)); else go(to);
 }
-ROUTE_ENTER.workshop = prev => { meShow(); if (prev !== 'workshop' && !meSaved) meSnap(); requestAnimationFrame(meFit); };
-ROUTE_BACK.workshop = meExit;
+// «Не сохранять»: карта — как сохранена (новая — пустая), черновик удаляется
+async function meDiscard(){
+  meDraftDrop();
+  const n = ME.name; ME = MAPS[n] ? meFromJson(MAPS[n], n) : meNew(20, 14); ME.name = n;
+  meSnap(); meHistReset(); meShow(); meChanged();
+}
+ROUTE_ENTER.workshop = prev => { meShow(); if (prev !== 'workshop' && !meSaved) meSnap(); meChanged(); requestAnimationFrame(meFit); meDraftCheck(); };
+ROUTE_BACK.workshop = () => meLeave('home');
 document.querySelectorAll('[data-ws-exit]').forEach(b => b.onclick = () => goBack());
 $('meExport').onclick = () => { const blob = new Blob([JSON.stringify(Object.assign({name: ME.name}, meToJson()), null, 1)], {type:'application/json'}), a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (ME.name || 'map') + '.json'; a.click(); };
 $('meImport').onclick = () => $('meFile').click();
-$('meFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const j = JSON.parse(await f.text()); ME = meFromJson(j, j.name || f.name.replace(/\.json$/, '')); meShow(); meMsg('Карта прочитана: проверьте и сохраните.'); } catch (err) { meMsg('Не удалось прочитать: ' + err.message, 'err'); } };
+$('meFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const j = JSON.parse(await f.text()), b = meShot(); ME = meFromJson(j, j.name || f.name.replace(/\.json$/, '')); meShow(); meStep(b); meMsg('Карта прочитана: проверьте и сохраните.'); } catch (err) { meMsg('Не удалось прочитать: ' + err.message, 'err'); } };
 meList();
 addEventListener('resize', () => { if (ME && ROUTE === 'workshop') meFit(); });
+
+// ---- отмена и повтор (Ф-02, В-05, В-06): снимок карты до операции; один штрих или одна операция — один шаг; до 200 шагов
+// (ТЗ — не меньше 100); история — в памяти, сбрасывается при открытии другой карты ----
+const UNDO = {past: [], fut: [], max: 200, pend: null};
+function meShot(m = ME){ return {name: m.name, aw: m.aw, ah: m.ah, theme: m.theme, L: Object.fromEntries(LAYERS.map(k => [k, m.L[k].slice()])), starts: m.starts.map(t => t && t.slice()), vx: new Map(m.vx || [])}; }
+function meSame(a, b){
+  if (a.aw !== b.aw || a.ah !== b.ah || a.theme !== b.theme || a.vx.size !== b.vx.size || JSON.stringify(a.starts) !== JSON.stringify(b.starts)) return false;
+  return LAYERS.every(k => { const x = a.L[k], y = b.L[k]; for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false; return true; });
+}
+// операция закончена: before — снимок до неё; ничего не изменилось (щелчок мимо) — шага нет
+function meStep(before){
+  if (meSame(before, meShot())) return;
+  UNDO.past.push(before); if (UNDO.past.length > UNDO.max) UNDO.past.shift();
+  UNDO.fut = []; meChanged();
+}
+function meApply(t){ const n = ME.name; ME = meShot(t); ME.name = n; meShow(); meChanged(); }
+function meUndo(){ if (!UNDO.past.length) return; UNDO.fut.push(meShot()); meApply(UNDO.past.pop()); }
+function meRedo(){ if (!UNDO.fut.length) return; UNDO.past.push(meShot()); meApply(UNDO.fut.pop()); }
+function meHistReset(){ UNDO.past = []; UNDO.fut = []; UNDO.pend = null; meChanged(); }
+$('meUndo').onclick = meUndo; $('meRedo').onclick = meRedo;
+// горячие клавиши (табл. 6, п. 4.3.3.3): не в текстовом поле и не при открытом окне; по коду клавиши — и в русской раскладке
+addEventListener('keydown', e => {
+  if (ROUTE !== 'workshop' || !(e.ctrlKey || e.metaKey) || e.altKey || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || document.querySelector('.modal-bg')) return;
+  if (e.code === 'KeyZ' && !e.shiftKey){ e.preventDefault(); meUndo(); }
+  else if (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey)){ e.preventDefault(); meRedo(); }
+  else if (e.code === 'KeyS'){ e.preventDefault(); meSaveNow(); }
+});
+// ---- изменения и черновик (Ф-03): индикатор В-04; черновик — в IndexedDB каждые 30 с и при уходе со вкладки, только
+// при изменениях после прошлого черновика; при следующем открытии редактора — предложение восстановить (М-13) ----
+const DRAFT = {dirty: false, checked: false};
+function meChanged(){
+  $('meUndo').disabled = !UNDO.past.length; $('meRedo').disabled = !UNDO.fut.length;
+  const ind = $('meSavedInd');
+  if (!meDirty()){ wsSaved(ind, 'ok'); DRAFT.dirty = false; }
+  else { wsSaved(ind, 'dirty'); DRAFT.dirty = true; }
+}
+async function meDraftSave(){
+  if (!DRAFT.dirty || !ME || !meDirty()) return;
+  DRAFT.dirty = false;
+  const d = {name: ME.name, map: meToJson(), at: Date.now()};
+  try { await GMDB.put('drafts', 'map', d); if (!DRAFT.dirty) wsSaved($('meSavedInd'), 'draft', d.at); }
+  catch (e) { DRAFT.dirty = true; console.error('черновик карты не записан:', e.message); }
+}
+function meDraftDrop(){ DRAFT.dirty = false; GMDB.del('drafts', 'map').catch(() => {}); }
+setInterval(meDraftSave, 30000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') meDraftSave(); });
+addEventListener('pagehide', meDraftSave);
+async function meDraftCheck(){
+  if (DRAFT.checked) return; DRAFT.checked = true;
+  let d = null; try { d = await GMDB.get('drafts', 'map'); } catch (e) { return; }
+  if (!d || !d.map || !d.map.aw) return;
+  const saved = MAPS[d.name] ? JSON.stringify(MAPS[d.name]) : '';
+  if (saved && saved === JSON.stringify(d.map)){ meDraftDrop(); return; }   // черновик совпадает с сохранённой картой
+  const when = new Date(d.at).toLocaleString('ru-RU', {day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit'});
+  const m = modal('Черновик', `<p>Найден несохранённый черновик «${esc(d.name || 'Без названия')}» от ${esc(when)}. Восстановить?</p>`, '<button id="meDraftNo">Удалить черновик</button><button class="primary" id="meDraftYes">Восстановить</button>', {required: true});
+  m.q('#meDraftNo').onclick = () => { m.close(); meDraftDrop(); };
+  m.q('#meDraftYes').onclick = () => {
+    m.close();
+    ME = meFromJson(d.map, d.name);
+    // отметка сохранённого: карта из списка, а новая карта не сохранялась вовсе ('-' не совпадёт ни с какой картой; '' вход
+    // в редактор принял бы за «ещё не снимали» и счёл черновик сохранённым)
+    meSaved = MAPS[d.name] ? JSON.stringify(Object.assign({n: d.name}, meToJson(meFromJson(MAPS[d.name], d.name)))) : '-';
+    meHistReset(); meShow(); meChanged(); requestAnimationFrame(meFit);
+  };
+}

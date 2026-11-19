@@ -424,11 +424,11 @@ const wdDirty = () => !!WD.cur && WD.snap !== wdState();
 function wdCenter(cells){ const w = Math.min(32, cells), h = Math.min(20, cells); return {x: Math.floor((cells - w) / 2), y: Math.floor((cells - h) / 2), w, h}; }
 async function wdOpen(w){
   WD.cur = w; WD.frame = Object.assign(wdCenter(w.cells), w.frame || {}); WD.map = null; wdDraw(); wdList();
-  $('wdTitle').textContent = `${w.name} · ${w.cells}×${w.cells}`; $('wdOpen').disabled = true;
+  $('wdTitle').textContent = wsTitle(w.name, `${w.cells}×${w.cells}`); $('wdOpen').disabled = true;
   const gen = ++WD.gen, r = await api({cmd:'worldmap', seed: String(w.seed), size: Math.max(1000, w.cells * 10)});
   if (gen !== WD.gen) return;
   if (r.type !== 'worldmap'){ toast(r.err || 'Не удалось построить мир', 5000, true); return; }
-  WD.map = r; WD.snap = wdState(); $('wdOpen').disabled = false; wdDraw();
+  WD.map = r; WD.snap = wdState(); $('wdOpen').disabled = false; wdDraw(); wdMark();
 }
 function wdList(){
   const l = readWorlds();
@@ -449,7 +449,9 @@ function wdDraw(){
   x.save(); x.setLineDash([12, 8]); x.lineWidth = 4; x.strokeStyle = '#f4bd19'; x.strokeRect(f.x * k, f.y * k, f.w * k, f.h * k); x.setLineDash([]); x.fillStyle = '#f4bd19';
   [[f.x, f.y], [f.x + f.w, f.y], [f.x, f.y + f.h], [f.x + f.w, f.y + f.h]].forEach(([a, b]) => { x.beginPath(); x.arc(a * k, b * k, 7, 0, 7); x.fill(); }); x.restore();
   $('wdSel').textContent = `${f.w}×${f.h} клеток`;
+  wdMark();
 }
+const wdMark = () => wsSaved($('wdSavedInd'), wdDirty() ? 'dirty' : 'ok');   // индикатор сохранения (В-04)
 function wdFromInputs(){
   const name = $('wdName').value.trim().slice(0, 40), seed = Math.max(1, Math.trunc(+$('wdSeed').value) || 0), cells = +$('wdSize').value;
   if (!name){ toast('Назовите мир', 4000, true); return null; }
@@ -459,21 +461,24 @@ function wdFromInputs(){
 ROUTE_ENTER.worlds = () => { wdList(); if (!WD.cur){ const l = readWorlds(); if (l[0]) wdOpen(l[0]); else { const w = wdFromInputs(); if (w){ w.id = ''; wdOpen(w); } } } else requestAnimationFrame(wdDraw); };
 // выход из миров — туда, откуда пришли (комната выбирает участок здесь), иначе в меню
 const wdLeave = () => { const r = WD.ret || 'home'; WD.ret = ''; go(r); };
-ROUTE_BACK.worlds = async () => {
-  if (wdDirty()){
-    const m = modal('Сохранить мир?', '<p>Есть несохранённые изменения участка.</p>', '<button data-close>Отмена</button><button id="wdNo">Не сохранять</button><button class="primary" id="wdYes">Сохранить</button>');
-    m.q('#wdNo').onclick = () => { m.close(); WD.snap = wdState(); wdLeave(); };
-    m.q('#wdYes').onclick = () => { m.close(); wdSave(); wdLeave(); };
-    return;
-  }
-  wdLeave();
-};
+// уход из миров (В-01, В-03): при несохранённом участке — «Сохранить / Не сохранять / Отмена»; to — куда (нет — откуда пришли)
+function wdLeaveTo(to){
+  const then = () => to ? go(to) : wdLeave();
+  if (wdDirty()) wsLeaveDialog(() => { wdSave(); return true; }, () => { WD.frame = Object.assign(wdCenter(WD.cur.cells), WD.cur.frame || {}); WD.snap = wdState(); wdDraw(); }, then);
+  else then();
+}
+ROUTE_BACK.worlds = () => wdLeaveTo('');
+// переключатель «Карты | Миры» (В-03)
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-ws-to]'); if (!b || b.dataset.wsTo === ROUTE) return;
+  if (ROUTE === 'workshop') meLeave(b.dataset.wsTo); else if (ROUTE === 'worlds') wdLeaveTo(b.dataset.wsTo);
+});
 function wdSave(){
   if (!WD.cur) return;
   const l = readWorlds(); if (!WD.cur.id) WD.cur.id = 'world-' + Date.now().toString(36);
   WD.cur.frame = Object.assign({}, WD.frame);
   const i = l.findIndex(w => w.id === WD.cur.id); if (i >= 0) l[i] = WD.cur; else l.push(WD.cur);
-  writeWorlds(l); WD.snap = wdState(); wdList(); toast('Мир сохранён');
+  writeWorlds(l); WD.snap = wdState(); wdList(); wdMark(); toast('Мир сохранён');
 }
 $('wdSave').onclick = wdSave;
 $('wdCreate').onclick = () => { const w = wdFromInputs(); if (!w) return; const l = readWorlds(); l.push(w); writeWorlds(l); wdOpen(w); toast('Мир создан'); };
@@ -531,7 +536,7 @@ $('wdOpen').onclick = async () => {
   $('wdOpen').disabled = false;
   if (r.type !== 'map'){ toast(r.err || 'Не удалось открыть участок', 5000, true); return; }
   if (typeof meDirty === 'function' && meDirty() && !(await confirmBox('В редакторе карт есть несохранённая карта. Заменить её участком мира?', 'Заменить'))) return;
-  ME = meFromJson(r.map, `${WD.cur.name} — участок`); meSaved = ''; go('workshop'); meMsg('Участок мира открыт: правьте и сохраните.');
+  ME = meFromJson(r.map, `${WD.cur.name} — участок`); meSaved = ''; meHistReset(); go('workshop'); meMsg('Участок мира открыт: правьте и сохраните.');
 };
 addEventListener('resize', () => { if (ROUTE === 'worlds') wdDraw(); });
 

@@ -128,10 +128,16 @@
   <div class="ws-top glass">
     <button class="btn" type="button" data-ws-exit>← Выйти</button>
     <b class="ws-title" id="meTitle">Моя арена · 20×14</b>
-    <div class="seg"><button type="button" class="on" data-go="workshop">Карты</button><button type="button" data-go="worlds">Миры</button></div>
+    <div class="seg" role="group" aria-label="Редактор"><button type="button" class="on" data-ws-to="workshop">Карты</button><button type="button" data-ws-to="worlds">Миры</button></div>
+    <span class="ws-saved" id="meSavedInd" role="status" data-state="ok"><i></i><span>Сохранено</span></span>
     <span class="grow"></span>
+    <button class="btn btn-icon" id="meUndo" type="button" aria-label="Отменить" title="Отменить (Ctrl+Z)" disabled>↶</button>
+    <button class="btn btn-icon" id="meRedo" type="button" aria-label="Повторить" title="Повторить (Ctrl+Y)" disabled>↷</button>
     <button class="btn" id="meCheck" type="button">Проверить</button>
-    <button class="btn btn-accent" id="meSave" type="button">Сохранить</button>
+    <button class="btn" id="meExport" type="button">Экспорт</button>
+    <button class="btn" id="meImport" type="button">Импорт</button>
+    <input type="file" id="meFile" accept="application/json,.json" hidden>
+    <button class="btn btn-accent" id="meSave" type="button" title="Сохранить (Ctrl+S)">Сохранить</button>
   </div>
   <aside class="ws-left glass" aria-label="Кисти">
     <div id="meTools"></div>
@@ -153,9 +159,6 @@
   <div class="ws-bottom glass">
     <select id="meList" aria-label="Сохранённые карты"></select>
     <button class="btn" id="meDel" type="button" title="Удалить выбранную карту">Удалить</button>
-    <button class="btn" id="meExport" type="button">Экспорт</button>
-    <button class="btn" id="meImport" type="button">Импорт</button>
-    <input type="file" id="meFile" accept="application/json,.json" hidden>
     <span class="grow"></span>
     <div class="seg zoom-seg" role="group" aria-label="Масштаб карты"><button type="button" id="meZoomOut" title="Отдалить" aria-label="Отдалить">−</button><span id="meZoomPct" class="zoom-pct">100%</span><button type="button" id="meZoomIn" title="Приблизить" aria-label="Приблизить">+</button></div>
     <button class="btn" id="meZoomFit" type="button" title="Вписать карту в экран">Вписать</button>
@@ -170,7 +173,8 @@
   <div class="ws-top glass">
     <button class="btn" type="button" data-ws-exit>← Выйти</button>
     <b class="ws-title" id="wdTitle">Мир</b>
-    <div class="seg"><button type="button" data-go="workshop">Карты</button><button type="button" class="on" data-go="worlds">Миры</button></div>
+    <div class="seg" role="group" aria-label="Редактор"><button type="button" data-ws-to="workshop">Карты</button><button type="button" class="on" data-ws-to="worlds">Миры</button></div>
+    <span class="ws-saved" id="wdSavedInd" role="status" data-state="ok"><i></i><span>Сохранено</span></span>
     <span class="grow"></span>
     <button class="btn" id="wdExport" type="button">Экспорт</button>
     <button class="btn btn-accent" id="wdSave" type="button">Сохранить мир</button>
