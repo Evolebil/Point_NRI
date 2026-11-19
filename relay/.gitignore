@@ -2,3 +2,5 @@ node_modules/
 .dev.vars
 host_key.txt
 .wrangler/
+# копии web/vendor и web/assets/models для раздачи с Cloudflare (собирает deploy.sh)
+public/

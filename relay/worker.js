@@ -2,6 +2,8 @@
 // Компьютер хозяина (host.mjs) держит WebSocket к /__host?key=…; каждый HTTP-запрос игрока Worker передаёт по нему
 // хозяину, тот спрашивает свой сервер игры (127.0.0.1:8770) и возвращает ответ. Хранилище — один Durable Object «hub».
 // Секрет хозяина — переменная HOST_KEY (wrangler secret put HOST_KEY).
+// Библиотеки 3D (/vendor/…) и модели бойцов (/assets/models/…) не идут через туннель: их раздаёт сам Cloudflare из relay/public
+// (статические файлы Worker, wrangler.toml [assets]); выкладка — relay/deploy.sh.
 
 export class Hub {
   constructor(state, env) {
@@ -30,17 +32,20 @@ export class Hub {
     if (!ws) return new Response(OFFLINE, { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
     const id = ++this.seq, t0 = Date.now();
     const body = req.method === "POST" ? await req.text() : "";
-    const msg = { id, method: req.method, path: url.pathname + url.search, body, gzip: (req.headers.get("Accept-Encoding") || "").includes("gzip") };
+    const msg = { id, method: req.method, path: url.pathname + url.search, body, gzip: (req.headers.get("Accept-Encoding") || "").includes("gzip"), inm: req.headers.get("If-None-Match") || "" };
     const res = await new Promise((resolve) => {
       const timer = setTimeout(() => { this.pending.delete(id); resolve(null); }, 40000);
       this.pending.set(id, { resolve, timer });
       try { ws.send(JSON.stringify(msg)); } catch (e) { clearTimeout(timer); this.pending.delete(id); resolve(null); }
     });
     if (!res) return new Response(JSON.stringify({ type: "error", err: "нет связи с сервером: компьютер хозяина не ответил" }), { status: 504, headers: { "Content-Type": "application/json; charset=utf-8" } });
-    const bytes = Uint8Array.from(atob(res.body || ""), (c) => c.charCodeAt(0));
-    const h = new Headers({ "Content-Type": res.type || "application/octet-stream", "Cache-Control": "no-store" });
-    if (res.enc) h.set("Content-Encoding", res.enc);
+    // кэш — как велит сервер игры (прежний хозяин его не присылает — тогда no-store); страница — с ETag: повторный заход — 304 без тела
+    const h = new Headers({ "Content-Type": res.type || "application/octet-stream", "Cache-Control": res.cc || "no-store" });
+    if (res.etag) h.set("ETag", res.etag);
     h.set("X-Relay-Ms", String(Date.now() - t0));   // время хаб -> хозяин -> хаб
+    if (res.status === 304) return new Response(null, { status: 304, headers: h });
+    const bytes = Uint8Array.from(atob(res.body || ""), (c) => c.charCodeAt(0));
+    if (res.enc) h.set("Content-Encoding", res.enc);
     return new Response(bytes, { status: res.status || 200, headers: h, encodeBody: res.enc ? "manual" : "automatic" });
   }
 

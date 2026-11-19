@@ -10,3 +10,8 @@ class_name = "Hub"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Hub"]
+
+# библиотеки 3D и модели бойцов — с Cloudflare, без туннеля (копии web/vendor, web/assets/models; собирает deploy.sh);
+# пути, которых нет в public, идут в worker.js как раньше
+[assets]
+directory = "./public"
