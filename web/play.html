@@ -124,7 +124,9 @@
 
 <!-- ============ Мастерская: карты ============ -->
 <section class="scene scene-full" id="s5" data-route="workshop">
-  <div class="ws-stage" id="meStage"><canvas id="meCv"></canvas></div>
+  <div class="ws-stage" id="meStage"><canvas id="meCv"></canvas><canvas id="meOv" aria-hidden="true"></canvas>
+    <div class="me-hint" id="meHint" aria-live="polite"></div>
+    <div class="me-viewnote" id="meViewNote">Для правки откройте редактор с компьютера</div></div>
   <div class="ws-top glass">
     <button class="btn" type="button" data-ws-exit>← Выйти</button>
     <b class="ws-title" id="meTitle">Моя арена · 20×14</b>
@@ -139,31 +141,46 @@
     <input type="file" id="meFile" accept="application/json,.json" hidden>
     <button class="btn btn-accent" id="meSave" type="button" title="Сохранить (Ctrl+S)">Сохранить</button>
   </div>
-  <aside class="ws-left glass" aria-label="Кисти">
-    <div id="meTools"></div>
-  </aside>
-  <aside class="ws-right glass" aria-label="Параметры карты">
-    <div class="caps">Карта</div>
-    <input type="text" id="meName" value="Моя арена" maxlength="40" aria-label="Название карты">
-    <div class="size-line"><input type="number" id="meW" min="5" max="100" value="20" aria-label="Ширина"><span>×</span><input type="number" id="meH" min="5" max="100" value="14" aria-label="Высота"><button class="btn" id="meResize" type="button">OK</button></div>
-    <select id="meTheme" aria-label="Тема карты"><option value="0">дикая местность</option><option value="1">город</option></select>
-    <div class="size-line"><select id="meBrush" aria-label="Размер кисти"><option value="1">кисть 1</option><option value="2">кисть 2</option><option value="3">кисть 3</option><option value="5">кисть 5</option></select>
-      <select id="meLevel" aria-label="Высота (земля, настил)"><option value="0">высота 0 фт</option><option value="1">высота 5 фт</option><option value="2" selected>высота 10 фт</option><option value="3">высота 15 фт</option><option value="4">высота 20 фт</option><option value="5">высота 25 фт</option><option value="6">высота 30 фт</option><option value="7">высота 35 фт</option><option value="8">высота 40 фт</option><option value="9">высота 45 фт</option><option value="10">высота 50 фт</option><option value="11">высота 55 фт</option><option value="12">высота 60 фт</option><option value="13">высота 65 фт</option><option value="14">высота 70 фт</option><option value="15">высота 75 фт</option><option value="16">высота 80 фт</option><option value="17">высота 85 фт</option><option value="18">высота 90 фт</option></select></div>
-    <select id="meTreeH" aria-label="Высота дерева"><option value="2">дерево 10 фт</option><option value="3">дерево 15 фт</option><option value="4" selected>дерево 20 фт</option><option value="5">дерево 25 фт</option><option value="6">дерево 30 фт</option><option value="7">дерево 35 фт</option><option value="8">дерево 40 фт</option></select>
-    <button class="btn wide" id="meRandom" type="button">Случайная заготовка</button>
-    <button class="btn wide" id="meBorder" type="button">Рамка из стен</button>
-    <button class="btn wide" id="meClear" type="button">Очистить</button>
-    <div id="meMsg"></div>
-    <details class="ws-help"><summary>Как рисовать</summary><p class="small muted">ЛКМ — рисовать, ПКМ — стереть слой. Отрезанные части можно: бой идёт в самой большой связной части. Высота — шагами по 5 фт: перепад до 10 фт — подъём, больше — обрыв (только по лестнице). Дерево — своей высоты (10–40 фт), на него можно залезть. Настил — второй ярус над землёй.</p><div class="legend2" id="meLegend"></div></details>
+  <aside class="ws-left me-tools glass" aria-label="Инструменты"><div id="meToolCol"></div></aside>
+  <aside class="ws-right me-side glass" aria-label="Палитра и параметры карты">
+    <div class="seg me-tabs" role="tablist" aria-label="Панель"><button type="button" role="tab" data-metab="pal" class="on">Палитра</button><button type="button" role="tab" data-metab="map">Карта</button></div>
+    <div class="me-tab" id="mePal">
+      <input type="search" id="meSearch" placeholder="Поиск материала" aria-label="Поиск материала" autocomplete="off">
+      <section class="tool-group" id="meFav" hidden><div class="caps">Избранное</div><div id="meFavList"></div></section>
+      <div id="meTools"></div>
+      <p class="small muted" id="meNone" hidden>Ничего не найдено</p>
+      <p class="small muted">Правый щелчок по материалу — в избранное (до 12).</p>
+    </div>
+    <div class="me-tab" id="meMapTab" hidden>
+      <div class="caps" id="meToolName">Кисть</div>
+      <div class="me-param" data-for="brush erase line">
+        <label class="size-line small">Размер <input type="range" id="meBrush" min="1" max="10" value="1" aria-label="Размер кисти"><b id="meBrushV">1</b></label>
+        <div class="seg" role="group" aria-label="Форма кисти" id="meShape"><button type="button" data-shape="sq" class="on">Квадрат</button><button type="button" data-shape="ci">Круг</button></div>
+      </div>
+      <div class="me-param" data-for="rect"><div class="seg" role="group" aria-label="Прямоугольник" id="meRectMode"><button type="button" data-rm="fill" class="on">Залитый</button><button type="button" data-rm="line">Контур</button></div></div>
+      <div class="me-param" data-for="start"><div class="seg" role="group" aria-label="Сторона" id="meSide"><button type="button" data-side="0" class="on">Старт A</button><button type="button" data-side="1">Старт B</button></div>
+        <p class="small muted">Щелчок — клетка старта, Alt + щелчок — убрать. До 16 клеток на сторону; бой ставит бойца в первую.</p></div>
+      <div class="size-line"><select id="meLevel" aria-label="Кисть: высота (земля, настил)"><option value="0">высота 0 фт</option><option value="1">высота 5 фт</option><option value="2" selected>высота 10 фт</option><option value="3">высота 15 фт</option><option value="4">высота 20 фт</option><option value="5">высота 25 фт</option><option value="6">высота 30 фт</option><option value="7">высота 35 фт</option><option value="8">высота 40 фт</option><option value="9">высота 45 фт</option><option value="10">высота 50 фт</option><option value="11">высота 55 фт</option><option value="12">высота 60 фт</option><option value="13">высота 65 фт</option><option value="14">высота 70 фт</option><option value="15">высота 75 фт</option><option value="16">высота 80 фт</option><option value="17">высота 85 фт</option><option value="18">высота 90 фт</option></select><select id="meTreeH" aria-label="Высота дерева"><option value="2">дерево 10 фт</option><option value="3">дерево 15 фт</option><option value="4" selected>дерево 20 фт</option><option value="5">дерево 25 фт</option><option value="6">дерево 30 фт</option><option value="7">дерево 35 фт</option><option value="8">дерево 40 фт</option></select></div>
+      <div class="caps">Карта</div>
+      <input type="text" id="meName" value="Новая арена" maxlength="60" aria-label="Название карты">
+      <div class="size-line"><input type="number" id="meW" min="5" max="100" value="20" aria-label="Ширина"><span>×</span><input type="number" id="meH" min="5" max="100" value="14" aria-label="Высота"><button class="btn" id="meResize" type="button">OK</button></div>
+      <select id="meTheme" aria-label="Тип местности"><option value="0">дикая местность</option><option value="1">город</option></select>
+      <button class="btn wide" id="meRandom" type="button">Случайная заготовка</button>
+      <button class="btn wide" id="meBorder" type="button">Рамка из стен</button>
+      <button class="btn wide" id="meClear" type="button">Очистить</button>
+      <div id="meMsg"></div>
+      <div class="caps">Мои карты</div>
+      <div class="size-line"><select id="meList" aria-label="Сохранённые карты"></select><button class="btn" id="meDel" type="button" title="Удалить выбранную карту">Удалить</button></div>
+      <details class="ws-help"><summary>Как рисовать</summary><p class="small muted">Инструменты слева (клавиши B, G, R, L, E, I, S, T), материал — в «Палитре». ЛКМ — инструмент, ПКМ — ластик группы материала. [ и ] — размер кисти, пробел + мышь — сдвиг, колесо — масштаб. Высота — шагами по 5 фт: перепад до 10 фт — подъём, больше — обрыв (только по лестнице). Дерево — своей высоты (10–40 фт), на него можно залезть. Настил — второй ярус над землёй.</p></details>
+    </div>
   </aside>
   <div class="ws-bottom glass">
-    <select id="meList" aria-label="Сохранённые карты"></select>
-    <button class="btn" id="meDel" type="button" title="Удалить выбранную карту">Удалить</button>
     <span class="grow"></span>
+    <span class="small muted me-coord" id="meCoord"></span>
+    <span class="me-sep" aria-hidden="true"></span>
     <div class="seg zoom-seg" role="group" aria-label="Масштаб карты"><button type="button" id="meZoomOut" title="Отдалить" aria-label="Отдалить">−</button><span id="meZoomPct" class="zoom-pct">100%</span><button type="button" id="meZoomIn" title="Приблизить" aria-label="Приблизить">+</button></div>
     <button class="btn" id="meZoomFit" type="button" title="Вписать карту в экран">Вписать</button>
-    <button class="btn show-sm" id="meProps" type="button">Параметры</button>
-    <span class="small muted hide-sm" title="Колесо — масштаб; средняя кнопка или пробел + мышь — сдвиг; на телефоне — два пальца">колесо — масштаб · пробел + мышь — сдвиг</span>
+    <button class="btn me-edit" id="meGridBtn" type="button" aria-pressed="true" title="Линии сетки">Сетка</button>
   </div>
 </section>
 

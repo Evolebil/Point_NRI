@@ -40,7 +40,8 @@ function hudAll(off){
   r.hidden = !off;
 }
 addEventListener('keydown', e => {
-  if (e.code !== 'KeyH' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || document.querySelector('.modal-bg')) return;
+  if (e.code !== 'KeyH' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey ||   // Shift+H — отражение выделения в редакторе карт
+       /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || document.querySelector('.modal-bg')) return;
   if (!FULL_ROUTES.includes(ROUTE) && ROUTE !== 'campaign') return;
   hudAll(!document.body.classList.contains('hud-all-off'));
 });

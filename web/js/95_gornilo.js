@@ -546,6 +546,5 @@ addEventListener('keydown', e => {
   if (/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')){ document.activeElement.blur(); return; }
   e.preventDefault(); goBack();
 });
-$('meProps').onclick = () => document.body.classList.toggle('ws-props');
 
 startApp();

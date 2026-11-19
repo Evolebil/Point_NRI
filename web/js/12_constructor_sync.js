@@ -290,7 +290,7 @@ addEventListener('drop', async e => {
     if (f.size > 4 * 1024 * 1024) throw new Error('файл больше 4 МБ');
     const j = JSON.parse(await f.text());
     if (Array.isArray(j.stats) || (j && j.format === 'gornilo-character')){ await importCharacterFile(f); go('characters'); }
-    else if (j && j.aw && j.ah){ ME = meFromJson(j, j.name || f.name.replace(/\.json$/, '')); meSaved = ''; go('workshop'); meMsg('Карта прочитана: проверьте и сохраните.'); }
+    else if (j && j.aw && j.ah){ ME = meFromJson(j, j.name || f.name.replace(/\.json$/, '')); meSaved = ''; meHistReset(); go('workshop'); meMsg('Карта прочитана: проверьте и сохраните.'); }
     else throw new Error('это не персонаж и не карта');
   } catch (err) { toast('Не удалось прочитать файл: ' + err.message, 6000, true); }
 });
