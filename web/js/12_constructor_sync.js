@@ -178,6 +178,9 @@ async function loadCatalog(){
 }
 function queuePrice(){ clearTimeout(priceTimer); priceTimer = setTimeout(doPrice, 140); }
 async function doPrice(){
+  // прямой вызов заменяет отложенный (queuePrice): иначе тот, сработав до ответа (туннель медленнее 140 мс), обгонит номер
+  // запроса, и ответ того, кто ждёт цену (await doPrice() у «Найти бой»), выбросится — lastPrice останется пустым
+  clearTimeout(priceTimer);
   const seq = ++priceSeq;
   const r = await api({cmd:'price', char: toChar()});
   if (seq !== priceSeq) return;

@@ -340,6 +340,7 @@ int main(int argc, char** argv) {
 #include "audit/20_T230-T237_mir_kubov.inc"
 #include "audit/21_T238-T239_tma_kopatel.inc"
 #include "audit/22_T240-T241_kadr_vida.inc"
+#include "audit/23_T242_put_pryamo.inc"
     blkTime();
     if (g_shards > 1)
         printf("#ИТОГ %d %d\n", g_pass, g_fail);

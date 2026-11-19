@@ -357,6 +357,17 @@ void vxDijkstra(const World& w, const Fighter& f, int tx, int ty, Visit&& visit)
                     // равных путей — мелкий, а не до дна мира
                     const int deep = f.b.burrowS && nz < VZ0 + w.height[ny][nx] - 2 ? 1 : 0;
                     const int nv = c0 + 64 * vxStepCost(w, f, x, y, z, nx, ny, nz) + haz + deep;
+                    // из равных по цене предков — ближайший к прямой «старт → узел» (как в прежнем дереве путей): наискосок
+                    // столько же футов, что прямо, и без этого путь по ровному месту шёл «уголком». Узел n ещё в очереди
+                    // (nv > c0), его цена не меняется — меняется только предок
+                    auto dev = [&](int p) {
+                        const int px = p % SX, py = (p / SX) % SY;
+                        return std::abs((nx - f.x) * (py - f.y) - (ny - f.y) * (px - f.x));
+                    };
+                    if (stamp[(size_t)n] == cur && nv == cost[(size_t)n]) {
+                        if (dev(c) < dev(prev[(size_t)n])) prev[(size_t)n] = c;
+                        continue;
+                    }
                     if (stamp[(size_t)n] != cur || nv < cost[(size_t)n]) {
                         stamp[(size_t)n] = cur;
                         cost[(size_t)n] = nv;
