@@ -3,6 +3,7 @@
 Нужна собранная программа (make). Игроки пишутся во временный файл, а не в state/players.json.
 Запуск из корня проекта:  python3 -m unittest -v tests.test_server_integration"""
 import json
+import re
 import os
 import sys
 import tempfile
@@ -212,6 +213,16 @@ class TestHttpApi(unittest.TestCase):
         code, html = self.get("/")
         self.assertEqual(code, 200)
         self.assertNotIn("/*PLAY_JS*/", html)                 # скрипты подставлены в страницу
+        # стили и скрипт — отдельными файлами с хешем в имени (кэш на год), те же, что во встроенной странице
+        css, js = re.search(r'href="(/app\.[0-9a-f]{16}\.css)"', html), re.search(r'src="(/app\.[0-9a-f]{16}\.js)"', html)
+        self.assertTrue(css and js, html[:400])
+        _, full_css, full_js = ps.page_parts()
+        for p, body in ((css.group(1), full_css), (js.group(1), full_js)):
+            with urllib.request.urlopen(self.url + p, timeout=60) as r:
+                self.assertEqual(r.status, 200)
+                self.assertIn("immutable", r.headers.get("Cache-Control", ""))
+                self.assertEqual(r.read().decode("utf-8"), body)
+        self.assertEqual(self.get("/app.0000000000000000.js")[0], 404)
         code, md = self.get("/sheet?budget=1000")
         self.assertEqual(code, 200)
         self.assertIn("бюджет 1000", md)

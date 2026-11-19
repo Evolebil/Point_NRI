@@ -10,6 +10,7 @@ API:      POST /api, JSON. У каждого браузера свой id (sid):
 """
 import base64
 import gzip
+import hashlib
 import json
 import os
 import queue
@@ -603,16 +604,43 @@ def sheet_mod():
     return _SHEET["mod"]
 
 
-def page():
-    """Страница одним ответом (через туннель лишние запросы дороги): web/play.html + стили web/css/play.css + скрипты
-    web/js/*.js по порядку имён; в скрипт боя подставляется общий код рисования из web/viewer_template.html."""
+def page_parts():
+    """Части страницы: web/play.html, стили web/css/play.css, скрипты web/js/*.js по порядку имён; в скрипт боя подставляется
+    общий код рисования из web/viewer_template.html."""
     def rd(*p):
         with open(os.path.join(WEB, *p), encoding="utf-8") as f:
             return f.read()
     v = rd("viewer_template.html")
     a, b = v.index("/*RENDER_BEGIN*/"), v.index("/*RENDER_END*/")
     js = "".join(rd("js", n) for n in sorted(os.listdir(os.path.join(WEB, "js"))) if n.endswith(".js"))
-    return rd("play.html").replace("/*PLAY_CSS*/\n", rd("css", "play.css")).replace("/*PLAY_JS*/\n", js.replace("/*RENDER_JS*/", v[a:b]))
+    return rd("play.html"), rd("css", "play.css"), js.replace("/*RENDER_JS*/", v[a:b])
+
+
+def page():
+    """Страница одним ответом: стили и скрипты встроены."""
+    html, css, js = page_parts()
+    return html.replace("/*PLAY_CSS*/\n", css).replace("/*PLAY_JS*/\n", js)
+
+
+APP_FILES = {}   # "/app.<хеш>.js" и ".css" -> (тип, текст); несколько последних версий: страница могла уйти до правки файлов
+APP_LOCK = threading.Lock()
+
+
+def page_shell():
+    """Страница для браузера: оболочка без стилей и скриптов (~20 КБ), они — отдельными файлами с хешем в имени и кэшем на год.
+    Через туннель страница (~175 КБ сжатой) шла ~5 с при каждом заходе; теперь повторный заход качает только оболочку."""
+    html, css, js = page_parts()
+    names = {}
+    with APP_LOCK:
+        for ext, text, ctype in (("css", css, "text/css; charset=utf-8"), ("js", js, "text/javascript; charset=utf-8")):
+            name = "/app.%s.%s" % (hashlib.sha1(text.encode("utf-8")).hexdigest()[:16], ext)
+            APP_FILES.pop(name, None)
+            APP_FILES[name] = (ctype, text)
+            names[ext] = name
+        while len(APP_FILES) > 8:
+            APP_FILES.pop(next(iter(APP_FILES)))
+    return (html.replace("<style>\n/*PLAY_CSS*/\n</style>", '<link rel="stylesheet" href="%s">' % names["css"])
+                .replace("<script>\n/*PLAY_JS*/\n</script>", '<script src="%s"></script>' % names["js"]))
 
 
 def quick_match_room(players):
@@ -845,6 +873,13 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, f.read(), "text/html; charset=utf-8")
             except OSError:
                 self._send(404, "не найдено", "text/plain; charset=utf-8")
+        elif path.startswith("/app."):   # стили и скрипты страницы (page_shell): имя с хешем — кэш на год
+            with APP_LOCK:
+                f = APP_FILES.get(path)
+            if f:
+                self._send(200, f[1], f[0], "public, max-age=31536000, immutable")
+            else:
+                self._send(404, "не найдено", "text/plain; charset=utf-8")
         elif path == "/sheet":
             try:
                 b = int(parse_qs(u.query).get("budget", ["800"])[0])
@@ -854,7 +889,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, "ошибка шпаргалки (подробности — в журнале сервера)", "text/plain; charset=utf-8")
         elif path in ("/", "/play.html"):
             try:
-                self._send(200, page(), "text/html; charset=utf-8")
+                self._send(200, page_shell(), "text/html; charset=utf-8")
             except Exception as e:  # noqa: BLE001
                 log("страница:", repr(e))
                 self._send(500, "ошибка сборки страницы (подробности — в журнале сервера)", "text/plain; charset=utf-8")

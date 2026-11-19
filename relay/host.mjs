@@ -3,7 +3,6 @@
 // Обрыв связи — переподключение через 2 с; ссылка для игроков при этом не меняется.
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import { createHash } from "node:crypto";
 
 const base = (process.argv[2] || "").replace(/\/+$/, "");
 if (!/^https?:\/\//.test(base)) { console.error("укажите адрес Worker: node relay/host.mjs https://dnd-arena.<логин>.workers.dev"); process.exit(1); }
@@ -27,16 +26,10 @@ function connect() {
       const r = await fetch(LOCAL + m.path, { method: m.method, body: m.method === "POST" ? m.body : undefined, headers: { "Content-Type": "application/json", "Accept-Encoding": "identity" } });
       let buf = Buffer.from(await r.arrayBuffer());
       const type = r.headers.get("Content-Type") || "application/octet-stream";
-      let cc = r.headers.get("Cache-Control") || "no-store", etag = "";
-      // страница (весь клиент одним ответом, ~170 КБ сжатой): браузер сверяет ETag — не изменилась, туннель несёт 304 без тела
-      if (m.method === "GET" && r.status === 200 && type.startsWith("text/html")) {
-        etag = '"' + createHash("sha1").update(buf).digest("base64url").slice(0, 22) + '"';
-        cc = "no-cache";
-        if ((m.inm || "").split(/\s*,\s*/).includes(etag)) { ws.send(JSON.stringify({ id: m.id, status: 304, type, cc, etag, enc: "", body: "" })); return; }
-      }
+      const cc = r.headers.get("Cache-Control") || "no-store";   // кэш — как велит сервер (библиотеки, стили и скрипт страницы — на год)
       let enc = "";
       if (m.gzip && buf.length > 1024) { buf = gzipSync(buf, { level: 6 }); enc = "gzip"; }
-      out = { id: m.id, status: r.status, type, cc, etag, enc, body: buf.toString("base64") };
+      out = { id: m.id, status: r.status, type, cc, enc, body: buf.toString("base64") };
     } catch (e) {
       out = { id: m.id, status: 502, type: "application/json; charset=utf-8", enc: "", body: Buffer.from(JSON.stringify({ type: "error", err: "сервер игры не отвечает: " + e.message })).toString("base64") };
     }
