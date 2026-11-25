@@ -47,6 +47,9 @@ const ABIL_PRESETS = [
   {n:'Лечение', a:{_kind:'self', healN:3, bonus:true, uses:3}},
   {n:'Каменная кожа', a:{_kind:'self', tempN:4, uses:1}},
   {n:'Прыжок', a:{_kind:'self', teleFt:30, bonus:true, recharge:5}},
+  {n:'Иллюзорное укрытие', a:{_kind:'auto', name:'Иллюзорное укрытие', ground:true, range:30, illusionRounds:10}},
+  {n:'Снять испуг у союзника', a:{_kind:'self', name:'Ободрение', ally:true, range:30, cleanse:3}},
+  {n:'Защита союзника от испуга', a:{_kind:'self', name:'Стойкость', ally:true, range:30, wardCond:3, wardRounds:3, conc:true}},
   {n:'Стена-барьер', a:{_kind:'auto', ground:true, range:30, wallLen:5, wallRounds:3, uses:2}},
   {n:'Заросли (замедляют путь)', a:{_kind:'auto', ground:true, range:30, radius:15, terr:true, recharge:5}},
   {n:'Огненный шар по клетке', a:{_kind:'save', ground:true, saveStat:1, range:60, radius:20, dmgN:4, dmgS:6, dtype:3, recharge:5}},
@@ -55,13 +58,13 @@ const ABIL_PRESETS = [
   {n:'PHB · Луч холода (заговор)', a:{_kind:'attack', name:'Луч холода', range:60, dmgN:1, dmgS:8, dtype:2, cond:7, condRounds:1}},
   {n:'PHB · Священное пламя (заговор)', a:{_kind:'save', name:'Священное пламя', saveStat:1, range:60, dmgN:1, dmgS:8, dtype:10}},
   {n:'PHB · Волшебная стрела (1 ур.)', a:{_kind:'auto', name:'Волшебная стрела', range:120, dmgN:3, dmgS:4, dtype:4, slotLvl:1}},
-  {n:'PHB · Громовая волна (1 ур.)', a:{_kind:'save', name:'Громовая волна', saveStat:2, range:15, radius:15, shape:1, dmgN:2, dmgS:8, dtype:12, pushFt:10, slotLvl:1}},
+  {n:'PHB · Громовая волна (1 ур.)', a:{_kind:'save', name:'Громовая волна', upDice:1, saveStat:2, range:15, radius:15, shape:1, dmgN:2, dmgS:8, dtype:12, pushFt:10, slotLvl:1}},
   {n:'PHB · Лечащее слово (1 ур.)', a:{_kind:'self', name:'Лечащее слово', healN:1, bonus:true, slotLvl:1}},
   {n:'PHB · Туманный шаг (2 ур.)', a:{_kind:'self', name:'Туманный шаг', teleFt:30, bonus:true, slotLvl:2}},
-  {n:'PHB · Удержание личности (2 ур.)', a:{_kind:'save', name:'Удержание личности', saveStat:4, range:60, cond:10, condRounds:10, conc:true, slotLvl:2}},
+  {n:'PHB · Удержание личности (2 ур.)', a:{_kind:'save', name:'Удержание личности', targetType:9, upTargets:1, saveStat:4, range:60, cond:10, condRounds:10, conc:true, slotLvl:2}},
   {n:'PHB · Паутина (2 ур.)', a:{_kind:'save', name:'Паутина', ground:true, saveStat:1, range:60, radius:20, cond:2, condRounds:10, conc:true, slotLvl:2}},
-  {n:'PHB · Огненный шар (3 ур.)', a:{_kind:'save', name:'Огненный шар', ground:true, saveStat:1, range:150, radius:20, dmgN:8, dmgS:6, dtype:3, slotLvl:3}},
-  {n:'PHB · Молния (3 ур.)', a:{_kind:'save', name:'Молния', saveStat:1, range:100, radius:100, shape:3, dmgN:8, dmgS:6, dtype:5, slotLvl:3}},
+  {n:'PHB · Огненный шар (3 ур.)', a:{_kind:'save', name:'Огненный шар', upDice:1, ground:true, saveStat:1, range:150, radius:20, dmgN:8, dmgS:6, dtype:3, slotLvl:3}},
+  {n:'PHB · Молния (3 ур.)', a:{_kind:'save', name:'Молния', upDice:1, saveStat:1, range:100, radius:100, shape:3, dmgN:8, dmgS:6, dtype:5, slotLvl:3}},
   {n:'PHB · Ужас (3 ур.)', a:{_kind:'save', name:'Ужас', saveStat:4, range:30, radius:30, shape:2, cond:3, condRounds:10, conc:true, slotLvl:3}},
 ];
 const PATHS = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
@@ -86,7 +89,12 @@ function toSpec(a){   // из состояния формы в описание 
   if (k === 'guard'){ return {react:5, self:true, protect:!!a.protect, strike:!!a.strike, range:+a.range || 5, uses:+a.uses || 0, name:a.name || ''}; }   // реакция за союзника
   // доп. урон другого типа (v21): в форме — more.0, more.1; движку — список непустых
   o.more = Object.values(a.more || {}).filter(m => m && +m.n > 0).map(m => ({n:+m.n, s:+(m.s || DIE_OPTS()[0][0]), type:m.type == null || m.type === '' ? DT_OPTS().map(x => x[0]).find(t => t !== +o.dtype) : +m.type}));   // пустое поле = первый вариант списка, как показывает форма
-  if (k === 'self') o.more = [];
+  if (k === 'self'){ o.more = []; delete o.breakOnDamage; }
+  else { delete o.cleanse; delete o.wardCond; delete o.wardRounds; }
+  if (o.self || o.ground || o.onHit){ delete o.targetType; delete o.upTargets; }
+  if (!o.ground) delete o.illusionRounds;
+  if (o.radius > 0) delete o.upTargets;
+  if (!o.slotLvl){ delete o.upDice; delete o.upTargets; }
   return o;
 }
 // Библиотека приспешников и обликов (v21): готовые шаблоны + сохранённые игроком персонажи (описание для движка)

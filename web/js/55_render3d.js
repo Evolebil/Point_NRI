@@ -10,13 +10,12 @@ const R3 = {
   want: r3Want(),   // 3D выбран (настройка или флаг): без него модуль ничего не делает, библиотека не грузится
   on: false, ready: false, failed: false, loading: false,
   map: null, vox: null, H: 0, NX: 0, NY: 0, NZ: 0, chunks: [], dynFr: null, dynKey: '', dynCells: new Map(),
-  fm: [], capGeo: new Map(), fogKey: '', dragged: false, hit: null, voxEd: new Map(), voxAt: 0,   // voxEd — правки кубов боя по клеткам
+  fm: [], capGeo: new Map(), dragged: false, hit: null, voxEd: new Map(), voxAt: 0,   // voxEd — правки кубов боя по клеткам
   view: {tx: 0, ty: 0, tz: 0, yaw: .65, pitch: .95, dist: 30, fdist: 22, kind: 'tac', pp: .45, pd: 5, fp: .25},   // kind: tac / third / first (решение №2)
   fps: 0, fpsN: 0, fpsT0: 0, showFps: /[?&]fps=1/.test(location.search), models: new Map(), tokens: r3TokWant(), tLast: 0
 };
 const VZ0 = 2;      // кубов под уровнем «0» нынешней карты: дно ущелья
 const VCH = 16;     // чанк 16×16×16
-const R3DARK = .1;  // тьма без неба (решение владельца 2026-11-16: «почти чёрная»): доля яркости там, куда не достаёт свет бойцов
 // материалы кубов: цвет (sRGB, яркая пастель как в макете) и твёрдость для луча
 const VM = {AIR:0, GRASS:1, DIRT:2, STONE:3, STRONG:4, WOOD:5, LEAF:6, WATER:7, MUD:8, PLANK:9, DOOR:10, PITF:11,
   LAVA:12, ACID:13, SMOKE:14, ICE:15, STORM:16, NECRO:17, FORCE:18, COBBLE:19, RUBBLE:20, DARKG:21, COVER:22, LADDER:23, CDIRT:24, LADDV:25};   // LADDER — поверхность клетки с лестницей слоя, LADDV — куб «лестница» движка
@@ -32,19 +31,27 @@ function r3Want(){
   try { return localStorage.getItem('dnd_view') === '3d'; } catch (e) { return false; }
 }
 // ---- загрузка библиотеки: только когда выбран 3D, отдельным файлом с кэшем ----
+let threeLibrary;
+function loadThreeLibrary(){
+  if (window.THREE) return Promise.resolve(window.THREE);
+  if (!threeLibrary) threeLibrary = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/vendor/three-r159.min.js';
+    script.onload = () => resolve(window.THREE);
+    script.onerror = () => { threeLibrary = null; reject(new Error('не загрузилась библиотека 3D')); };
+    document.head.appendChild(script);
+  });
+  return threeLibrary;
+}
 R3.load = function(){
   if (R3.ready || R3.loading || R3.failed) return;
   R3.loading = true;
-  const s = document.createElement('script');
-  s.src = '/vendor/three-r159.min.js';
   const go = () => { R3.loading = false; try { R3.init(); } catch (e) { R3.fail('не удалось включить 3D: ' + e.message); } };
-  s.onload = () => {   // загрузчик моделей — вторым файлом; не загрузился — бойцы капсулами
+  loadThreeLibrary().then(() => {   // загрузчик моделей — вторым файлом; не загрузился — бойцы капсулами
     const g = document.createElement('script'); g.src = '/vendor/three-r159-gltf.js';
     g.onload = go; g.onerror = () => { console.error('не загрузился загрузчик моделей — бойцы капсулами'); go(); };
     document.head.appendChild(g);
-  };
-  s.onerror = () => { R3.loading = false; R3.fail('не загрузилась библиотека 3D'); };
-  document.head.appendChild(s);
+  }).catch(e => { R3.loading = false; R3.fail(e.message); });
 };
 if (R3.want) R3.load();
 R3.fail = function(msg){ R3.failed = true; R3.on = false; if (R3.cv) R3.cv.style.display = 'none'; console.error(msg); toast(msg + ' — показан 2D-вид.'); r3SyncSeg(); R3.syncCamBtn(); };
@@ -86,20 +93,19 @@ R3.init = function(){
   R3.sky.renderOrder = -1; R3.sky.frustumCulled = false; R3.scene.add(R3.sky);
   // рельеф: плоские грани под светом; в шейдере — туман войны (маска клеток), сетка 5 фт по верхним граням и тьма без неба:
   // вершина знает, открыто ли над ней небо (aS), свет бойцов (uLt: центр и радиус в кубах) снимает тьму в своём круге
-  R3.U = {uFog: {value: null}, uFogOn: {value: 0}, uGrid: {value: 0}, uSize: {value: new T.Vector2(1, 1)}, uDark: {value: R3DARK},
+  R3.U = {uGrid: {value: 0},
     uLt: {value: Array.from({length: 8}, () => new T.Vector4())}, uLtN: {value: 0}};
   R3.mat = R3.low ? new T.MeshLambertMaterial({vertexColors: true, flatShading: true}) : new T.MeshStandardMaterial({vertexColors: true, flatShading: true, roughness: 1, metalness: 0});
   R3.mat.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, R3.U);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec3 aC;\nattribute float aS;\nvarying vec3 vC;\nvarying vec3 vWp;\nvarying float vS;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvC = aC; vWp = position; vS = aS;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D uFog;\nuniform float uFogOn, uGrid, uDark;\nuniform vec2 uSize;\nuniform vec4 uLt[8];\nuniform int uLtN;\nvarying vec3 vC;\nvarying vec3 vWp;\nvarying float vS;')
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uGrid;\nuniform vec4 uLt[8];\nuniform int uLtN;\nvarying vec3 vC;\nvarying vec3 vWp;\nvarying float vS;')
       .replace('#include <color_fragment>', `#include <color_fragment>
-        if (uFogOn > .5) diffuseColor.rgb *= mix(.33, 1., texture2D(uFog, (vC.xy + .5) / uSize).r);
         if (uGrid > .5 && vC.z > .5){ vec2 g = abs(fract(vWp.xz) - .5); if (max(g.x, g.y) > .47) diffuseColor.rgb *= .62; }
         float lt = 0.;
         for (int i = 0; i < 8; i++){ if (i >= uLtN) break; lt = max(lt, 1. - smoothstep(uLt[i].w * .55, uLt[i].w, distance(vWp, uLt[i].xyz))); }
-        diffuseColor.rgb *= mix(uDark, 1., max(vS, lt)) * mix(vec3(1.), vec3(1.12, .96, .78), lt * (1. - vS));`);
+        diffuseColor.rgb *= mix(vec3(1.), vec3(1.12, .96, .78), lt * (1. - vS));`);
   };
   R3.ray = new T.Raycaster();
   R3.shadowGeo = new T.CircleGeometry(.5, 20).rotateX(-Math.PI / 2);
@@ -141,7 +147,7 @@ function r3Column(x, y){
     const hz = mapN('haz', x, y);
     let surf = city ? VM.COBBLE : VM.GRASS;
     if (mapN('water', x, y)) surf = VM.WATER; else if (hz) surf = VM.LAVA + hz - 1; else if (mapN('diff', x, y) || d[2]) surf = VM.MUD;
-    else if (mapN('ladder', x, y)) surf = VM.LADDER; else if (mapN('dark', x, y) || d[3]) surf = VM.DARKG;
+    else if (mapN('ladder', x, y)) surf = VM.LADDER;
     if (d[4]) surf = VM.RUBBLE;
     put(0, top - 1, city ? VM.CDIRT : VM.DIRT); put(top - 1, top, surf);
   }
@@ -178,7 +184,7 @@ R3.setMap = function(){
   R3.chunks.forEach(c => { if (c && c.mesh){ R3.scene.remove(c.mesh); c.mesh.geometry.dispose(); } });
   R3.fm.forEach(r3FmFree);
   R3.voxEd = new Map(); R3.voxAt = 0;
-  R3.fm = []; R3.map = MAP; R3.dynFr = null; R3.fogKey = ''; R3.dynCells = r3DynMap(FR[curIdx] && FR[curIdx].dyn); R3.dynKey = JSON.stringify((FR[curIdx] && FR[curIdx].dyn) || []);
+  R3.fm = []; R3.map = MAP; R3.dynFr = null; R3.dynCells = r3DynMap(FR[curIdx] && FR[curIdx].dyn); R3.dynKey = JSON.stringify((FR[curIdx] && FR[curIdx].dyn) || []);
   let maxTop = 0;
   for (let y = 0; y < AH; y++) for (let x = 0; x < AW; x++) maxTop = Math.max(maxTop, VZ0 + Math.max(mapN('height', x, y) + Math.max(6, mapN('tree', x, y)), mapN('deck', x, y)));
   R3.vxo = r3VxMap(); R3.vxo.forEach(c => { maxTop = Math.max(maxTop, c[2] + c[3].length); });
@@ -188,11 +194,6 @@ R3.setMap = function(){
   for (let y = 0; y < AH; y++) for (let x = 0; x < AW; x++) r3Column(x, y);
   R3.chunks = new Array(R3.NX * R3.NY * R3.NZ).fill(null);
   for (let i = 0; i < R3.chunks.length; i++) R3.buildChunk(i);
-  // маска тумана войны: 1 тексель = 1 клетка
-  if (R3.U.uFog.value) R3.U.uFog.value.dispose();
-  R3.fogData = new Uint8Array(AW * AH * 4).fill(255);
-  R3.U.uFog.value = new T.DataTexture(R3.fogData, AW, AH, T.RGBAFormat); R3.U.uFog.value.needsUpdate = true;
-  R3.U.uSize.value.set(AW, AH);
   R3.setSky(MAP.day === 0);
   let sum = 0, mx = 0; for (let k = 0; k < AW * AH; k++){ sum += R3.gtop[k]; mx = Math.max(mx, R3.gtop[k]); }
   R3.gAvg = sum / (AW * AH); R3.gMax = mx;
@@ -440,15 +441,6 @@ R3.syncVox = function(){
   cols.forEach(c => r3ColInfo(c % AW, Math.floor(c / AW)));   // небо и сглаживание столбца — по новым кубам
   dirty.forEach(ci => R3.buildChunk(ci));
 };
-// туман войны: та же маска, что у 2D (бит на клетку из запроса хода)
-R3.syncFog = function(){
-  const q = G.req || G.lastReq, on = !!(q && q.vis && !G.over && q.visW === AW && q.visH === AH);
-  R3.U.uFogOn.value = on ? 1 : 0; if (!on || q.vis === R3.fogKey) return;
-  R3.fogKey = q.vis; const bin = atob(q.vis);
-  for (let k = 0; k < AW * AH; k++) R3.fogData[4 * k] = ((bin.charCodeAt(k >> 3) >> (k & 7)) & 1) ? 255 : 0;
-  R3.U.uFog.value.needsUpdate = true;
-};
-
 // ---- бойцы: модели Quaternius (CC0, web/assets/LICENSES.md) по типу существа и размеру; пока модель грузится или
 // загрузчика нет — капсула цвета стороны (она же всегда — невидимая цель луча и силуэт сквозь стены); жетоны — по настройке ----
 function r3Cap(n, sz){
@@ -473,10 +465,10 @@ const R3MOD = {
   dragon: {idle: 'Dragon_Flying', walk: 'Dragon_Flying', run: 'Dragon_Flying', atk: 'Dragon_Attack', hit: 'Dragon_Hit', die: 'Dragon_Death', fly: 1},
   mushroom: {idle: 'Idle', walk: 'Walk', run: 'Run', atk: 'Punch', hit: 'HitReact', die: 'Death'},
   hywirl: {idle: 'Flying_Idle', walk: 'Fast_Flying', run: 'Fast_Flying', atk: 'Punch', hit: 'HitReact', die: 'Death', fly: 1}};
-// тип существа (ct в кадре режима кубов; 0–13, как в конструкторе) и полёт (fl) -> модель
-const R3CT = ['alien', 'wolf', 'adventurer', 'robot', 'dragon', 'hywirl', 'adventurer', 'demon', 'orc', 'adventurer', 'yeti', 'slime', 'mushroom', 'skeleton'];
+// тип существа (ct в кадре режима кубов; 0–14, как в конструкторе) и полёт (fl) -> модель
+const R3CT = ['alien', 'wolf', 'adventurer', 'robot', 'dragon', 'hywirl', 'adventurer', 'demon', 'orc', 'adventurer', 'yeti', 'slime', 'mushroom', 'skeleton', 'ghost'];
 function r3ModelKey(f){
-  const ct = f.ct != null && f.ct >= 0 && f.ct < 14 ? f.ct : 9;
+  const ct = f.ct != null && f.ct >= 0 && f.ct < R3CT.length ? f.ct : 9;
   if (f.fl && ct === 1) return 'bat';
   if (f.fl && ct === 13) return 'ghost';
   return R3CT[ct];
@@ -497,7 +489,7 @@ function r3Model(key){
 function r3Inst(e, key, h, n){
   const T = THREE, obj = THREE.SkeletonUtils.clone(e.g.scene), inner = new T.Group(), outer = new T.Group(), mats = [];
   const k = Math.min(h / e.h, .95 * n / e.w);   // рост по размеру, но не шире своей клетки (n×n)
-  obj.traverse(o => { if (o.isMesh){ o.frustumCulled = false; o.material = [].concat(o.material).map(m => { const c = r3Stamp(m.clone()); mats.push([c, c.color.clone()]); return c; }); if (o.material.length === 1) o.material = o.material[0]; } });
+  obj.traverse(o => { if (o.isMesh){ o.frustumCulled = false; o.material = [].concat(o.material).map(m => { const c = m.clone(); mats.push(c); return c; }); if (o.material.length === 1) o.material = o.material[0]; } });
   inner.add(obj); inner.scale.setScalar(k); inner.position.set(-e.cx * k, -e.minY * k, -e.cz * k); outer.add(inner);
   const mixer = new T.AnimationMixer(obj), acts = {}, M = R3MOD[key];
   for (const role of ['idle', 'walk', 'run', 'atk', 'hit', 'die']){
@@ -506,18 +498,12 @@ function r3Inst(e, key, h, n){
     const a = mixer.clipAction(clip); if (role === 'atk' || role === 'hit' || role === 'die'){ a.setLoop(T.LoopOnce, 1); a.clampWhenFinished = true; }
     acts[role] = a;
   }
-  return {outer, mixer, acts, mats, role: '', dim: 1, fly: !!M.fly, hgt: e.h * k};
-}
-// силуэт сквозь стены: боец метит трафарет (1), силуэт рисуется только там, где боец закрыт миром (глубина больше), и не поверх бойцов
-function r3Stamp(m){ return Object.assign(m, {stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp}); }
-function r3GhostMat(col){
-  return new THREE.MeshBasicMaterial({color: col, transparent: true, opacity: .32, depthTest: true, depthFunc: THREE.GreaterDepth, depthWrite: false,
-    stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp});
+  return {outer, mixer, acts, mats, role: '', fly: !!M.fly, hgt: e.h * k};
 }
 // убрать модель и жетон бойца (свои материалы и текстура портрета освобождаются; геометрия и клипы — общие у модели)
 function r3DropView(m){
   if (m.mi){
-    R3.scene.remove(m.mi.outer); m.mi.mixer.stopAllAction(); m.mi.mixer.uncacheRoot(m.mi.mixer.getRoot()); m.mi.mats.forEach(([c]) => c.dispose());
+    R3.scene.remove(m.mi.outer); m.mi.mixer.stopAllAction(); m.mi.mixer.uncacheRoot(m.mi.mixer.getRoot()); m.mi.mats.forEach(c => c.dispose());
     m.mi.outer.traverse(o => { if (o.isSkinnedMesh && o.skeleton) o.skeleton.dispose(); });   // скелет копии свой: его текстура костей — тоже освободить
     m.mi = null;
   }
@@ -526,16 +512,16 @@ function r3DropView(m){
 }
 function r3FmFree(m){
   if (!m) return;
-  R3.scene.remove(m.body, m.shadow, m.ghost); m.mat.dispose(); m.gmat.dispose();
+  R3.scene.remove(m.body, m.shadow); m.mat.dispose();
   r3DropView(m);
 }
 // жетон: подставка цвета стороны и портрет (или буква) — всегда лицом к камере
 function r3Token(f, n, col){
   const T = THREE, g = new T.Group(), r = .42 * n;
-  const base = new T.Mesh(R3.tokGeo || (R3.tokGeo = new T.CylinderGeometry(1, 1.05, .08, 24).translate(0, .04, 0)), r3Stamp(new T.MeshLambertMaterial({color: col})));
+  const base = new T.Mesh(R3.tokGeo || (R3.tokGeo = new T.CylinderGeometry(1, 1.05, .08, 24).translate(0, .04, 0)), new T.MeshLambertMaterial({color: col}));
   base.scale.set(r, 1, r); g.add(base);
   const cv2 = document.createElement('canvas'); cv2.width = cv2.height = 128; const tex = new T.CanvasTexture(cv2); tex.colorSpace = T.SRGBColorSpace;
-  const sp = new T.Sprite(r3Stamp(new T.SpriteMaterial({map: tex, transparent: true}))); sp.scale.set(r * 1.9, r * 1.9, 1); sp.position.y = .1 + r * .95; g.add(sp);
+  const sp = new T.Sprite(new T.SpriteMaterial({map: tex, transparent: true})); sp.scale.set(r * 1.9, r * 1.9, 1); sp.position.y = .1 + r * .95; g.add(sp);
   g.userData = {cv: cv2, tex, drawn: ''};
   return g;
 }
@@ -567,33 +553,29 @@ function r3Role(fr, k, f, t, moved){
   const a = FR[prevIdx] && FR[prevIdx].f[k]; if (live && a && !a.hid && !a.ns && !f.ns && f.hp < a.hp) return 'hit';
   return 'idle';
 }
-// свет бойцов (lt — радиус в футах, режим кубов) и тьма: боец под крышей без света рядом — темнее, как рельеф
+// Локальные источники света дают тёплый оттенок рельефу.
 function r3Lights(list){
   const L = R3.U.uLt.value; let n = 0;
   for (const o of list){ if (n >= 8) break; if (o.f.lt > 0 && o.f.hp > 0) L[n++].set(o.X, o.Y + o.h * .7, o.Z, o.f.lt / 5 + .5); }
   R3.U.uLtN.value = n;
-  for (const o of list){
-    const covered = MAP.vox && o.f.z != null && !r3Open(o.f.x, o.f.y, o.f.z + Math.max(1, o.n));
-    let lit = covered ? 0 : 1;
-    for (let i = 0; i < n && lit < 1; i++) lit = Math.max(lit, 1 - Math.min(1, Math.max(0, (Math.hypot(L[i].x - o.X, L[i].y - o.Y - o.h * .5, L[i].z - o.Z) - L[i].w * .55) / (L[i].w * .45))));
-    o.dim = R3DARK + (1 - R3DARK) * lit;
-  }
+
 }
 R3.syncFighters = function(fr, t, dt){
   const out = [], tiny = r3TinySlots(fr), T = THREE;
   R3.selfObj = null;
-  const meF = fr.f[G.req ? G.req.me : G.me], myTeam = meF ? meF.team : -1;
+  const meF = fr.f[G.req ? G.req.me : G.me];
   fr.f.forEach((f, k) => {
     let m = R3.fm[k];
     if (!m){
-      const mat = r3Stamp(new T.MeshLambertMaterial({color: r3Colors(f)})), gmat = r3GhostMat(r3Colors(f));
-      m = R3.fm[k] = {mat, gmat, body: new T.Mesh(r3Cap(f.n || 1, f.sz), mat), shadow: new T.Mesh(R3.shadowGeo, R3.shadowMat), n: f.n || 1, sz: f.sz, col: '', key: '', yaw: 0};
-      m.ghost = new T.Mesh(m.body.geometry, gmat); m.ghost.renderOrder = 10;   // силуэт сквозь стены и деревья: бойца не теряем за кубами
-      m.body.userData.k = k; R3.scene.add(m.body, m.shadow, m.ghost);
+      const mat = new T.MeshLambertMaterial({color: r3Colors(f)});
+      m = R3.fm[k] = {mat, body: new T.Mesh(r3Cap(f.n || 1, f.sz), mat), shadow: new T.Mesh(R3.shadowGeo, R3.shadowMat), n: f.n || 1, sz: f.sz, col: '', key: '', yaw: 0};
+      m.body.userData.k = k; R3.scene.add(m.body, m.shadow);
     }
     const n = f.n || 1, boss = f.ld != null ? !!f.ld : f.kind < 2;
-    if (m.n !== n || m.sz !== f.sz){ m.body.geometry = m.ghost.geometry = r3Cap(n, f.sz); m.n = n; m.sz = f.sz; r3DropView(m); }   // новый размер — модель заново
-    const hide = (f.hid && typeof G !== 'undefined') || (f.hp <= 0 && !boss) || (R3.view.kind === 'first' && k === (G.req ? G.req.me : G.me));   // 1-е лицо: себя не видно
+    if (m.n !== n || m.sz !== f.sz){ m.body.geometry = r3Cap(n, f.sz); m.n = n; m.sz = f.sz; r3DropView(m); }   // новый размер — модель заново
+    const occluded = meF && meF !== f && !f.hid && !meF.hid && r3Ray(meF.x+.5, meF.y+.5, r3Z(meF)+r3Eye(meF),
+      f.x+.5, f.y+.5, r3Z(f)+r3Eye(f), r3SightBlock) >= 100;
+    const hide = occluded || ((f.hid || f.ns) && typeof G !== 'undefined') || (f.hp <= 0 && !boss) || (R3.view.kind === 'first' && k === (G.req ? G.req.me : G.me));   // 1-е лицо: себя не видно
     const h = m.body.geometry.userData.h;
     // вид: жетон (настройка), модель (когда загрузилась) или капсула
     const key = R3.tokens ? 'tok' : r3ModelKey(f);
@@ -604,13 +586,12 @@ R3.syncFighters = function(fr, t, dt){
     }
     const shown = m.mi || m.tok;
     m.body.visible = m.shadow.visible = !hide; m.mat.visible = !shown;   // капсула прозрачна для глаза, но ловит луч
-    m.ghost.visible = !hide && f.team === myTeam;   // силуэт сквозь стены — только у своей команды: чужих за стеной не видно
     if (m.mi) m.mi.outer.visible = !hide; if (m.tok) m.tok.visible = !hide;
     if (hide){   // свой боец не виден (1-е лицо, скрыт, пал) — но камера 1-го и 3-го лица стоит при нём, а не у бойца 0
       if (k === (G.req ? G.req.me : G.me) && !f.hid){ const p = posAt(k, t), a = FR[prevIdx].f[k]; R3.selfObj = {k, f, X: p.x + n / 2, Y: a && !a.hid ? lerp(r3Z(a), r3Z(f), t) : r3Z(f), Z: p.y + n / 2, h, n}; }
       return;
     }
-    const c = r3Colors(f); if (c !== m.col){ m.mat.color.set(c); m.gmat.color.set(c); m.col = c; if (m.tok) m.tok.userData.dim = -1; }
+    const c = r3Colors(f); if (c !== m.col){ m.mat.color.set(c); m.col = c; if (m.tok) m.tok.children[0].material.color.set(c); }
     const p = posAt(k, t), a0 = FR[prevIdx].f[k], a = a0 && !a0.hid ? a0 : null, tele = FR[curIdx].act === 'teleport' && FR[curIdx].actor === k;   // из тумана — без скольжения
     const z = a && !tele ? lerp(r3Z(a), r3Z(f), t) : r3Z(f);
     const ts = tiny[k], X = p.x + n / 2 + (ts ? ts[0] : 0), Z = p.y + n / 2 + (ts ? ts[1] : 0);
@@ -619,7 +600,6 @@ R3.syncFighters = function(fr, t, dt){
     if (f.hp <= 0){ m.body.rotation.set(0, 0, Math.PI / 2); m.body.position.set(X, z + (f.sz === 0 ? .1 : f.sz === 1 ? .17 : .3 * n), Z); }   // павший лежит
     else { m.body.rotation.set(0, 0, 0); m.body.position.set(X, z + h / 2, Z); }
     m.shadow.scale.setScalar(f.sz === 0 ? .35 : f.sz === 1 ? .6 : .9 * n); m.shadow.position.set(X, (MAP.vox ? r3Z(f) : VZ0 + r3Level(f) - (f.alt || 0)) + .02, Z);
-    m.ghost.position.copy(m.body.position); m.ghost.rotation.copy(m.body.rotation);
     // поворот: по ходу движения, иначе — к цели своего действия, иначе к ближайшему живому врагу
     const moved = a && (a.x !== f.x || a.y !== f.y) && !tele ? [f.x - a.x, f.y - a.y] : null;
     let face = null;
@@ -641,13 +621,8 @@ R3.syncFighters = function(fr, t, dt){
     if (m.tok){ m.tok.position.set(X, z, Z); r3TokenDraw(m.tok, f, c); }
     out.push({k, f, X, Y: z, Z, h: m.mi && f.hp > 0 ? Math.max(.3, m.mi.hgt) : h, n, boss, m});   // подписи и портрет — над головой модели
   });
-  for (let k = fr.f.length; k < R3.fm.length; k++) if (R3.fm[k]){ const m = R3.fm[k]; m.body.visible = m.shadow.visible = m.ghost.visible = false; if (m.mi) m.mi.outer.visible = false; if (m.tok) m.tok.visible = false; }
+  for (let k = fr.f.length; k < R3.fm.length; k++) if (R3.fm[k]){ const m = R3.fm[k]; m.body.visible = m.shadow.visible = false; if (m.mi) m.mi.outer.visible = false; if (m.tok) m.tok.visible = false; }
   r3Lights(out);
-  out.forEach(o => {   // тьма: модель и жетон темнее там, где темно (материалы — свои у каждого бойца)
-    const mi = o.m.mi, tk = o.m.tok;
-    if (mi && Math.abs(mi.dim - o.dim) >= .01){ mi.dim = o.dim; mi.mats.forEach(([c, base]) => c.color.copy(base).multiplyScalar(o.dim)); }
-    if (tk && tk.userData.dim !== o.dim){ tk.userData.dim = o.dim; tk.children[0].material.color.set(o.m.col).multiplyScalar(o.dim); tk.children[1].material.color.setScalar(o.dim); }
-  });
   return out;
 };
 // настройка «Жетоны вместо моделей»: на ходу — бойцы пересоздаются в следующем кадре
@@ -745,12 +720,9 @@ R3.pan = function(dx, dy){
 R3.cellAt = function(e){
   const r = cv.getBoundingClientRect(), T = THREE;
   R3.ray.setFromCamera(new T.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1), R3.camera);
-  // враг на луче — цель даже за кубами (его силуэт виден) и за своей капсулой; свой или союзник — только если не закрыт
-  const fr = FR[curIdx], myT = fr.f[G.req ? G.req.me : G.me].team;
-  const hits = R3.ray.intersectObjects(R3.fm.filter(m => m && m.body.visible).map(m => m.body), false);
-  const he = hits.find(h => { const f = fr.f[h.object.userData.k]; return f && f.hp > 0 && f.team !== myT; });
-  const o = R3.ray.ray.origin, d = R3.ray.ray.direction, vh = r3Voxel(o, d, 1e9), hb = he || hits[0];
-  if (hb && (hb === he || !vh || hb.distance <= vh.t)){ const f = fr.f[hb.object.userData.k]; R3.hit = {x: f.x, y: f.y, top: r3Z(f), k: hb.object.userData.k}; return {x: f.x, y: f.y}; }
+  const fr = FR[curIdx], hits = R3.ray.intersectObjects(R3.fm.filter(m => m && m.body.visible).map(m => m.body), false);
+  const o = R3.ray.ray.origin, d = R3.ray.ray.direction, vh = r3Voxel(o, d, 1e9), hb = hits[0];
+  if (hb && (!vh || hb.distance <= vh.t)){ const f = fr.f[hb.object.userData.k]; R3.hit = {x:f.x,y:f.y,top:r3Z(f),k:hb.object.userData.k}; return {x:f.x,y:f.y}; }
   if (!vh){ R3.hit = null; return null; }
   // удар по объекту — сама клетка стены (в режиме кубов — любой разрушимый блок: копать действием), иначе — куб перед гранью
   const vm = R3.vox[vIdx(vh.x, vh.y, vh.z)], inObj = G.mode === 'attack' && (MAP.vox ? vm !== VM.PITF && vm !== VM.WATER && vm !== VM.LAVA && vm !== VM.ACID : isObjCell(vh.x, vh.y));
@@ -844,6 +816,7 @@ function r3Fx(list, now){
 }
 // ---- область в объёме (режим кубов) — та же геометрия, что в движке (vox.h: vxRay, vxInShape3, vxAreaCube, vxTopZ) ----
 const r3Solid = m => !!m && m !== VM.WATER && m !== VM.LAVA && m !== VM.ACID && m !== VM.WOOD && m !== VM.LADDV;   // ствол и лестница — не твёрдые (как в движке)
+const r3SightBlock = m => (m === VM.WOOD || r3Solid(m) && ![VM.ICE, VM.COVER, VM.FORCE].includes(m)) ? 100 : 0;
 const r3BlocksEffect = m => r3Solid(m) && m !== VM.LEAF && m !== VM.COVER;   // полное укрытие: твёрдое, кроме листвы и ящика
 function r3TopZ(x, y){ for (let z = R3.H - 1; z >= 1; z--) if (r3Solid(vGet(x, y, z - 1)) && !r3Solid(vGet(x, y, z))) return z; return 1; }
 // луч от a к b (кубы концов не считаются); f(материал) ≥ 100 — преграда
@@ -948,16 +921,18 @@ R3.draw = function(now, t, tt){
   const fr = FR[curIdx]; if (!fr) return;
   const W = cvW(), H = cvH(), dp = R3.ren.getPixelRatio();
   if (R3.cv.width !== Math.round(W * dp) || R3.cv.height !== Math.round(H * dp)) R3.ren.setSize(W, H, false);
-  R3.syncDyn(fr); R3.syncVox(); R3.syncFog();
+  R3.syncDyn(fr); R3.syncVox();
   R3.U.uGrid.value = G.req && !G.busy && !G.over ? 1 : 0;   // сетка 5 фт — в свой ход
   const dt = R3.tLast ? Math.min(.1, Math.max(0, (now - R3.tLast) / 1000)) : 0; R3.tLast = now;   // для анимаций моделей
-  const list = R3.syncFighters(fr, t, dt);
-  R3.camUpdate(list);
+  const fighters = R3.syncFighters(fr, t, dt);
+  R3.camUpdate(fighters);
+  const camPos = R3.camera.position;
+  const list = fighters.filter(o => r3Ray(camPos.x,camPos.z,camPos.y,o.X,o.Z,o.Y+o.h*.7,r3SightBlock)<100);
   R3.sky.position.copy(R3.camera.position);   // небо — вокруг камеры
   R3.ren.render(R3.scene, R3.camera);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
   const A = fr.actor;
-  if (A >= 0 && FR[prevIdx].f[A] && !FR[prevIdx].f[A].hid && !fr.f[A].hid && stepT0 > -1e8){   // след движения ходящего (не у скрытого)
+  if (list.some(o => o.k === A) && FR[prevIdx].f[A] && !FR[prevIdx].f[A].hid && !fr.f[A].hid && stepT0 > -1e8){   // след движения ходящего (не у скрытого)
     const p0 = FR[prevIdx].f[A], p1 = fr.f[A], n = p1.n || 1;
     if (p0.x !== p1.x || p0.y !== p1.y){ const a = r3P(p0.x + n / 2, r3Z(p0) + .05, p0.y + n / 2), b = r3P(p1.x + n / 2, r3Z(p1) + .05, p1.y + n / 2); if (a.ok && b.ok){ ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.setLineDash([5, 6]); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore(); } }
   }
@@ -987,7 +962,7 @@ R3.setCamKind = function(k){
   const b = $('camKindBtn'); if (b && b.textContent != null) b.textContent = CAMK[k];
   try { localStorage.setItem('dnd_cam3d', k); } catch (e) {}
 };
-R3.syncCamBtn = function(){ const b = $('camKindBtn'); if (b && 'hidden' in b) b.hidden = !R3.on; };
+R3.syncCamBtn = function(){ const look = $('lookAtCell'); if (look) look.hidden = R3.on; const b = $('camKindBtn'); if (b && 'hidden' in b) b.hidden = !R3.on; };
 if ($('camKindBtn') && $('camKindBtn').addEventListener){
   $('camKindBtn').addEventListener('click', () => R3.setCamKind(R3.view.kind === 'tac' ? 'third' : (R3.view.kind === 'third' ? 'first' : 'tac')));
   document.addEventListener('keydown', e => {

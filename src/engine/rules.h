@@ -16,7 +16,7 @@ int saveBonus(const Fighter& t, int stat) {
     forRules(t, [&](const Rule& r, int) {
         if (r.what == E_SAVEB && selfOn(t, r)) b += r.n;
     });
-    return t.mod(stat) + (((t.b.saveProf >> stat) & 1u) ? t.b.prof : 0) + b;
+    return (creatureType(t.b.ctype).save == stat ? 2 : 0) + t.mod(stat) + (((t.b.saveProf >> stat) & 1u) ? t.b.prof : 0) + b;
 }
 bool advSave(const Fighter& t);
 bool useReroll(const Fighter& f, int on);
@@ -100,9 +100,10 @@ void grabSync(Fighter& t) {
     t.grabDotN = 0;
 }
 bool applyCond(Fighter& t, int kind, int rounds, int stat, int dc, bool repeatSave, int src = -1, int concSrc = 0) {
-    if (t.b.immCond & (1u << kind) || t.cimm[kind] > 0 || t.banished > 0) return false;
+    if (t.b.immCond & (1u << kind) || t.cimm[kind] > 0 || t.wardTicks[kind] > 0 || t.banished > 0) return false;
     // размеры (v21): схватить можно существо не больше чем на ступень крупнее себя
     if (kind == C_GRAPPLE && g_curW && src >= 0 && src < (int)g_curW->f.size() && t.b.size > g_curW->f[src].b.size + 1) return false;
+    t.breakOnDamage &= ~(1u << kind);
     t.cond[kind] = std::max(t.cond[kind], rounds);
     // из захвата выбираются действием (СЛ), а не повторным спасом
     t.cstat[kind] = (repeatSave && kind != C_GRAPPLE) ? stat : -1;
@@ -142,6 +143,12 @@ bool selfOn(const Fighter& me, const Rule& r) {
             return true;
         case W_RECKLESS: return me.wasReckless;
         case W_TWOWEAP: return me.b.wN > 0 && !me.disarmed && hasOffhand(me.b);
+        case W_SHIELD: return me.b.shield;
+        case W_UNARMORED: return !me.b.armor;
+        case W_NOSHIELD: return !me.b.armor && !me.b.shield;
+        case W_OWNCONC: return me.concSpec >= 0;
+        case W_FULLHP: return me.hp == me.maxHp;
+        case W_SELFCOND: return me.cond[r.warg] > 0;
         case W_HEAVY: return me.b.wN > 0 && !me.disarmed && me.b.wHeavy;
     }
     return false;
@@ -185,6 +192,7 @@ int hurt(Fighter& d, int dmg, int type, bool magical, bool concCheck = true) {
     }
     // броски и ресурсы (v21): урон немагического физического меньше на N (Мастер тяжёлых доспехов); урон типа, которым
     // источник «игнорирует сопротивление», проходит сквозь резист (не сквозь иммунитет)
+    if (creatureType(d.b.ctype).ward == type) dmg -= 2;
     if (isPhys(type) && !magical)
         forRules(d, [&](const Rule& r, int) {
             if (r.what == E_DMGRED && selfOn(d, r)) dmg -= r.n;
@@ -206,6 +214,13 @@ int hurt(Fighter& d, int dmg, int type, bool magical, bool concCheck = true) {
     // концентрация: на каждое попадание своя СЛ спасброска ТЕЛ = max(10, урон/2); урон, ушедший во временные хиты,
     // тоже полученный урон (PHB)
     if (concCheck && d.concSpec >= 0) d.concDCs.push_back(std::max(10, dmg / 2));
+    if (d.breakOnDamage) {
+        for (int k = 1; k < C_N; ++k) if (d.breakOnDamage & (1u << k)) {
+            d.cond[k] = d.condConc[k] = d.cgrit[k] = 0;
+        }
+        d.breakOnDamage = 0;
+        grabSync(d);
+    }
     const int taken = dmg;
     // временные хиты поглощают урон первыми
     int ab = std::min(d.temp, dmg);
@@ -241,8 +256,8 @@ int hurt(Fighter& d, int dmg, int type, bool magical, bool concCheck = true) {
 }
 bool allyAdjacent(const World& w, const Fighter& me, const Fighter& target) {
     for (auto& g : w.f)
-        if (&g != &me && g.hp > 0 && g.team == me.team &&
-            5 * std::max(std::abs(g.x - target.x), std::abs(g.y - target.y)) <= 5)
+        if (&g != &me && g.hp > 0 && g.team == me.team && !g.fled && !g.banished &&
+            !g.cond[C_INCAP] && !g.cond[C_STUN] && !g.cond[C_PARAL] && distFt(g, target) <= 5)
             return true;
     return false;
 }
@@ -250,6 +265,11 @@ bool allyAdjacent(const World& w, const Fighter& me, const Fighter& target) {
 // (безрассудство даёт преимущество только ближним атакам, а атаки по безрассудному — любые)
 bool ruleOn(const World& w, const Fighter& me, const Fighter* foe, const Rule& r, bool offense, bool melee) {
     switch (r.when) {
+        case W_FOETYPE: return foe && foe->b.ctype == r.warg;
+        case W_FOECONC: return foe && foe->concSpec >= 0;
+        case W_FOEFIRST: return foe && !foe->startedTurn;
+        case W_WOUNDED: return foe && foe->hp < foe->maxHp;
+        case W_LARGER: return foe && foe->b.size > me.b.size;
         case W_ALLYADJ: return foe && allyAdjacent(w, me, *foe);
         case W_FOECOND: return foe && foe->cond[r.warg] > 0;
         case W_FOEHPLOW: return foe && foe->hp * 2 <= foe->maxHp;
@@ -313,6 +333,13 @@ inline bool litCell(const World& w, int x, int y) {
     }
     return false;
 }
+inline bool canStudy(const World& w, const Fighter& v, const Illusion& im) {
+    const int distance = dist3(v.x, v.y, zF(w,v), im.x, im.y, im.z);
+    if (v.b.dv < distance && (w.dark[im.y][im.x] || (!w.day && distance > 30 && !litCell(w,im.x,im.y)))) return false;
+    if (fogLine(w,v.x,v.y,zF(w,v),im.x,im.y,im.z)) return false;
+    return !v.cond[C_BLIND] && illusionOpaque(w, im, v) && !illusionLine(w,v,im.x,im.y,im.z+.5) &&
+           losFP(w,v.x,v.y,zF(w,v),fpN(v),im.x,im.y,im.z,1,vxEyeH(v,fpN(v)),.5);
+}
 thread_local int g_curRound = 0;   // номер текущего раунда (туман войны, восприятие МДР, наблюдение сети)
 // ---- Туман войны (v21, №12): сторона видит врага, если его видит хоть один её боец (canSee и нет стены между ними).
 // Бот, сеть и игрок знают только видимых врагов и тех, кого видели в прошлом раунде на той же клетке (атаковать «угаданную
@@ -320,7 +347,7 @@ thread_local int g_curRound = 0;   // номер текущего раунда (
 // слышит (технический предохранитель от бесконечного боя вслепую).
 bool teamSees(const World& w, int team, const Fighter& t) {
     for (auto& g : w.f)
-        if (g.hp > 0 && g.team == team && !g.fled && (&g == &t || (canSee(w, g, t) && losF(w, g, t)))) return true;
+        if (g.hp > 0 && g.team == team && !g.fled && !g.banished && (&g == &t || (canSee(w, g, t) && losF(w, g, t)))) return true;
     return false;
 }
 inline std::array<int, 3>& knownOf(World& w, int team, int i) {
@@ -329,7 +356,7 @@ inline std::array<int, 3>& knownOf(World& w, int team, int i) {
     return K[i];
 }
 void revealTo(World& w, int team, int i) {
-    if (team < 0 || team > 1 || i < 0 || i >= (int)w.f.size()) return;
+    if (team < 0 || team >= MAXT || i < 0 || i >= (int)w.f.size()) return;
     knownOf(w, team, i) = {w.f[i].x, w.f[i].y, g_curRound};
     w.knownRound[team] = g_curRound;
 }
@@ -401,7 +428,7 @@ int coverBonus(const World& w, int x0, int y0, int x1, int y1) {
 // укрытие цели d от a: прежний бой — по клеткам (coverBonus), режим кубов — одним лучом по кубам (vxCover)
 inline int coverF(const World& w, const Fighter& a, const Fighter& d) { return w.vx ? vxCover(w, a, d) : coverBonus(w, a.x, a.y, d.x, d.y); }
 inline bool canReact(const Fighter& d) {
-    return d.hp > 0 && !d.reactionUsed && !d.cond[C_STUN] && !d.cond[C_PARAL] && !d.cond[C_INCAP];
+    return d.hp > 0 && !d.fled && !d.banished && !d.reactionUsed && !d.cond[C_STUN] && !d.cond[C_PARAL] && !d.cond[C_INCAP];
 }
 // Невероятное уклонение: реакцией вдвое меньше урона от атаки, которая попала (бот тратит, если урон >= 10% максимума
 // ХП)

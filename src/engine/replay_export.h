@@ -26,7 +26,7 @@ static std::string specTitle(const Spec& s) {
     if (s.offhand) return "Атака второй рукой";
     if (s.onHit) return s.pool ? "Приём" : "Удар при попадании";
     if (s.self) {
-        if (s.healN) return "Исцеление";
+        if (s.healN || s.healB) return "Исцеление";
         if (s.tempN) return "Каменная кожа";
         if (s.acB) return "Щит из воздуха";
         if (s.sbAmt) return "Прилив силы";
@@ -197,7 +197,7 @@ static std::vector<BuyItem> bossItems(const Boss& b, const Coef& C, double budge
     if (b.riposte) cp("passive", "Контратака", "ответный удар реакцией", P(AT_RIPOSTE));
     if (b.surge) cp("passive", "Всплеск действий", "×" + std::to_string(b.surge), P(AT_SURGE, b.surge));
     for (int L = 1; L < 10; L++)
-        if (b.slots[L]) cp("passive", "Ячейки заклинаний " + std::to_string(L) + " ур.", "×" + std::to_string(b.slots[L]), C[AT_SLOT] * L * b.slots[L]);
+        if (b.slots[L]) cp("passive", "Ячейки заклинаний " + std::to_string(L) + " ур.", "×" + std::to_string(b.slots[L]), slotUnitPrice(C) * L * b.slots[L]);
     if (b.dv) cp("passive", "Тёмное зрение", std::to_string(b.dv) + " фт", P(AT_DARKV, senseMul(b.dv, SENSE_DV)));
     if (b.truesight) cp("passive", "Истинное зрение", std::to_string(b.truesight) + " фт: видит невидимых и сквозь тьму", P(AT_TRUESIGHT, senseMul(b.truesight, SENSE_TS)));
     if (b.blindsight) cp("passive", "Слепое зрение", std::to_string(b.blindsight) + " фт", P(AT_BLINDS, senseMul(b.blindsight, SENSE_BS)));

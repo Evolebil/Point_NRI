@@ -24,11 +24,7 @@
 namespace pt {
 static const long long BUDGETS[6] = {200, 400, 800, 1600, 3200, 6400};
 // цены атомов сейчас (стартовые из AD[])
-static Coef coefNow() {
-    Coef C;
-    for (int a = 0; a < AT_N; a++) C[a] = AD[a].init;
-    return C;
-}
+
 using pn::Decision;
 using pn::PNet;
 
@@ -444,7 +440,7 @@ static int bcMain(int argc, char** argv) {
     AdamState aC, aP;
     aC.init(net.core.p.size());
     aP.init(net.ptr.size());
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     Hyper hp;
     hp.lr = 1e-3;
     const int chunk = 256;
@@ -498,7 +494,7 @@ static int trainMain(int argc, char** argv) {
     }
     loadCalibBld();   // этап 5б: боссы сетей-Сборщиков в обучении (DND_CALIB_BLD — доля пар)
     if (g_cb.share > 0) std::printf("обучение на смеси: %.0f%% пар с боссами сетей-Сборщиков\n", 100 * g_cb.share);
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     Hyper hp;
     if (const char* e = std::getenv("DND_LR")) hp.lr = std::atof(e);
     // дисконт за решение и сглаживание GAE (свежий взгляд 10 ноября): за бой ~100 решений на сторону, при γ 0.99 исход
@@ -630,7 +626,7 @@ static int replayMain(int argc, char** argv) {
     if (!pn::loadP(argv[2], net, true)) return 1;
     const long long B = std::atoll(argv[3]);
     const uint64_t seed = std::strtoull(argv[4], nullptr, 10);
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     rng.seed(seed);
     Boss A, Bo;
     makePair(B, C, A, Bo);
@@ -665,7 +661,7 @@ static int fairMain(int argc, char** argv) {
     PNet net;
     if (!pn::loadP(argv[2], net, true)) return 1;
     const int N = std::atoi(argv[3]);
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     std::vector<std::array<int, 2>> res(N);
     std::vector<long long> bud(N);
     parallelFor(N, [&](int i) {
@@ -713,7 +709,7 @@ static int evalMain(int argc, char** argv) {
     PNet net;
     if (!pn::loadP(argv[2], net, true)) return 1;
     loadCalibBld();   // DND_CALIB_BLD > 0 — часть боссов от сетей-Сборщиков (по умолчанию только генератор)
-    const EvalRes ev = evaluate(coefNow(), net, std::atoi(argv[3]), HELD_OUT);
+    const EvalRes ev = evaluate(trainingPrices(), net, std::atoi(argv[3]), HELD_OUT);
     std::printf("сеть (ИНТ 16, жадно) против правила-бота (ИНТ 10), %d отложенных боёв: победы %.1f%% (±%.1f п.п.), раундов %.1f, решений на бой %.1f, отказов %lld, странных побед %zu\n",
                 ev.n, 100 * ev.win, 100 * 2 * std::sqrt(0.25 / ev.n), ev.rounds, ev.steps, ev.illegal, ev.strange.size());
     std::printf("  ход: ходов сети %lld, с перемещением %.1f%%, упёрлись в предел %d решений %lld (%.2f на бой), завершены движком %lld, решений с закрытым «концом хода» (пустой ход) %lld\n",
@@ -738,7 +734,7 @@ static int psmokeMain(int argc, char** argv) {
     pn::PNet net;
     if (!pn::loadP(argv[2], net, true)) return 1;
     const int N = argc > 3 ? std::atoi(argv[3]) : 400;
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     std::vector<long long> steps(N), illegal(N);
     std::vector<int> res(N), rounds(N);
     parallelFor(N, [&](int i) {
@@ -775,7 +771,7 @@ static int psmokeMain(int argc, char** argv) {
 // ход из примитивов (v21, №4): бой, где ходы бота записаны примитивами, и тот же бой, где их повторяет исполнитель
 // (applyPrim), совпадают до бита: исход, длина, ХП обоих боссов
 static int checkMain() {
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     const int N = 4000;
     // v21, №4: ход из примитивов. Бой, где ходы босса записаны примитивами, и тот же бой, где эти примитивы повторяет
     // исполнитель (applyPrim), совпадают до бита: исход, длина, ХП обоих боссов

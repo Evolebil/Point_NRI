@@ -23,6 +23,7 @@ Boss makeBossOnce(long long budget, const Coef& C, bool allowSummon, bool force)
     g_B = (double)budget;
     double passLeft = budget * (0.05 + 0.40 * warp(BW_PASS, rand01()));
     g_bstate.budget = (double)budget;
+    b.ctype = catN(BC_CREATURE_TYPE, CT_COUNT);
     auto buy = [&](double cost) {
         long long c = (long long)std::ceil(cost);
         if (c > passLeft) return false;
@@ -287,9 +288,10 @@ Boss makeBossOnce(long long budget, const Coef& C, bool allowSummon, bool force)
         r.what = bern(BP_RUNEW, 0.12) ? E_SKILLADV + catN(BC_RUNEW, 3) : catN(BC_RUWHAT, std::min((int)E_N, 16));
         if (r.what == E_SKILLADV) r.n = irand(SK_N);
         if (r.what == E_ACMINUS) r.n = magN(MG_ACMIN, 1, 20);
-        do r.when = catN(BC_RUWHEN, W_N);
+        do r.when = catN(BC_SRD_WHEN, W_N);
         while (!ruleAllowed(r.when, r.what));
-        if (r.when == W_FOECOND) r.warg = 1 + catN(BC_RUCOND, C_N - 1);
+        if (r.when == W_FOETYPE) r.warg = catN(BC_CREATURE_TYPE, CT_COUNT);
+        if (r.when == W_FOECOND || r.when == W_SELFCOND) r.warg = 1 + catN(BC_RUCOND, C_N - 1);
         if (r.what == E_DMG) {
             r.n = magN(MG_RUN, 1, MAX_DICE_G);
             r.s = DICE[catN(BC_RUS, DICE_N)];
@@ -357,10 +359,12 @@ Boss makeBossOnce(long long budget, const Coef& C, bool allowSummon, bool force)
             int lvl = std::clamp(1 + (int)(s.price / (0.04 * budget)), 1, 9);
             Spec t = s;
             t.slotLvl = lvl;
+            if (lvl < 9 && (t.dmgN || t.healN) && bern(BP_UPDICE, .25)) t.upDice = 1;
+            if (lvl < 9 && !t.self && !t.radius && !t.ground && bern(BP_UPTARGETS, .12)) t.upTargets = 1;
             long long p = specPrice(t, C), need = 0, n = 0;
             if (b.slots[lvl] == 0) {
                 n = lvl <= 3 ? 1 + irand(3) : (lvl <= 6 ? 1 + irand(2) : 1);
-                need = (long long)std::ceil(C[AT_SLOT] * lvl * n);
+                need = slotUnitPrice(C) * lvl * n;
                 newL = lvl;
                 newN = (int)n;
             }

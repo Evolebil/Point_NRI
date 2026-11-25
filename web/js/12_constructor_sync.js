@@ -18,6 +18,7 @@ function syncForm(){
   STAT_N.forEach((n, i) => { const v = (S.stats || [])[i] || 10, el = document.querySelector(`[data-statcost="${i}"]`); if (el) { const c = v * (v + 1) / 2 - 55; el.textContent = `мод ${Math.floor((v - 10) / 2) >= 0 ? '+' : ''}${Math.floor((v - 10) / 2)} · ${c > 0 ? '−' + c : (c < 0 ? '+' + (-c) : '0')} оч.`; el.style.color = c < 0 ? 'var(--good)' : ''; } });
   const acv = S.acV || 0; const ae = document.querySelector('[data-accost]'); if (ae) ae.textContent = `${acv * (2 * acv + 1)} оч.`;   // (2a)(2a+1)/2
   const av = document.querySelector('[data-acval]'); if (av) av.textContent = lastPrice && lastPrice.boss ? `итого КД ${lastPrice.boss.ac}` : `КД ${10 + acv} + ЛОВ`;
+  if ($('typeTrait')) $('typeTrait').textContent = CAT.creatureTypes[S.ctype ?? 9]?.trait || '';
   $('bud').textContent = S.budget;
 }
 function onInput(e){

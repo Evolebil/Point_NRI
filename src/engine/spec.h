@@ -23,6 +23,10 @@ struct Spec {
     int dmgN = 0, dmgS = 6;
     int cond = 0, condRounds = 1;
     int dotN = 0, dotS = 6, dotRounds = 0, darkR = 0, invisN = 0, slotLvl = 0;
+    int cleanse = 0, wardCond = 0, wardRounds = 0, targetType = -1;
+    bool breakOnDamage = false;
+    int illusionRounds = 0;
+    int upDice = 0, upTargets = 0;   // за каждый уровень фактически потраченной ячейки сверх базового
     bool terr = false, conc = false;
     int pushFt = 0, healN = 0, teleFt = 0, buffN = 0, buffRounds = 0, tempN = 0, acB = 0, acRounds = 0;
     bool hide = false;
@@ -215,6 +219,8 @@ double specMult(const Spec& s, const Coef& C, bool durOnly = false) {
     if (s.preCast && s.self) m += C[AT_PRECAST] - 1;
     if (s.immSave && s.delivery == 1 && !s.self) down += 1 - C[AT_IMMSAVE];
     if (s.noRepeat) down += 1 - C[AT_NOREPEAT];
+    if (s.targetType >= 0) down += 1 - C[AT_TARGET_TYPE];
+    m += C[AT_UPDICE] * s.upDice + C[AT_UPTARGETS] * s.upTargets;
     if (s.healAlly) m += C[AT_HEALALLY] - 1;   // пакет атомов 2: лечит союзников
     if (s.rechAfter && s.uses < UNL && s.recharge) m += C[AT_RECHAFTER] - 1;   // пакет атомов 3: перезарядка возвращает все применения
     return m - std::min(down, 1 - MULT_FLOOR);
@@ -236,6 +242,9 @@ inline long long summonTmplPrice(const Spec& s, const Coef& C) {
     for (auto& g : s.sumMore) pts += (double)g[2] * g[1];   // остальные группы — так же, полной ценой
     return (long long)std::ceil(minMult(C) * pts * casts);
 }
+inline long long slotUnitPrice(const Coef& C) {
+    return std::max(1LL, (long long)std::ceil(C[AT_SLOT]));
+}
 long long specPrice(const Spec& s, const Coef& C) {
     // атака второй рукой: доля цены одной атаки оружием (кубики оружия скопированы в dmgN/dmgS) и стиль
     if (s.offhand) return std::max(1LL, (long long)std::ceil(C[AT_WPNDICE] * s.dmgN * (s.dmgS + 1) / 2.0 * C[AT_TWF] + (s.twfMod ? C[AT_TWFMOD] * scl(AT_TWFMOD) : 0.0)));
@@ -248,7 +257,7 @@ long long specPrice(const Spec& s, const Coef& C) {
         // прон снимается на 1-м ходу цели, длительность не работает — не продаём её
         // без повторного спаса каждый раунд сверх первого стоит дороже (этап 5б): он держится наверняка
         double durMult = (s.cond == C_PRONE || s.delivery == 2) ? 1.0 : (1 + (s.noRep ? C[AT_NOREP] : 0.25) * (s.condRounds - 1));
-        base += C[AT_PRONE + s.cond - 1] * durMult * scl(AT_PRONE + s.cond - 1);
+        base += C[AT_PRONE + s.cond - 1] * durMult * scl(AT_PRONE + s.cond - 1) * (s.breakOnDamage ? C[AT_BREAK_DAMAGE] : 1.0);
     }
     if (s.wallLen > 0) base += C[AT_WALL] * s.wallLen * s.wallRounds;
     if (s.pushFt > 0) base += C[AT_PUSH] * tierN(TR_PUSH, s.pushFt / 5.0);
@@ -287,6 +296,9 @@ long long specPrice(const Spec& s, const Coef& C) {
     // полёт и увеличение на время (пакет атомов 2): как постоянное × доля боя
     if (s.flyRounds > 0) dur += C[AT_FLY] * scl(AT_FLY) * C[AT_FLYBUFF] * coverOf(s, s.flyRounds);
     if (s.growRounds > 0) dur += C[AT_GROW] * scl(AT_GROW) * FIGHT_ROUNDS * coverOf(s, s.growRounds);
+    if (s.cleanse) base += C[AT_CLEANSE] * scl(AT_CLEANSE);
+    if (s.wardCond) base += C[AT_WARD_COND] * scl(AT_WARD_COND) * s.wardRounds;
+    base += s.illusionRounds * C[AT_ILLUSION] * scl(AT_ILLUSION);
     if (s.disarm) base += C[AT_DISARM];
     if (s.cmdAtk) base += C[AT_CMDATK] * scl(AT_CMDATK);      // приказ союзнику атаковать
     if (s.protect) base += C[AT_PROTECT] * scl(AT_PROTECT);   // реакция за союзника
@@ -294,7 +306,11 @@ long long specPrice(const Spec& s, const Coef& C) {
     if (s.killN > 0 || s.killB > 0) base += C[AT_KILLHEAL] * (s.killN * (s.killS + 1) / 2.0 + s.killB) / 3.5;
     if (s.selfN > 0) base -= C[AT_SELFDMG] * s.selfN * (s.selfS + 1) / 2.0 / 3.5;   // урон себе возвращает очки
     const double pm = s.pool ? C[AT_POOL] : 1.0;
-    return std::max(1LL, (long long)std::ceil(base * specMult(s, C) * pm + dur * specMult(s, C, true) * pm)) + summonTmplPrice(s, C);
+    const double price = (base * specMult(s,C) + dur * specMult(s,C,true)) * pm;
+    const int levels = std::max(0, s.slotLvl - 1);
+    // Круг выше первого даёт скидку хотя бы в одно целое очко, пока цена не достигнет минимума.
+    const long long perLevel = std::max(1LL, (long long)std::ceil(price * .05));
+    return std::max(1LL, (long long)std::ceil(price) - levels * perLevel) + summonTmplPrice(s,C);
 }
 std::string describe(const Spec& s) {
     char buf[300];
@@ -312,6 +328,13 @@ std::string describe(const Spec& s) {
         std::snprintf(buf, sizeof buf, "ячейка %d ур.; ", s.slotLvl);
         r += buf;
     }
+    if (s.cleanse) r += std::string("снимает состояние «") + CN[s.cleanse] + "»; ";
+    if (s.wardCond) r += std::string("защита от «") + CN[s.wardCond] + "» на " + std::to_string(s.wardRounds) + " р.; ";
+    if (s.breakOnDamage) r += "состояние снимается любым полученным уроном; ";
+    if (s.targetType >= 0) r += "эффекты по выбранному типу существа; ";
+    if (s.illusionRounds) r += "иллюзорное укрытие на " + std::to_string(s.illusionRounds) + " р.; ";
+    if (s.upDice) r += "+" + std::to_string(s.upDice) + " куб. за каждый уровень ячейки сверх базового; ";
+    if (s.upTargets) r += "+" + std::to_string(s.upTargets) + " целей за каждый уровень ячейки сверх базового; ";
     if (s.conc) r += "концентрация; ";
     if (s.preCast && s.self) r += "действует с начала боя; ";
     if (s.noRepeat) r += "не два раунда подряд; ";
@@ -421,6 +444,7 @@ std::string describe(const Spec& s) {
         std::snprintf(buf, sizeof buf, s.healB ? "лечение %dк%d+%d " : "лечение %dк%d ", s.healN, s.healS, s.healB);
         r += buf;
     }
+    if (!s.healN && s.healB) r += "лечение " + std::to_string(s.healB) + " ";
     if (s.teleFt) {
         std::snprintf(buf, sizeof buf, "телепорт %d фт ", s.teleFt);
         r += buf;
@@ -481,17 +505,19 @@ struct Wp {
 // преимущество; атаки по мне с преимуществом), условная защита (условие → резист), преимущество на спасброски (всегда →).
 // Противник — тот, с кем сейчас дело: цель моей атаки или тот, кто атакует меня. Резист и спасброски проверяются без
 // противника, поэтому для них годятся только условия о себе
-enum When { W_ALWAYS, W_ALLYADJ, W_HPLOW, W_HPHIGH, W_NOCOND, W_FOECOND, W_FOEHPLOW, W_RECKLESS, W_TWOWEAP, W_HEAVY, W_N };
+enum When { W_ALWAYS, W_ALLYADJ, W_HPLOW, W_HPHIGH, W_NOCOND, W_FOECOND, W_FOEHPLOW, W_RECKLESS, W_TWOWEAP, W_HEAVY, W_FOETYPE, W_FOECONC, W_FOEFIRST, W_WOUNDED, W_LARGER, W_SHIELD, W_UNARMORED, W_OWNCONC, W_FULLHP, W_SELFCOND, W_NOSHIELD, W_N };
+inline int whenAtom(int w) { return w < W_FOETYPE ? AT_W_ALWAYS + w : AT_W_FOETYPE + (w - W_FOETYPE); }
 enum What { E_ADVATK, E_DMG, E_AC, E_DISVSME, E_ADVVSME, E_RES, E_RESNM, E_ADVSAVE, E_SAVEB, E_ATKDIE, E_SAVEDIE, E_DMGRED, E_PIERCE, E_NOCOVER, E_POWER, E_NOOA,
            E_SKILLADV, E_DISATK, E_ACMINUS, E_N };   // 8 ноября: преимущество на навык; недостатки — помеха на мои атаки, −КД (возврат)
 const char* WN[W_N] = {"всегда", "союзник рядом с противником", "мои ХП ≤ 50%", "мои ХП > 50%", "на мне нет состояний", "у противника состояние",
-                       "противник ранен (ХП ≤ 50%)", "атакую безрассудно", "держу два оружия", "бью тяжёлым оружием"};
+                       "противник ранен (ХП ≤ 50%)", "атакую безрассудно", "держу два оружия", "бью тяжёлым оружием",
+                       "противник выбранного типа", "противник концентрируется", "противник ещё не начинал ход", "у противника неполные хиты", "противник крупнее меня", "держу щит", "без доспеха", "удерживаю концентрацию", "мои хиты полные", "на мне выбранное состояние", "без щита и доспеха"};
 const char* EN[E_N] = {"преимущество на мои атаки", "+ кубики к урону оружия", "+ КД", "атаки по мне с помехой", "атаки по мне с преимуществом",
                        "резист ко всему урону", "резист к немагическому физическому", "преимущество на спасброски", "+ к спасброскам",
                        "+ кость к броскам атаки", "+ кость к спасброскам", "меньше урона от немагического физического", "мой урон игнорирует сопротивление",
                        "мои атаки не замечают укрытия", "размен: −к попаданию, +урон", "после моей атаки цель не провоцирует",
                        "преимущество на проверки навыка", "помеха на мои атаки (недостаток)", "− к КД (недостаток)"};
-inline bool whenSelf(int w) { return w == W_ALWAYS || w == W_HPLOW || w == W_HPHIGH || w == W_NOCOND || w == W_RECKLESS || w == W_TWOWEAP || w == W_HEAVY; }
+inline bool whenSelf(int w) { return w == W_ALWAYS || w == W_HPLOW || w == W_HPHIGH || w == W_NOCOND || w == W_RECKLESS || w == W_TWOWEAP || w == W_HEAVY || (w >= W_SHIELD && w <= W_NOSHIELD); }
 inline bool ruleAllowed(int w, int e) { return (e == E_RES || e == E_RESNM || e == E_ADVSAVE || e == E_SAVEB || e == E_SAVEDIE || e == E_DMGRED || e == E_PIERCE || e == E_NOOA || e == E_SKILLADV || e == E_DISATK || e == E_ACMINUS) ? whenSelf(w) : true; }
 struct Rule {
     int when = W_ALWAYS, warg = 0;   // warg — состояние для W_FOECOND
@@ -549,6 +575,43 @@ inline double senseMul(int ft, const SensePts& p) {
     return p.n - 1;
 }
 inline bool senseOK(int ft, const SensePts& p) { return ft >= 0 && ft <= p.ft[p.n - 1] && ft % 5 == 0; }
+// Порядок типов входит в формат персонажей и кадров боя.
+struct CreatureType {
+    const char* name;
+    const char* trait;
+    int skill, save, ward;
+};
+constexpr CreatureType CREATURE_TYPES[] = {
+    {"аберрация", "чуждый разум", -1, INT, -1},
+    {"зверь", "острый слух", SK_PERCEP, -1, -1},
+    {"небожитель", "светлая природа", -1, -1, DT_RADIANT},
+    {"конструкт", "искусственное тело", -1, -1, DT_POISON},
+    {"дракон", "жаропрочная чешуя", -1, -1, DT_FIRE},
+    {"элементаль", "грозовая природа", -1, -1, DT_LIGHTNING},
+    {"фея", "лёгкая поступь", SK_ACRO, -1, -1},
+    {"исчадие", "адская воля", -1, CHA, -1},
+    {"великан", "исполинская сила", SK_ATHL, -1, -1},
+    {"гуманоид", "дипломатия", SK_PERSUADE, -1, -1},
+    {"монстр", "охотничий инстинкт", SK_SURVIVAL, -1, -1},
+    {"слизь", "кислотное тело", -1, -1, DT_ACID},
+    {"растение", "глубокие корни", -1, STR, -1},
+    {"нежить", "сродство со смертью", -1, -1, DT_NECROTIC},
+    {"призрак", "бестелесность", -1, -1, -1},
+};
+constexpr int CT_COUNT = sizeof(CREATURE_TYPES) / sizeof(CREATURE_TYPES[0]);
+constexpr int CT_HUMANOID = 9, CT_GHOST = 14;
+inline const CreatureType& creatureType(int id) {
+    return CREATURE_TYPES[id >= 0 && id < CT_COUNT ? id : CT_HUMANOID];
+}
+inline std::string typeTrait(int id) {
+    const auto& t = creatureType(id);
+    std::string s = t.trait;
+    if (t.skill >= 0) return s + " (+2 к проверкам «" + SKN[t.skill] + "»)";
+    if (t.save >= 0) return s + " (+2 к спасброскам " + SN[t.save] + ")";
+    if (t.ward >= 0) return s + " (−2 к входящему урону типа «" + DTN[t.ward] + "»)";
+    return s + " (проходит сквозь стены и двери; реакцией вселяется на один удар в союзника в 5 фт: +2 к попаданию и урону)";
+}
+
 struct Boss {
     // состояние героя на входе в бой (кампания, задача Б-3): текущие ХП, потраченные ячейки и применения, истощение;
     // off — бой со свежим бойцом, как всегда
@@ -619,7 +682,7 @@ struct Boss {
     bool ignDiff = false;
     bool climbS = false, swimS = false, burrowS = false;   // скорости лазания, плавания, копания (v21)
     bool evasion = false, sunSens = false;                 // Увёртливость; солнечная чувствительность (v21)
-    int ctype = 9;                                         // тип существа (PHB/MM, v21): по умолчанию гуманоид
+    int ctype = CT_HUMANOID;                                         // тип существа (PHB/MM, v21): по умолчанию гуманоид
     int lair = 0;                                          // действия логова (v21): уровень 0–3
     int auraN = 0, auraS = 6, auraType = DT_FIRE, auraRad = 0, auraCond = 0, auraRounds = 1;
     // всплеск действий, контратака, ячейки по уровням 1..9   // довесок к удару оружием (раз в ход): доп. урон и/или состояние
@@ -636,6 +699,7 @@ struct Boss {
     long long acost = 0;
     long long cost = 0, wcost = 0;
     bool at(int a) const { return (atoms.w[a >> 6] >> (a & 63)) & 1ULL; }
+    int skillBonus(int k) const { return creatureType(ctype).skill == k ? 2 : 0; }
     int mod(int s) const { return modOf(stats[s]); }
 };
 // есть ли у босса способность-реакция (№23)

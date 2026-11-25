@@ -120,7 +120,7 @@ static void houseVol(World& w, int x0, int y0, const wg::Cell& h, const VolSrc& 
 // под землёй не меньше 2 кубов (нет под водой, ущельем, опасностью и поселением). У каждой пещеры (связной полости от 12
 // кубов) — выход на поверхность: спуск ступенями по кубу из её места поближе к поверхности, по прямой в ту сторону, где он
 // короче, не ближе 2 клеток к краю арены
-static void caveVol(World& w, uint64_t seed, int gx0, int gy0, const std::vector<unsigned char>& town) {
+static void caveVol(World& w, uint64_t seed, int gx0, int gy0, const std::vector<unsigned char>& town, bool regional) {
     const int AW = w.aw, AH = w.ah;
     int Z = 0;
     for (int y = 0; y < AH; y++)
@@ -136,10 +136,31 @@ static void caveVol(World& w, uint64_t seed, int gx0, int gy0, const std::vector
             for (int z = 1; z <= ground(x, y) - 3; z++)
                 if (wg::caveAir(seed, gx0 + x, gy0 + y, z)) air[id(x, y, z)] = 1, any = true;
         }
+    // Два склепа с общим коридором под участком сухой возвышенности.
+    bool crypt = false;
+    size_t firstCell = 0;
+    for (int y = 2; y + 6 < AH && !crypt; ++y) {
+        for (int x = 2; x + 10 < AW && !crypt; ++x) {
+            if (wg::hash01(seed, gx0+x, gy0+y, 913) > .12) continue;
+            int floor = ground(x,y)-3;
+            for (int dy=0; dy<5; ++dy)
+                for (int dx=0; dx<9; ++dx)
+                    floor = std::min(floor, open(x+dx,y+dy) ? ground(x+dx,y+dy)-3 : 0);
+            if (floor < 1) continue;
+            for (int dy=0; dy<5; ++dy)
+                for (int dx=0; dx<9; ++dx)
+                    if (dx<3 || dx>=6 || dy==2)
+                        for (int z=floor; z<floor+2; ++z) air[id(x+dx,y+dy,z)]=1;
+            firstCell = id(x,y,floor);
+            crypt = any = true;
+        }
+    }
     if (!any) return;
     // связные полости (6 соседей) и выход у каждой
     std::vector<int> comp(air.size(), -1), st;
-    for (size_t s0 = 0; s0 < air.size(); s0++) {
+    int entrancesLeft = std::max(1, AW * AH / 900);
+    for (size_t i = 0; i < air.size(); ++i) {
+        const size_t s0 = (firstCell + i) % air.size();
         if (!air[s0] || comp[s0] >= 0) continue;
         const int cid = (int)s0;
         std::vector<int> cubes;
@@ -159,6 +180,15 @@ static void caveVol(World& w, uint64_t seed, int gx0, int gy0, const std::vector
             }
         }
         if (cubes.size() < 12) continue;
+        if (!entrancesLeft) {
+            // Ходы на стыке регионов продолжаются на соседней карте.
+            const bool border = regional && std::any_of(cubes.begin(), cubes.end(), [&](int cell) {
+                const int x = cell / Z % AW, y = cell / Z / AW;
+                return x == 0 || y == 0 || x == AW-1 || y == AH-1;
+            });
+            if (!border) for (int cell : cubes) air[cell] = 0;
+            continue;
+        }
         // место для выхода: куб пола (под ним не полость) поближе к поверхности; спуск — самый короткий из четырёх сторон
         std::vector<std::array<int, 3>> best;
         int bestLen = 1 << 30;
@@ -180,6 +210,7 @@ static void caveVol(World& w, uint64_t seed, int gx0, int gy0, const std::vector
                 if (ok && (int)ramp.size() < bestLen) { bestLen = (int)ramp.size(); best = ramp; }
             }
         }
+        if (!best.empty()) --entrancesLeft;
         for (const auto& r : best)   // спуск: высота хода 2 куба (поверху — до поверхности)
             for (int z = r[2]; z <= std::min(r[2] + 1, ground(r[0], r[1]) - 1); z++) air[id(r[0], r[1], z)] = 1;
     }
@@ -191,9 +222,9 @@ static void caveVol(World& w, uint64_t seed, int gx0, int gy0, const std::vector
             vxoPut(w, x, y, col);
         }
 }
-static void buildVolume(World& w, uint64_t caveSeed, int gx0, int gy0, const VolSrc& src) {
+static void buildVolume(World& w, uint64_t caveSeed, int gx0, int gy0, const VolSrc& src, bool regional = false) {
     w.vxo.clear();
-    caveVol(w, caveSeed, gx0, gy0, src.town);
+    caveVol(w, caveSeed, gx0, gy0, src.town, regional);
     for (const auto& [o, h] : src.houses) houseVol(w, o.first, o.second, h, src);
 }
 struct MapStyle {
@@ -382,7 +413,7 @@ void regionArena(World& w, const wg::RegionDesc& d, int aw, int ah) {
     // участков сходятся на границе; без места в регионе — в своих координатах по зерну участка
     if (vol) {
         const bool inReg = d.gx >= 0 && d.gy >= 0;
-        buildVolume(w, inReg ? wg::seedOfText("пещеры:" + d.wseed) : P.seed ^ 0x43415645, inReg ? d.gx * P.size + x0 : x0, inReg ? d.gy * P.size + y0 : y0, vs);
+        buildVolume(w, inReg ? wg::seedOfText("пещеры:" + d.wseed) : P.seed ^ 0x43415645, inReg ? d.gx * P.size + x0 : x0, inReg ? d.gy * P.size + y0 : y0, vs, inReg);
     }
     w.wseed = 0;
     w.wsize = 0;

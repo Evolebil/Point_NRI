@@ -205,11 +205,15 @@ def solo_hist(s, cmd, out):
         s["hist"] = None
 
 
-def fog_frames(frames, team):
+def fog_frames(frames, team, seat=None):
     """Туман войны в бою нескольких игроков: кадр движка общий, у бойца — список команд, которые его не видят (hT).
     Каждому участнику — своя копия: скрытый от его команды боец помечен hid (не рисуется, его действия не в журнале)."""
     out = []
     for fr in frames:
+        if isinstance(fr, dict) and "seatVis" in fr:
+            fr = dict(fr)
+            masks = fr.pop("seatVis")
+            fr["vis"] = masks.get(str(seat), "")
         fs = fr.get("f") if isinstance(fr, dict) else None
         if not fs or not any("hT" in f or "nsT" in f for f in fs):
             out.append(fr)
@@ -341,7 +345,7 @@ class Room:
                 "members": [{"name": m["name"], "team": m["team"], "bot": m["bot"], "brain": m.get("brain", "rules"), "npc": bool(m.get("npc")), "me": m["sid"] == sid, "host": m["sid"] == self.host, "selected": bool(m.get("char")), "ready": bool(m.get("ready")) or m["bot"] is not None,
                              "i": i} for i, m in enumerate(self.members)],
                 "seat": self.seats.get(sid, -1), "init": mask_init(self.init, {team}) if self.init and since == 0 else None,
-                "frames": mask_hidden(fog_frames(self.frames, team), {})[since:], "nframes": len(self.frames), "req": mine["req"] if mine else None,
+                "frames": mask_hidden(fog_frames(self.frames, team, self.seats.get(sid)), {})[since:], "nframes": len(self.frames), "req": mine["req"] if mine else None,
                 "waiting": who, "end": self.end, "opts": self.opts, "ver": self.ver, "fid": self.fid,
                 "ptrs": [{"name": m["name"], "team": m["team"], "x": m["ptr"][0], "y": m["ptr"][1]} for m in self.members
                          if m.get("ptr") and m["sid"] != sid and time.time() - m["ptr"][2] < PTR_TTL]}
@@ -551,8 +555,8 @@ def room_cmd1(msg, sid):
                     e["char"], e["seat"] = m["char"], r.seats[m["sid"]]
                 members.append(e)
             r.order = [m["name"] for m in r.members]
-            opts = {k: msg[k] for k in ("seed", "rounds", "map", "world", "vox") if k in msg}
-            r.opts = {k: v for k, v in opts.items() if k in ("seed", "rounds", "vox")}
+            opts = {k: msg[k] for k in ("seed", "rounds", "map", "world", "vox", "volume") if k in msg}
+            r.opts = {k: v for k, v in opts.items() if k in ("seed", "rounds", "vox", "volume")}
             r.status, r.err, r.frames, r.init, r.end, r.pending = "fight", "", [], None, None, None
             r.fid += 1
             if r.eng:
@@ -622,7 +626,7 @@ def sheet_mod():
     return _SHEET["mod"]
 
 
-def page_parts():
+def page_parts(lazy=True):
     """Части страницы: web/play.html, стили web/css/play.css, скрипты web/js/*.js по порядку имён; в скрипт боя подставляется
     общий код рисования из web/viewer_template.html."""
     def rd(*p):
@@ -630,13 +634,14 @@ def page_parts():
             return f.read()
     v = rd("viewer_template.html")
     a, b = v.index("/*RENDER_BEGIN*/"), v.index("/*RENDER_END*/")
-    js = "".join(rd("js", n) for n in sorted(os.listdir(os.path.join(WEB, "js"))) if n.endswith(".js"))
-    return rd("play.html"), rd("css", "play.css"), js.replace("/*RENDER_JS*/", v[a:b])
+    js = "".join(rd("js", n) for n in sorted(os.listdir(os.path.join(WEB, "js"))) if n.endswith(".js") and not (lazy and n == "60_kampaniya.js"))
+    html = re.sub(r"<!--PAGE ([a-z]+)-->", lambda m: rd("pages", m[1] + ".html"), rd("play.html"))
+    return html, rd("css", "play.css"), js.replace("/*RENDER_JS*/", v[a:b])
 
 
 def page():
     """Страница одним ответом: стили и скрипты встроены."""
-    html, css, js = page_parts()
+    html, css, js = page_parts(lazy=False)
     return html.replace("/*PLAY_CSS*/\n", css).replace("/*PLAY_JS*/\n", js)
 
 
@@ -647,7 +652,7 @@ APP_LOCK = threading.Lock()
 def page_shell():
     """Страница для браузера: оболочка без стилей и скриптов (~20 КБ), они — отдельными файлами с хешем в имени и кэшем на год.
     Через туннель страница (~175 КБ сжатой) шла ~5 с при каждом заходе; теперь повторный заход качает только оболочку."""
-    html, css, js = page_parts()
+    html, css, js = page_parts(lazy=True)
     names = {}
     with APP_LOCK:
         for ext, text, ctype in (("css", css, "text/css; charset=utf-8"), ("js", js, "text/javascript; charset=utf-8")):
@@ -879,6 +884,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, f.read(), "text/javascript; charset=utf-8", "public, max-age=31536000, immutable")
             except OSError:
                 self._send(404, "не найдено", "text/plain; charset=utf-8")
+        elif path in ("/assets/castle-flight.webp", "/assets/castle.png", "/assets/castle.mp4", "/assets/citadel.webp", "/assets/citadel.mp4"):
+            with open(os.path.join(WEB, path.lstrip("/")), "rb") as f:
+                self._send(200, f.read(), {"webp":"image/webp", "mp4":"video/mp4", "png":"image/png"}[path.rsplit(".",1)[1]], "public, max-age=86400")
+        elif path == "/campaign-module.js":
+            with open(os.path.join(WEB, "js", "60_kampaniya.js"), encoding="utf-8") as f:
+                self._send(200, f.read(), "text/javascript; charset=utf-8")
         elif MODEL_RE.match(path):
             try:
                 with open(os.path.join(WEB, "assets", "models", MODEL_RE.match(path).group(1) + ".glb"), "rb") as f:
@@ -905,7 +916,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 log("шпаргалка:", repr(e))
                 self._send(500, "ошибка шпаргалки (подробности — в журнале сервера)", "text/plain; charset=utf-8")
-        elif path in ("/", "/play.html"):
+        elif path in ("/", "/play.html") or re.fullmatch(r"/(editor|quick|battle|sheet-view|workshop|coop|campaign|characters|settings|worlds)", path):
             try:
                 self._send(200, page_shell(), "text/html; charset=utf-8")
             except Exception as e:  # noqa: BLE001

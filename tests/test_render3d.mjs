@@ -163,7 +163,7 @@ function watertight(B){
 // модель по типу существа (ct из кадра режима кубов) и анимация
 check('модель по типу: гуманоид, зверь, нежить, дракон, слизь; летун — свой вариант; без типа — гуманоид',
   r3ModelKey({ct: 9}) === 'adventurer' && r3ModelKey({ct: 1}) === 'wolf' && r3ModelKey({ct: 1, fl: 1}) === 'bat' && r3ModelKey({ct: 13}) === 'skeleton' &&
-  r3ModelKey({ct: 13, fl: 1}) === 'ghost' && r3ModelKey({ct: 4}) === 'dragon' && r3ModelKey({ct: 11}) === 'slime' && r3ModelKey({}) === 'adventurer' && R3CT.length === 14);
+  r3ModelKey({ct: 13, fl: 1}) === 'ghost' && r3ModelKey({ct: 4}) === 'dragon' && r3ModelKey({ct: 11}) === 'slime' && r3ModelKey({}) === 'adventurer' && r3ModelKey({ct: 14}) === 'ghost' && R3CT.length === 15);
 {
   // у каждой модели — файл и все названные анимации в нём (опечатка в имени клипа — модель стоит столбом)
   let miss = [];

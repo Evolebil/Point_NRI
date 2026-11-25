@@ -72,6 +72,46 @@ class TestEngineProtocol(unittest.TestCase):
         hp = [self.eng.talk({"cmd": "price", "char": dict(KNIGHT, budget=b)})["data"]["hp"] for b in (800, 1600)]
         self.assertLess(hp[0], hp[1])
 
+    def test_slot_prices_by_circle(self):
+        previous_spell, previous_slot = float("inf"), 0
+        for circle in range(1, 10):
+            slots = [0] * 10
+            slots[circle] = 1
+            character = dict(KNIGHT, budget=3200, abilities=[dict(KNIGHT["abilities"][0], slotLvl=circle)],
+                             passives={"slots": slots})
+            items = self.eng.talk({"cmd": "price", "char": character})["data"]["boss"]["items"]
+            spell = next(it["cost"] for it in items if it["cat"] == "ability")
+            slot = next(it["cost"] for it in items if it["label"].startswith("Ячейки заклинаний"))
+            self.assertLess(spell, previous_spell)
+            self.assertGreater(slot, previous_slot)
+            previous_spell, previous_slot = spell, slot
+
+    def test_volume_tree_climb_and_jump(self):
+        import base64
+        flat = ["0" * 12] * 12
+        terrain = {"aw": 12, "ah": 12, "hz": 5, "starts": [[2, 2], [10, 10]],
+                   "tree": flat[:2] + ["000040000000"] + flat[3:],
+                   "wall": flat[:1] + ["001000000000"] + flat[2:]}
+        engine = ps.Engine()
+        try:
+            turn = engine.talk({"cmd": "start", "volume": 1, "side": 0, "seed": 7, "char": KNIGHT,
+                                "map": terrain, "opp": {"mode": "generator", "brain": "rules"}})
+            req = turn["req"]
+            behind_tree = 2 * req["visW"] + 5
+            mask = base64.b64decode(req["vis"])
+            self.assertFalse(mask[behind_tree // 8] & (1 << (behind_tree % 8)))
+            denied = engine.talk({"c": "jump", "x": 11, "y": 0})
+            self.assertEqual(denied["req"]["speedLeft"], req["speedLeft"])
+            self.assertEqual(denied["frames"], [])
+            for height in (3, 2):
+                move = engine.talk({"c": "move", "x": 2, "y": 2, "z": height})
+                self.assertEqual(move["frames"][-1]["f"][0]["z"], height)
+            jump = engine.talk({"c": "jump", "x": 2, "y": 4})
+            self.assertEqual(jump["frames"][-1]["f"][0]["y"], 4)
+            self.assertIn("vis", jump["frames"][-1])
+        finally:
+            engine.kill()
+
     def test_engine_restarts_after_kill(self):
         e = ps.Engine()
         e.talk({"cmd": "price", "char": KNIGHT})

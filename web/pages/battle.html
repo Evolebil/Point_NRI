@@ -1,0 +1,25 @@
+<section class="scene scene-full" id="s3" data-route="battle">
+  <div class="stagebox" id="stagebox">
+    <div class="stage" id="stage">
+      <canvas id="cv"></canvas>
+      <div class="banner" id="banner"></div>
+      <div class="result" id="result"><div class="box"></div></div>
+    </div>
+    <div class="fx fx-me glass pcard" id="cardMe"></div>
+    <div class="fx fx-round glass" id="roundBar"><b>Бой</b></div>
+    <div class="fx fx-enemy glass pcard" id="cardEnemy"></div>
+    <div class="fx fx-log glass" id="logBox">
+      <button class="caps log-toggle" id="logToggle" type="button" aria-expanded="true">Журнал боя</button>
+      <div class="log" id="log"></div>
+    </div>
+    <div class="fx fx-turn glass" id="turn"></div>
+    <div class="fx fx-cam glass">
+      <button class="btn btn-sm" id="camBtn" type="button">Камера: следить</button>
+      <button class="btn btn-sm" id="lookAtCell" type="button" aria-pressed="false">Посмотреть на клетку</button>
+      <button class="btn btn-sm" id="fullBtn" type="button">Во весь экран</button>
+      <button class="btn btn-sm" id="view3dBtn" type="button" hidden>Вид: 3D</button>
+      <button class="btn btn-sm" id="camKindBtn" type="button" hidden title="Камера 3D: тактика, 3-е лицо, 1-е лицо (клавиша V)">🎯 Тактика</button>
+      <span class="small" id="ptrHint" hidden title="Как в Owlbear: точку под мышью видят все в комнате">Держите Q — указка</span>
+    </div>
+  </div>
+</section>

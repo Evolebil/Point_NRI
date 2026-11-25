@@ -126,9 +126,10 @@ enum PrimKind {
     PR_HELP,        // Помощь (действие, v21): враг a рядом со мной — первая атака союзника по нему с преимуществом
     PR_READY,       // Подготовка (действие, v21): враг войдёт в досягаемость — удар оружием реакцией
     PR_ALT,         // высота полёта a (уровни по 5 фт): 5 фт движения за уровень; уход из досягаемости ближника — провоцирует
+    PR_STUDY,
     PR_N
 };
-const char* PRN[PR_N] = {"конец хода", "идти", "атака", "способность", "Рывок", "Уклонение", "Отход", "призыв", "смена оружия", "снять концентрацию", "всплеск", "приказ", "Помощь", "Подготовка", "высота"};
+const char* PRN[PR_N] = {"конец хода", "идти", "атака", "способность", "Рывок", "Уклонение", "Отход", "призыв", "смена оружия", "снять концентрацию", "всплеск", "приказ", "Помощь", "Подготовка", "высота", "Изучить иллюзию"};
 struct Prim {
     int kind = PR_END, a = -1, b = -1, x = -1, y = -1;
 };
@@ -144,6 +145,7 @@ bool beginTurn(World& w, int idx, TurnState& ts) {
     Fighter& me = w.f[idx];
     if (me.hp <= 0 || over(w)) return false;
     g_act = ActInfo{};
+    me.startedTurn = true;
     me.turnX0 = me.x;   // наскок (пакет атомов 2): разбег считается от клетки начала хода
     me.turnY0 = me.y;
     if (me.banished > 0) {   // изгнан: ход пропускается; изгнавший пал — возвращается сразу
@@ -186,9 +188,10 @@ bool beginTurn(World& w, int idx, TurnState& ts) {
             if (cs.sumN > 0 && f.summoner == idx && f.sumSpec == me.concSpec && f.hp > 0) act = true;
         for (auto& f : w.f) {
             for (int k = 1; k < C_N; k++)
-                if (f.cond[k] > 0 && f.condConc[k] == idx + 1) act = true;
+                if ((f.cond[k] > 0 && f.condConc[k] == idx + 1) || (f.wardTicks[k] && f.wardCaster[k] == idx + 1)) act = true;
             if (f.dotRounds > 0 && f.dotConc == idx + 1) act = true;
         }
+        for (const auto& im : w.illusions) if (im.caster == idx && im.concentration) act = true;
         if (!act) me.concSpec = -1;
     }
     if (me.b.regenN && !(me.supp > 0 && (me.b.suppTgt & 1)))
@@ -322,7 +325,7 @@ bool applyPrim0(World& w, int idx, TurnState& ts, const Prim& p, bool check, std
         case PR_MOVE: {
             if (check) {
                 if (p.x < 0 || p.y < 0 || p.x >= w.aw || p.y >= w.ah) return no("Туда нельзя: это за пределами арены.");
-                if (!w.vx && (w.wall[p.y][p.x] || w.pit[p.y][p.x])) return no("Клетка непроходима (стена или ущелье).");   // режим кубов: решает путь по кубам
+                if (!w.vx && ((w.wall[p.y][p.x] && me.b.ctype != CT_GHOST) || w.pit[p.y][p.x])) return no("Клетка непроходима (стена или ущелье).");   // режим кубов: решает путь по кубам
                 if (ts.speed < 5) return no("Движения не осталось.");
                 // опутан, схвачен или парализован посреди хода (реакция, ловушка): бюджет хода уже выдан, но скорость — 0
                 if (speedOf(me) <= 0) return no("Вы не можете двигаться: опутаны, схвачены или парализованы.");
@@ -451,7 +454,7 @@ bool applyPrim0(World& w, int idx, TurnState& ts, const Prim& p, bool check, std
                 // «и на союзника»: цель — союзник в пределах дальности и на виду (иначе — на себя)
                 if (check && p.b >= 0 && p.b != idx) {
                     if (!s.ally) return no("Эта способность только на себя.");
-                    if (p.b >= (int)w.f.size() || w.f[p.b].hp <= 0 || w.f[p.b].team != me.team || w.f[p.b].fled) return no("Нужен живой союзник.");
+                    if (p.b >= (int)w.f.size() || w.f[p.b].hp <= 0 || w.f[p.b].team != me.team || w.f[p.b].fled || w.f[p.b].banished) return no("Нужен союзник на поле боя.");
                     if (distFt(me, w.f[p.b]) > s.range) return no("Союзник дальше дальности способности.");
                     if (!losF(w, me, w.f[p.b])) return no("Союзник не виден: путь закрыт стеной.");
                 }
@@ -474,6 +477,7 @@ bool applyPrim0(World& w, int idx, TurnState& ts, const Prim& p, bool check, std
                     // лечит союзников (пакет атомов 2): целью может быть и союзник
                     const bool allyOk = s.healAlly && p.b >= 0 && p.b < (int)w.f.size() && w.f[p.b].hp > 0 && w.f[p.b].team == me.team;
                     if (!allyOk && !enemyOk(p.b)) return no("Нужна живая известная цель-враг (не очаровавшая вас).");
+                    if (s.targetType >= 0 && w.f[p.b].b.ctype != s.targetType) return no("Тип существа не подходит для этой способности.");
                     if (distFt(me, w.f[p.b]) > specReach(me.b, s)) return no("Цель дальше дальности способности.");
                     if (!losF(w, me, w.f[p.b])) return no("Цель не видна: путь закрыт стеной.");
                 }
@@ -493,6 +497,16 @@ bool applyPrim0(World& w, int idx, TurnState& ts, const Prim& p, bool check, std
             me.dashedNow = true;
             g_act = ActInfo{};
             g_act.type = "dash";
+            return true;
+        }
+        case PR_STUDY: {
+            if (ts.actionUsed || p.a < 0 || p.a >= (int)w.illusions.size() || !canStudy(w,me,w.illusions[p.a]))
+                return no("Для изучения нужна видимая иллюзия и свободное действие.");
+            auto& im = w.illusions[p.a];
+            ts.actionUsed = true;
+            const bool understood = d20(skillAdv(me,SK_INVEST), me.exh >= 1) + me.skill(SK_INVEST) >= im.dc;
+            if (understood) im.recognized.push_back(idx);
+            g_act.type = understood ? "illusion-recognized" : "illusion-studied";
             return true;
         }
         case PR_HELP: {   // Помощь (v21): враг рядом со мной, первая атака союзника по нему — с преимуществом

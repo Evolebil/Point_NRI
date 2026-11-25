@@ -11,8 +11,8 @@
 <script>(function(){var d=document.documentElement,t='system',b='live';try{t=localStorage.getItem('dnd_theme')||'system';b=localStorage.getItem('dnd_bg')||'live';}catch(e){}d.dataset.theme=t;d.dataset.bg=b;})();</script>
 </head>
 <body>
-<!-- Фон меню: карта арены, размытая; «живой» — медленно плывёт (настройка «Фон меню») -->
-<div class="bg" id="bg" aria-hidden="true"><canvas id="bgCv"></canvas><div class="bg-ring"></div><div class="bg-shade"></div></div>
+<!-- Статичный кадр и облёт замка -->
+<div class="bg" id="bg" aria-hidden="true"><canvas id="castleScene" hidden></canvas><video id="castleFallback" muted loop playsinline preload="none" hidden></video><div class="bg-shade"></div></div>
 
 <header class="topbar" id="topbar">
   <button class="logo" id="logo" type="button" data-go="home" title="В главное меню">Горнило Миров</button>
@@ -22,290 +22,37 @@
 <main id="app">
 
 <!-- ============ Главное меню ============ -->
-<section class="scene" id="s0" data-route="home">
-  <nav class="menu" aria-label="Главное меню">
-    <button class="menu-btn menu-btn-main" data-go="quick">Быстрый бой</button>
-    <button class="menu-btn" data-go="characters">Мои персонажи</button>
-    <button class="menu-btn" data-go="coop">Совместный бой</button>
-    <button class="menu-btn" data-go="campaign">Кампания</button>
-    <button class="menu-btn" data-go="workshop">Мастерская</button>
-    <button class="menu-btn" data-go="settings">Настройки</button>
-  </nav>
-  <div class="menu-corner">
-    <button class="icon-btn icon-cap" id="reportBtn" type="button" title="Сообщить о проблеме" aria-label="Сообщить о проблеме"><b aria-hidden="true">!</b><small aria-hidden="true">Проблема</small></button>
-    <button class="icon-btn icon-cap" id="devBtn" type="button" title="Разработчики" aria-label="Разработчики"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor"><circle cx="9" cy="8" r="3.4"/><circle cx="17" cy="9.5" r="2.4"/><path d="M2.5 19.5c.4-3.6 2.8-5.6 6.5-5.6s6.1 2 6.5 5.6zM15.6 13.4c3.3-.4 5.5 1.3 5.9 4.6h-4.3c-.2-1.8-.7-3.4-1.6-4.6z"/></svg><small aria-hidden="true">Авторы</small></button>
-  </div>
-</section>
+<!--PAGE home-->
 
 <!-- ============ Быстрый бой ============ -->
-<section class="scene" id="s2" data-route="quick">
-  <div class="page">
-    <h1 class="page-title">Быстрый бой</h1>
-    <p class="page-sub">Поиск живого соперника. Если за минуту никто не найдётся, придёт бот на столько же очков, сколько у вашего персонажа (в 2D им играет нейросеть, в 3D — бот по правилам).</p>
-    <div class="cols cols-quick">
-      <div class="panel">
-        <h2>1. Сумма очков</h2>
-        <div class="budget-grid" id="qBudgets"></div>
-        <h2 id="qCharHead">2. Персонаж</h2>
-        <div class="list" id="qChars"></div>
-        <button class="btn" id="qCreate" type="button">+ Создать персонажа</button>
-      </div>
-      <aside class="panel">
-        <h2>Как это работает</h2>
-        <p>Вы нажимаете «Найти бой» и ждёте до минуты.</p>
-        <p>Нашёлся игрок с такой же суммой очков — бой начинается.</p>
-        <p>Не нашёлся — вам даётся бот, собранный на те же очки.</p>
-        <p class="muted small">Арена случайная.</p>
-      </aside>
-    </div>
-    <div class="page-foot"><span class="small muted" id="qWhy"></span><button class="btn btn-accent btn-xl" id="qFind" type="button" disabled>Найти бой</button></div>
-  </div>
-  <!-- настройки одиночного боя: их читает движок (30_opponent.js, 51_room.js startGame); игроку не показываются -->
-  <div hidden id="oppLegacy">
-    <select id="oppMode"><option value="net">net</option><option value="generator">generator</option></select>
-    <select id="oppBrain"><option value="net">net</option><option value="rules">rules</option></select>
-    <select id="oppMul"><option value="1" selected>1</option></select>
-    <input type="number" id="seed" value="1"><button id="btnDice" type="button"></button>
-    <select id="mapSel"><option value="">мир</option></select>
-    <div id="worldBox"><input id="wSeed" value="1"><button id="wDice" type="button"></button><select id="wSize"></select><input type="number" id="wW" value="30"><input type="number" id="wH" value="30"><button id="wShow" type="button"></button><span id="wPick"></span></div>
-    <select id="side"><option value="-1" selected>случайно</option><option value="0">A</option><option value="1">B</option></select>
-    <button id="btnFight" type="button"></button><div id="oppErr"></div><div id="oppCard"></div>
-    <div id="worldCard"><canvas id="wCv"></canvas><div id="wLegend"></div></div>
-  </div>
-</section>
+<!--PAGE quick-->
 
 <!-- ============ Мои персонажи ============ -->
-<section class="scene" id="s8" data-route="characters">
-  <div class="page">
-    <h1 class="page-title">Мои персонажи</h1>
-    <div class="cols cols-side">
-      <div class="panel">
-        <h2>Сохранённые персонажи</h2>
-        <div class="list" id="charList"></div>
-      </div>
-      <aside class="panel panel-actions">
-        <button class="btn btn-accent btn-lg" id="charCreate" type="button">Создать персонажа</button>
-        <button class="btn btn-lg" id="charUpload" type="button">Загрузить из файла</button>
-        <button class="btn btn-lg" id="charTemplate" type="button">Выбрать готового</button>
-        <p class="muted small">Персонаж собирается за очки: характеристики, оружие, способности, защита, скорость и черты.</p>
-        <input type="file" id="charFile" accept="application/json,.json" hidden>
-      </aside>
-    </div>
-  </div>
-</section>
+<!--PAGE characters-->
 
 <!-- ============ Совместный бой ============ -->
-<section class="scene" id="s6" data-route="coop">
-  <div class="page" id="rmJoin">
-    <h1 class="page-title center">Совместный бой</h1>
-    <p class="page-sub center">Создайте комнату и отправьте друзьям код — или войдите в чужую по коду.</p>
-    <label class="name-line">Ваше имя <input type="text" id="rmName" maxlength="24" autocomplete="nickname"></label>
-    <div class="cols cols-2 coop-cards">
-      <div class="panel panel-flex">
-        <h2>Создать комнату</h2>
-        <p class="muted">Вы станете хозяином: выберите карту, добавите ботов и начнёте бой. Код из пяти знаков появится сразу после создания.</p>
-        <button class="btn btn-accent btn-lg wide" id="rmCreate" type="button">Создать и войти</button>
-      </div>
-      <div class="panel panel-flex">
-        <h2>Войти по коду</h2>
-        <p class="muted">Код из пяти знаков (латинские буквы и цифры) даёт хозяин комнаты.</p>
-        <div class="code-line"><input type="text" id="rmCode" class="code-input" maxlength="5" autocomplete="off" spellcheck="false" placeholder="XXXXX" aria-label="Код комнаты"><button class="btn btn-accent btn-lg" id="rmEnter" type="button" disabled>Войти</button></div>
-        <p class="small muted" id="rmWhy" aria-live="polite"></p>
-      </div>
-    </div>
-    <p class="muted small center">Комната без действий удаляется через 3 часа. Если вылетели — войдите снова под тем же именем, место сохранится.</p>
-  </div>
-  <div class="page" id="rmBox"></div>
-</section>
+<!--PAGE coop-->
 
 <!-- ============ Кампания ============ -->
-<section class="scene" id="s7" data-route="campaign">
-  <div class="page"><div id="kmpHome"></div><div id="kmpBox"></div></div>
-</section>
+<!--PAGE campaign-->
 
 <!-- ============ Мастерская: карты ============ -->
-<section class="scene scene-full" id="s5" data-route="workshop">
-  <div class="ws-stage" id="meStage"><canvas id="meCv"></canvas><canvas id="meOv" aria-hidden="true"></canvas>
-    <div class="me-hint" id="meHint" aria-live="polite"></div>
-    <div class="me-viewnote" id="meViewNote">Для правки откройте редактор с компьютера</div></div>
-  <div class="ws-top glass">
-    <button class="btn" type="button" data-ws-exit>← Выйти</button>
-    <b class="ws-title" id="meTitle">Моя арена · 20×14</b>
-    <div class="seg" role="group" aria-label="Редактор"><button type="button" class="on" data-ws-to="workshop">Карты</button><button type="button" data-ws-to="worlds">Миры</button></div>
-    <span class="ws-saved" id="meSavedInd" role="status" data-state="ok"><i></i><span>Сохранено</span></span>
-    <span class="grow"></span>
-    <button class="btn btn-icon" id="meUndo" type="button" aria-label="Отменить" title="Отменить (Ctrl+Z)" disabled>↶</button>
-    <button class="btn btn-icon" id="meRedo" type="button" aria-label="Повторить" title="Повторить (Ctrl+Y)" disabled>↷</button>
-    <button class="btn" id="meCheck" type="button">Проверить</button>
-    <button class="btn" id="meExport" type="button">Экспорт</button>
-    <button class="btn" id="meImport" type="button">Импорт</button>
-    <input type="file" id="meFile" accept="application/json,.json" hidden>
-    <button class="btn btn-accent" id="meSave" type="button" title="Сохранить (Ctrl+S)">Сохранить</button>
-  </div>
-  <aside class="ws-left me-tools glass" aria-label="Инструменты"><div id="meToolCol"></div></aside>
-  <aside class="ws-right me-side glass" aria-label="Палитра и параметры карты">
-    <div class="seg me-tabs" role="tablist" aria-label="Панель"><button type="button" role="tab" data-metab="pal" class="on">Палитра</button><button type="button" role="tab" data-metab="map">Карта</button></div>
-    <div class="me-tab" id="mePal">
-      <input type="search" id="meSearch" placeholder="Поиск материала" aria-label="Поиск материала" autocomplete="off">
-      <section class="tool-group" id="meFav" hidden><div class="caps">Избранное</div><div id="meFavList"></div></section>
-      <div id="meTools"></div>
-      <p class="small muted" id="meNone" hidden>Ничего не найдено</p>
-      <p class="small muted">Правый щелчок по материалу — в избранное (до 12).</p>
-    </div>
-    <div class="me-tab" id="meMapTab" hidden>
-      <div class="caps" id="meToolName">Кисть</div>
-      <div class="me-param" data-for="brush erase line">
-        <label class="size-line small">Размер <input type="range" id="meBrush" min="1" max="10" value="1" aria-label="Размер кисти"><b id="meBrushV">1</b></label>
-        <div class="seg" role="group" aria-label="Форма кисти" id="meShape"><button type="button" data-shape="sq" class="on">Квадрат</button><button type="button" data-shape="ci">Круг</button></div>
-      </div>
-      <div class="me-param" data-for="rect"><div class="seg" role="group" aria-label="Прямоугольник" id="meRectMode"><button type="button" data-rm="fill" class="on">Залитый</button><button type="button" data-rm="line">Контур</button></div></div>
-      <div class="me-param" data-for="start"><div class="seg" role="group" aria-label="Сторона" id="meSide"><button type="button" data-side="0" class="on">Старт A</button><button type="button" data-side="1">Старт B</button></div>
-        <p class="small muted">Щелчок — клетка старта, Alt + щелчок — убрать. До 16 клеток на сторону; бой ставит бойца в первую.</p></div>
-      <div class="size-line"><select id="meLevel" aria-label="Кисть: высота (земля, настил)"><option value="0">высота 0 фт</option><option value="1">высота 5 фт</option><option value="2" selected>высота 10 фт</option><option value="3">высота 15 фт</option><option value="4">высота 20 фт</option><option value="5">высота 25 фт</option><option value="6">высота 30 фт</option><option value="7">высота 35 фт</option><option value="8">высота 40 фт</option><option value="9">высота 45 фт</option><option value="10">высота 50 фт</option><option value="11">высота 55 фт</option><option value="12">высота 60 фт</option><option value="13">высота 65 фт</option><option value="14">высота 70 фт</option><option value="15">высота 75 фт</option><option value="16">высота 80 фт</option><option value="17">высота 85 фт</option><option value="18">высота 90 фт</option></select><select id="meTreeH" aria-label="Высота дерева"><option value="2">дерево 10 фт</option><option value="3">дерево 15 фт</option><option value="4" selected>дерево 20 фт</option><option value="5">дерево 25 фт</option><option value="6">дерево 30 фт</option><option value="7">дерево 35 фт</option><option value="8">дерево 40 фт</option></select></div>
-      <div class="caps">Карта</div>
-      <input type="text" id="meName" value="Новая арена" maxlength="60" aria-label="Название карты">
-      <div class="size-line"><input type="number" id="meW" min="5" max="100" value="20" aria-label="Ширина"><span>×</span><input type="number" id="meH" min="5" max="100" value="14" aria-label="Высота"><button class="btn" id="meResize" type="button">OK</button></div>
-      <select id="meTheme" aria-label="Тип местности"><option value="0">дикая местность</option><option value="1">город</option></select>
-      <button class="btn wide" id="meRandom" type="button">Случайная заготовка</button>
-      <button class="btn wide" id="meBorder" type="button">Рамка из стен</button>
-      <button class="btn wide" id="meClear" type="button">Очистить</button>
-      <div id="meMsg"></div>
-      <div class="caps">Мои карты</div>
-      <div class="size-line"><select id="meList" aria-label="Сохранённые карты"></select><button class="btn" id="meDel" type="button" title="Удалить выбранную карту">Удалить</button></div>
-      <details class="ws-help"><summary>Как рисовать</summary><p class="small muted">Инструменты слева (клавиши B, G, R, L, E, I, S, T), материал — в «Палитре». ЛКМ — инструмент, ПКМ — ластик группы материала. [ и ] — размер кисти, пробел + мышь — сдвиг, колесо — масштаб. Высота — шагами по 5 фт: перепад до 10 фт — подъём, больше — обрыв (только по лестнице). Дерево — своей высоты (10–40 фт), на него можно залезть. Настил — второй ярус над землёй.</p></details>
-    </div>
-  </aside>
-  <div class="ws-bottom glass">
-    <span class="grow"></span>
-    <span class="small muted me-coord" id="meCoord"></span>
-    <span class="me-sep" aria-hidden="true"></span>
-    <div class="seg zoom-seg" role="group" aria-label="Масштаб карты"><button type="button" id="meZoomOut" title="Отдалить" aria-label="Отдалить">−</button><span id="meZoomPct" class="zoom-pct">100%</span><button type="button" id="meZoomIn" title="Приблизить" aria-label="Приблизить">+</button></div>
-    <button class="btn" id="meZoomFit" type="button" title="Вписать карту в экран">Вписать</button>
-    <button class="btn me-edit" id="meGridBtn" type="button" aria-pressed="true" title="Линии сетки">Сетка</button>
-  </div>
-</section>
+<!--PAGE workshop-->
 
 <!-- ============ Мастерская: миры ============ -->
-<section class="scene scene-full" id="s10" data-route="worlds">
-  <div class="ws-stage"><canvas id="wdCv" aria-label="Карта мира"></canvas></div>
-  <div class="ws-top glass">
-    <button class="btn" type="button" data-ws-exit>← Выйти</button>
-    <b class="ws-title" id="wdTitle">Мир</b>
-    <div class="seg" role="group" aria-label="Редактор"><button type="button" data-ws-to="workshop">Карты</button><button type="button" class="on" data-ws-to="worlds">Миры</button></div>
-    <span class="ws-saved" id="wdSavedInd" role="status" data-state="ok"><i></i><span>Сохранено</span></span>
-    <span class="grow"></span>
-    <button class="btn" id="wdExport" type="button">Экспорт</button>
-    <button class="btn btn-accent" id="wdSave" type="button">Сохранить мир</button>
-  </div>
-  <aside class="ws-left glass" aria-label="Миры">
-    <div class="caps">Мои миры</div>
-    <div id="wdList" class="ws-list"></div>
-    <div class="caps">Новый мир</div>
-    <input type="text" id="wdName" value="Новый мир" maxlength="40" aria-label="Название мира">
-    <div class="size-line"><input type="number" id="wdSeed" value="47361" min="1" aria-label="Зерно мира"><button class="btn" id="wdRandom" type="button">Случайное</button></div>
-    <select id="wdSize" aria-label="Размер мира"><option value="50">50×50</option><option value="100" selected>100×100</option><option value="200">200×200</option></select>
-    <select id="wdTheme" aria-label="Тема"><option value="0">дикая местность</option><option value="1">город</option></select>
-    <button class="btn btn-accent wide" id="wdCreate" type="button">Создать мир</button>
-  </aside>
-  <aside class="ws-right glass">
-    <div class="caps">Участок для боя</div>
-    <div class="ws-big" id="wdSel">32×20 клеток</div>
-    <p class="small muted">Арены вырезаются из мира: от 5×5 до 100×100. Рамкой выберите нужный участок: тяните рамку или её углы.</p>
-    <button class="btn btn-accent wide" id="wdOpen" type="button" disabled>Открыть в редакторе карт</button>
-  </aside>
-</section>
+<!--PAGE worlds-->
 
 <!-- ============ Настройки ============ -->
-<section class="scene" id="s9" data-route="settings">
-  <div class="page">
-    <h1 class="page-title">Настройки</h1>
-    <div class="panel panel-settings">
-      <div class="set-row"><span class="set-label">Имя игрока</span><b class="set-value" id="setName"></b><button class="btn" id="setNameBtn" type="button">Сменить имя</button></div>
-      <hr>
-      <h2>Оформление</h2>
-      <div class="theme-grid" id="themeGrid"></div>
-      <hr>
-      <h2>Вид боя</h2>
-      <div class="seg seg-lg" id="viewSeg"><button type="button" data-view="2d">2D</button><button type="button" data-view="3d">3D</button></div>
-      <div class="small muted" id="viewNote"></div>
-      <div class="set-row"><span class="set-label">Бойцы в 3D</span><div class="seg" id="tokSeg"><button type="button" data-tok="0">Модели</button><button type="button" data-tok="1">Жетоны</button></div></div>
-      <hr>
-      <h2>Фон меню</h2>
-      <div class="seg seg-lg" id="bgSeg"><button type="button" data-bg="live">Живой</button><button type="button" data-bg="static">Статичный</button></div>
-      <hr>
-      <h2>Правила боя</h2>
-      <div class="set-row"><span class="set-label">Время на ход</span>
-        <select id="turnTime" aria-label="Время на ход"><option value="0" selected>без ограничения</option><option value="60">60 с</option><option value="45">45 с</option><option value="30">30 с</option><option value="20">20 с</option><option value="10">10 с (блиц)</option></select>
-        <span class="small muted">Необязательное правило для одиночного боя: время вышло — ход завершается.</span></div>
-      <div class="set-row"><span class="set-label">Темп соперника</span>
-        <select id="tempo" aria-label="Темп анимации соперника"><option value="1" selected>спокойно</option><option value="1.6">быстро</option><option value="2.6">очень быстро</option></select></div>
-    </div>
-  </div>
-</section>
+<!--PAGE settings-->
 
 <!-- ============ Персонаж (конструктор) ============ -->
-<section class="scene" id="s1" data-route="editor">
-  <div class="ed">
-    <div class="ed-head"><h1 class="ed-title">Персонаж</h1><button class="btn btn-accent" id="edSave" type="button">Сохранить и выйти</button></div>
-    <nav class="ed-nav" aria-label="Разделы персонажа">
-      <div id="stepBar" class="ed-steps"></div>
-      <div class="ed-points">
-        <div class="caps">Очки</div>
-        <div><b class="big tnum" id="spent">0</b> <span class="muted">из <span id="bud"></span> <span id="budgetUnit">очков</span> · <span id="leftLbl"></span></span></div>
-        <details class="ed-buys"><summary>Покупки и итог</summary><div class="meter" id="meter"></div><div id="verdict"></div><div class="items" id="items"></div></details>
-        <div class="ed-file"><button class="btn btn-sm" id="btnExport" type="button">Скачать</button><button class="btn btn-sm" id="btnImport" type="button">Загрузить</button><button class="btn btn-sm" id="toOpp" type="button" hidden disabled></button></div>
-        <input type="file" id="fileImport" accept="application/json,.json" hidden>
-      </div>
-    </nav>
-    <div class="ed-main">
-      <div class="ed-top">
-        <div class="ed-token panel">
-          <div class="token" id="edToken"><span>Токен создаётся автоматически</span></div>
-          <button class="btn btn-sm" id="edPortraitBtn" type="button">Добавить изображение</button>
-          <input type="file" id="edPortraitFile" accept="image/png,image/jpeg,image/webp" hidden>
-        </div>
-        <div class="ed-sum">
-          <div class="bar bar-points"><i id="edPtsBar"></i><span id="edPts">Очки без учёта ХП: —</span></div>
-          <div class="bar bar-hp"><i id="edHpBar"></i><span id="edHp">ХП —</span></div>
-          <div class="ed-stats">
-            <div class="shield" title="Класс доспеха"><svg viewBox="0 0 100 116" aria-hidden="true"><path d="M50 4 94 18v38c0 28-19 46-44 56C25 102 6 84 6 56V18z"/></svg><small>КД</small><b id="edAc">—</b></div>
-            <div class="stat-grid" id="edStats"></div>
-          </div>
-        </div>
-      </div>
-      <div class="ed-body panel"><div id="form"></div></div>
-    </div>
-  </div>
-</section>
+<!--PAGE editor-->
 
 <!-- ============ Цены (шпаргалка, служебная) ============ -->
-<section class="scene" id="s4"><div class="page"><div class="panel" id="sheet"></div></div></section>
+<!--PAGE sheet-->
 
 <!-- ============ Бой ============ -->
-<section class="scene scene-full" id="s3" data-route="battle">
-  <div class="stagebox" id="stagebox">
-    <div class="stage" id="stage">
-      <canvas id="cv"></canvas>
-      <div class="banner" id="banner"></div>
-      <div class="result" id="result"><div class="box"></div></div>
-    </div>
-    <div class="fx fx-me glass pcard" id="cardMe"></div>
-    <div class="fx fx-round glass" id="roundBar"><b>Бой</b></div>
-    <div class="fx fx-enemy glass pcard" id="cardEnemy"></div>
-    <div class="fx fx-log glass" id="logBox">
-      <button class="caps log-toggle" id="logToggle" type="button" aria-expanded="true">Журнал боя</button>
-      <div class="log" id="log"></div>
-    </div>
-    <div class="fx fx-turn glass" id="turn"></div>
-    <div class="fx fx-cam glass">
-      <button class="btn btn-sm" id="camBtn" type="button">Камера: следить</button>
-      <button class="btn btn-sm" id="fullBtn" type="button">Во весь экран</button>
-      <button class="btn btn-sm" id="view3dBtn" type="button" hidden>Вид: 3D</button>
-      <button class="btn btn-sm" id="camKindBtn" type="button" hidden title="Камера 3D: тактика, 3-е лицо, 1-е лицо (клавиша V)">🎯 Тактика</button>
-      <span class="small" id="ptrHint" hidden title="Как в Owlbear: точку под мышью видят все в комнате">Держите Q — указка</span>
-    </div>
-  </div>
-</section>
+<!--PAGE battle-->
 </main>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

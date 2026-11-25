@@ -91,11 +91,7 @@ struct BrainNet : BuildBrain {
     }
 };
 
-static Coef coefNow() {
-    Coef C;
-    for (int a = 0; a < AT_N; a++) C[a] = AD[a].init;
-    return C;
-}
+
 
 // --------------------------------------------------------------------------------------------------------------------------------
 // Веса
@@ -305,7 +301,7 @@ static int trainMain(int argc, char** argv) {
     const int iters = argc > 2 ? std::atoi(argv[2]) : 100, M = argc > 3 ? std::atoi(argv[3]) : 768;
     const uint64_t seed = argc > 4 ? std::strtoull(argv[4], nullptr, 10) : 1;
     const std::string prefix = argc > 5 ? argv[5] : "runs/net/builder";
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     Learner L[2];
     for (int s = 0; s < 2; s++) {
         initNet(L[s].net, seed + 17 * s);
@@ -367,7 +363,7 @@ static int evalMain(int argc, char** argv) {
     BNet net;
     if (argc < 4 || !loadNet(argv[2], net)) return 1;
     const int N = std::atoi(argv[3]);
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     EvalRes r = evalNet(C, net, N, 99);
     std::printf("сеть-Сборщик, %d сборок: против обычного генератора %.2f%% (±%.1f п.п.), способностей на босса %.1f, системных сбоев %.0f, боёв до предохранителя %.0f\n", N,
                 100 * r.vsRandom, 100 * 2 * std::sqrt(0.25 / (2.0 * N)), r.steps, r.failures, r.guard);
@@ -378,7 +374,7 @@ static int showMain(int argc, char** argv) {
     BNet net;
     if (argc < 4 || !loadNet(argv[2], net)) return 1;
     const int n = std::atoi(argv[3]);
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     for (int i = 0; i < n; i++) {
         rng.seed(mix(31, i));
         BrainNet b(&net, nullptr);
@@ -399,7 +395,7 @@ static int replayMain(int argc, char** argv) {
     }
     const long long budget = std::atoll(argv[4]);
     const unsigned seed = (unsigned)std::strtoul(argv[5], nullptr, 10);
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     anyFighterNet();   // загружает сеть-бойца
     Boss boss[2];
     for (int k = 0; k < 2; k++) {
@@ -423,7 +419,7 @@ static int reportMain(int argc, char** argv) {
     BNet na, nb;
     if (argc < 4 || !loadNet(argv[2], na) || !loadNet(argv[3], nb)) return 1;
     const int N = argc > 4 ? std::atoi(argv[4]) : 6000;
-    Coef C = coefNow();
+    Coef C = trainingPrices();
     std::vector<double> fm(AT_N, 0), fr(AT_N, 0);
     double total = 0;
     std::printf("| Бюджет | A против B | A против случайного | B против случайного | способностей (сети / случайный) | средний ИНТ (сети / случайный) | доля ИНТ>=12 (сети / случайный) | сбоев |\n|---|---|---|---|---|---|---|---|\n");

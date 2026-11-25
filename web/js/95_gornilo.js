@@ -418,14 +418,12 @@ function renderSettings(){
 ROUTE_ENTER.settings = renderSettings;
 $('setNameBtn').onclick = () => askName(false);
 $('themeGrid').addEventListener('click', e => { const b = e.target.closest('[data-theme]'); if (!b) return; document.documentElement.dataset.theme = b.dataset.theme; LS.set('dnd_theme', b.dataset.theme); renderSettings(); });
-$('bgSeg').addEventListener('click', e => { const b = e.target.closest('[data-bg]'); if (!b) return; document.documentElement.dataset.bg = b.dataset.bg; LS.set('dnd_bg', b.dataset.bg); renderSettings(); });
+$('bgSeg').addEventListener('click', e => { const b = e.target.closest('[data-bg]'); if (!b) return; document.documentElement.dataset.bg = b.dataset.bg; LS.set('dnd_bg', b.dataset.bg); syncCastle(); renderSettings(); });
 
-// ---- фон меню: настоящая карта арены (по одному зерну), размытая ----
-(async function drawBackground(){
-  const r = await api({cmd:'genmap', seed: 47361, w: 48, h: 30, theme: 0});
-  if (r.type !== 'map') return;
-  const c = $('bgCv'); c.width = 960; c.height = 600; drawMapFit(c, meFromJson(r.map));
-})();
+new MutationObserver(syncCastle).observe(document.body, {attributes:true, attributeFilter:['class']});
+document.addEventListener('visibilitychange', syncCastle);
+matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', syncCastle);
+syncCastle();
 
 // ---- мастерская: миры (участок мира -> карта для редактора) ----
 const WD = {list: [], cur: null, map: null, frame: {x: 0, y: 0, w: 32, h: 20}, snap: '', drag: null, gen: 0};

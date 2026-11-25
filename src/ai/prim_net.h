@@ -359,7 +359,7 @@ static void buildObs(World& w, int idx, const TurnState& ts, Obs& o) {
             for (int j = 0; j < MAXE; j++) {
                 if (o.enemy[j] < 0) continue;
                 const Fighter& e = w.f[o.enemy[j]];
-                if (distFt(me, e) <= specReach(me.b, s) && losF(w, me, e) && !(me.cond[C_CHARM] > 0 && me.charmSrc == o.enemy[j]))
+                if ((s.targetType < 0 || s.targetType == e.b.ctype) && distFt(me, e) <= specReach(me.b, s) && losF(w, me, e) && !(me.cond[C_CHARM] > 0 && me.charmSrc == o.enemy[j]))
                     o.spellTgt[k][j] = any = true;
             }
         o.abilMask[k] = any;

@@ -27,6 +27,15 @@ void takeTurn(World& w, int idx) {
             enemies.push_back((int)i);
     // очарованному некого атаковать — но состояние всё равно идёт и заканчивается
     if (enemies.empty()) {
+        for (int i = 0; i < (int)w.illusions.size(); ++i) {
+            if (!canStudy(w, me, w.illusions[i]) || ts.actionUsed) continue;
+            const Prim study{PR_STUDY, i};
+            recordPrim(idx, study);
+            if (applyPrim(w, idx, ts, study, true)) {
+                endOfTurn(me);
+                return;
+            }
+        }
         // туман войны: никого не видно — идёт к месту, где последний раз видел врага (самые свежие сведения, ближе)
         int bk = -1;
         for (size_t i = 0; i < w.f.size() && i < w.known[me.team].size(); i++) {
@@ -221,7 +230,7 @@ void takeTurn(World& w, int idx) {
         if (!trySelf([](const Spec& s) { return s.teleFt > 0; })) trySelf([](const Spec& s) { return s.hide; });
     }
     if (br.selfSimple && hpFrac < me.pol->v[PO_HEAL])
-        trySelf([](const Spec& s) { return s.healN > 0; });
+        trySelf([](const Spec& s) { return s.healN > 0 || s.healB > 0; });
     // союзники (v21): лечение раненому союзнику (меньше половины хитов) и приказ атаковать — тому, кто достаёт врага
     if (br.selfSimple)
         for (size_t i = 0; i < me.b.abil.size(); i++) {
@@ -230,7 +239,7 @@ void takeTurn(World& w, int idx) {
             const int t = pickAlly(w, me, s);
             if (t < 0 || t == idx) continue;
             const Fighter& g = w.f[t];
-            const bool want = s.cmdAtk || ((s.healN || s.healB) && g.hp * 2 < g.maxHp) || (s.tempN && g.temp <= 0 && g.hp * 2 < g.maxHp);
+            const bool want = s.cmdAtk || (s.cleanse && g.cond[s.cleanse]) || (s.wardCond && !g.wardTicks[s.wardCond]) || ((s.healN || s.healB) && g.hp * 2 < g.maxHp) || (s.tempN && g.temp <= 0 && g.hp * 2 < g.maxHp);
             if (!want) continue;
             recordPrim(idx, {PR_SPELL, (int)i, t});
             doSpec(w, me, (int)i, t);

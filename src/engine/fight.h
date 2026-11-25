@@ -174,6 +174,7 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
         w.hazDC = std::clamp(11 + (int)(avgHp / 60), 11, 20);
     }
     w.dyn.clear();
+    w.illusions.clear();
     for (int t = 0; t < MAXT; t++) w.cmd[t] = -1;
     w.chaseOn = false;
     w.chaseSeen = true;
@@ -331,10 +332,35 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
         for (size_t k = 0; k < g_evPending.size(); k++) fr += (k ? "," : "") + g_evPending[k];
         fr += "]";
         if (actor >= 0 && g_act.gx >= 0) fr += ",\"cell\":[" + std::to_string(g_act.gx) + "," + std::to_string(g_act.gy) + "]";
+        if (!w.illusions.empty()) {
+            fr += ",\"illusions\":[";
+            for (size_t i = 0; i < w.illusions.size(); ++i) {
+                const auto& im = w.illusions[i];
+                fr += std::string(i ? ",[" : "[") + std::to_string(im.x) + "," + std::to_string(im.y) + "," + std::to_string(im.z) + "]";
+            }
+            fr += "]";
+        }
         if (!w.dyn.empty()) {
             fr += ",\"dyn\":[";
             for (size_t k = 0; k < w.dyn.size(); k++) fr += (k ? "," : "") + std::string("[") + std::to_string(w.dyn[k][0]) + "," + std::to_string(w.dyn[k][1]) + "," + std::to_string(w.dyn[k][2]) + "]";
             fr += "]";
+        }
+        if (w.vx && g_human.ask) {
+            if (!g_human.multi && g_human.idx >= 0) {
+                const int eye = actor >= 0 && humanSeat(w, actor) == 0 ? actor : g_human.idx;
+                fr += ",\"vis\":" + jq(visMask(w,w.f[eye].team,&w.f[eye]));
+            } else if (g_human.multi) {
+                fr += ",\"seatVis\":{";
+                bool first = true;
+                for (int i=0; i<(int)g_human.seats.size(); ++i) {
+                    const int seat = g_human.seats[i];
+                    if (seat < 0) continue;
+                    const int eye = actor >= 0 && humanSeat(w,actor) == seat ? actor : i;
+                    fr += std::string(first ? "" : ",") + jq(std::to_string(seat)) + ":" + jq(visMask(w,w.f[eye].team,&w.f[eye]));
+                    first = false;
+                }
+                fr += "}";
+            }
         }
         fr += ",\"f\":[";
         g_evPending.clear();
@@ -370,6 +396,9 @@ int fightRoster(const std::vector<RosterEntry>& R, std::vector<std::string>* log
     for (int r = 0; r < g_maxRounds && !over(w); r++) {
         rr = r + 1;
         g_curRound = rr;
+        w.illusions.erase(std::remove_if(w.illusions.begin(), w.illusions.end(), [&](const Illusion& im) {
+            return im.until <= rr;
+        }), w.illusions.end());
         for (int t = 0; t < nT; t++)   // предохранитель тумана: 5 раундов не знает ни одного врага — слышит, где они
             if (rr - w.knownRound[t] >= 5)
                 for (size_t k = 0; k < w.f.size(); k++)
@@ -503,5 +532,3 @@ int fight(const Boss& A, const Boss& B, std::vector<std::string>* log = nullptr,
           const Pol* polA = nullptr, const Pol* polB = nullptr) {
     return fightRoster({{&A, 0}, {&B, 1}}, log, mapJsonOut, polA, polB);
 }
-
-const char* CTN[14] = {"аберрация", "зверь", "небожитель", "конструкт", "дракон", "элементаль", "фея", "исчадие", "великан", "гуманоид", "монстр", "слизь", "растение", "нежить"};

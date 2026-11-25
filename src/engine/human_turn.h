@@ -44,17 +44,23 @@ std::string describe(const Spec& s);
 // обзора, только к клетке: слепое зрение в радиусе, тьма — лишь тёмным или истинным зрением на нужную дальность, дым и
 // туман зон закрывают (и саму клетку в облаке), ночью неосвещённое без тёмного зрения — лишь на 30 фт.
 // Битовая маска по строкам арены в base64.
-static std::string visMask(const World& w, int team) {
+static std::string visMask(const World& w, int team, const Fighter* observer = nullptr) {
     std::vector<unsigned char> bits((w.aw * w.ah + 7) / 8, 0);
+    VoxWorld surface;
+    if (!w.vx) voxFromWorld(surface, w);
+    const VoxWorld& volume = w.vx ? *w.vx : surface;
     for (auto& v : w.f) {
-        if (v.hp <= 0 || v.team != team || v.fled) continue;
+        if ((observer && &v != observer) || v.hp <= 0 || v.team != team || v.fled) continue;
         for (int y = 0; y < w.ah; y++)
             for (int x = 0; x < w.aw; x++) {
                 const int k = y * w.aw + x;
                 if (bits[k >> 3] >> (k & 7) & 1) continue;
                 const int d = distFC(w, v, x, y);
-                bool ok = v.b.blindsight >= d;
-                if (!ok && !v.cond[C_BLIND] && losFC(w, v, x, y))
+                const int targetZ = w.vx && v.z < VZ0+w.height[v.y][v.x] ? v.z : VZ0 + w.height[y][x];
+                const bool clear = !illusionLine(w,v,x,y,targetZ-VZ0+.8) && vxRay(volume, v.x+.5, v.y+.5, VZ0+zF(w,v)+vxEyeH(v,fpN(v)), x+.5,y+.5,targetZ+.8,
+                                         [](unsigned char m){ return MAT[m].seeThru ? 0 : 100; }) < 100;
+                bool ok = clear && v.b.blindsight >= d;
+                if (!ok && clear && !v.cond[C_BLIND])
                     ok = (!w.dark[y][x] || v.b.dv >= d || v.b.truesight >= d) && !fogLine(w, v.x, v.y, zF(w, v), x, y, zAt(w, x, y)) &&
                          (w.day || d <= 30 || v.b.dv >= d || v.b.truesight >= d || litCell(w, x, y));
                 if (ok) bits[k >> 3] |= (unsigned char)(1 << (k & 7));
@@ -101,7 +107,7 @@ static std::string pathTreeJson(const World& w, const Fighter& me) {
 
 static std::string humanRequest(World& w, int idx, const TurnState& ts, const std::string& msg) {
     const Fighter& me = w.f[idx];
-    std::string o = "{\"me\":" + std::to_string(idx) + ",\"round\":" + std::to_string(g_curRound) + ",\"speedLeft\":" + std::to_string(ts.speed) +
+    std::string o = std::string("{\"reactionFree\":") + (canReact(me) ? "true" : "false") + ",\"me\":" + std::to_string(idx) + ",\"round\":" + std::to_string(g_curRound) + ",\"speedLeft\":" + std::to_string(ts.speed) +
                     ",\"speed0\":" + std::to_string(ts.speed0) + ",\"actionFree\":" + (ts.actionUsed ? "false" : "true") +
                     ",\"bonusFree\":" + (ts.bonusUsed ? "false" : "true") + ",\"surgeLeft\":" + std::to_string(me.surgeLeft) + ",\"conc\":" + std::to_string(me.concSpec) + ",\"msg\":" + jq(msg) +
                     ",\"afraid\":" + (me.cond[C_FRIGHT] ? "true" : "false") + ",\"disengB\":" + (me.b.disengB ? "true" : "false") +
@@ -116,7 +122,7 @@ static std::string humanRequest(World& w, int idx, const TurnState& ts, const st
         else if (!canPay(me, ts, specAbility(me.b, (int)i).cost, &no)) why = no;
         o += std::string(i ? "," : "") + "{\"k\":" + std::to_string(i) + ",\"title\":" + jq(specTitle(s)) + ",\"desc\":" + jq(describe(s)) + ",\"avail\":" + (why.empty() ? "true" : "false") + ",\"why\":" + jq(why) +
              ",\"bonus\":" + (s.bonus ? "true" : "false") + ",\"react\":" + std::to_string(s.react) + ",\"self\":" + (s.self ? "true" : "false") + ",\"ally\":" + (s.ally ? "true" : "false") + ",\"ground\":" + (s.ground ? "true" : "false") +
-             ",\"wallLen\":" + std::to_string(s.wallLen) + ",\"range\":" + std::to_string(specReach(me.b, s)) + ",\"radius\":" + std::to_string(s.radius) +
+             ",\"targetType\":" + std::to_string(s.targetType) + ",\"wallLen\":" + std::to_string(s.wallLen) + ",\"range\":" + std::to_string(specReach(me.b, s)) + ",\"radius\":" + std::to_string(s.radius) +
              ",\"tele\":" + std::to_string(s.teleFt) + ",\"uses\":" + std::to_string(me.uses[i] >= UNL ? -1 : me.uses[i]) + ",\"slot\":" + std::to_string(s.slotLvl) +
              (w.vx ? ",\"shape\":" + std::to_string(s.shape) + ",\"sel\":" + (s.selective ? "1" : "0") : std::string()) + "}";   // режим кубов: предпросмотр области
     }
@@ -141,17 +147,26 @@ static std::string humanRequest(World& w, int idx, const TurnState& ts, const st
             }
     o += "]";
     if (me.b.fly && w.vx) o += std::string(",\"vfly\":") + (canStayAloft(me) ? "1" : "0");   // режим кубов: летит в любой куб воздуха (высоту цели выбирают клавишами R/F)
+    o += ",\"illusions\":[";
+    bool firstImage = true;
+    for (size_t i = 0; i < w.illusions.size(); ++i) {
+        const auto& im = w.illusions[i];
+        if (!canStudy(w,me,im)) continue;
+        o += std::string(firstImage ? "[" : ",[") + std::to_string(i) + "," + std::to_string(im.x) + "," + std::to_string(im.y) + "]";
+        firstImage = false;
+    }
+    o += "]";
     if (me.b.fly && !w.vx)   // летун: высота (уровни по 5 фт; режим кубов — летит ходом в куб), потолок над ним, может ли сейчас держаться в воздухе
         o += ",\"fly\":{\"alt\":" + std::to_string(me.alt) + ",\"max\":" + std::to_string(maxAltAt(w, me, me.x, me.y, me.up)) + ",\"can\":" + (canStayAloft(me) ? "1" : "0") + "}";
     if (w.vx) o += vxPathTreeJson(w, me, std::clamp(2 * ts.speed, 30, 120));   // режим кубов: дерево путей по кубам (вдвое дальше остатка)
     else if (fpFull(me) == 1) o += pathTreeJson(w, me);   // пути под мышью
-    o += ",\"vis\":\"" + visMask(w, me.team) + "\",\"visW\":" + std::to_string(w.aw) + ",\"visH\":" + std::to_string(w.ah);   // туман войны на карте
+    o += ",\"vis\":\"" + visMask(w, me.team, &me) + "\",\"visW\":" + std::to_string(w.aw) + ",\"visH\":" + std::to_string(w.ah);   // туман войны на карте
     o += ",\"enemies\":[";
     bool first = true;
     for (size_t e = 0; e < w.f.size(); e++) {
         const Fighter& E = w.f[e];
         if (E.hp <= 0 || E.team == me.team || E.fled || !isKnown(w, me.team, (int)e)) continue;   // туман войны: только известные
-        o += std::string(first ? "" : ",") + "{\"i\":" + std::to_string(e) + ",\"dist\":" + std::to_string(distFt(me, E)) +
+        o += std::string(first ? "" : ",") + "{\"i\":" + std::to_string(e) + ",\"ctype\":" + std::to_string(E.b.ctype) + ",\"dist\":" + std::to_string(distFt(me, E)) +
              ",\"seen\":" + (teamSees(w, me.team, E) ? "true" : "false") +
              ",\"los\":" + (losF(w, me, E) ? "true" : "false") +
              ",\"charm\":" + (me.cond[C_CHARM] > 0 && me.charmSrc == (int)e ? "true" : "false") + "}";
@@ -183,6 +198,42 @@ static void humanTurn(World& w, int idx) {
         if (c == "end" || c.empty()) break;
         Prim p;
         g_vxTz = g_vxGz = -1;   // цель по высоте — только у этой команды хода (ошибка разбора не должна оставить её боту)
+        if (c == "jump") {
+            const int x = cmd["x"].num(-1), y = cmd["y"].num(-1);
+            if (x < 0 || y < 0 || x >= w.aw || y >= w.ah) { msg = "За пределами поля."; continue; }
+            const int dist = 5 * std::max(std::abs(x-me.x), std::abs(y-me.y));
+            if (!dist || dist > std::max(5, me.b.stats[STR]) || dist > ts.speed || speedOf(me) <= 0 || me.cond[C_FRIGHT]) {
+                msg = "Не хватает движения или дальности для прыжка."; continue;
+            }
+            const int l = w.vx ? cmd["z"].num(vxTopZ(w,x,y)) : 0;
+            if (w.vx && (l < 1 || l >= w.vx->sz)) { msg = "Высота за пределами поля."; continue; }
+            const bool occupiedLanding = std::any_of(w.f.begin(), w.f.end(), [&](const Fighter& g) { return touchesAt(w,me,x,y,l,g); });
+            const bool fits = w.vx ? vxStand(w,me,x,y,l) : nodeOK(w,me,x,y,l) && w.door[y][x] != 1;
+            if (!fits || std::abs(nodeZ(w,x,y,l)-zF(w,me)) > 1 || occupiedLanding || !losZ(w,me.x,me.y,zF(w,me),x,y,nodeZ(w,x,y,l))) {
+                msg = "Место приземления занято или путь закрыт."; continue;
+            }
+            if (w.vx) {
+                // Проверяем объём тела вдоль дуги, включая потолок над местом отталкивания.
+                const int steps = 2 * (dist / 5);
+                bool clear = true;
+                for (int i = 1; i < steps && clear; ++i) {
+                    const double t = (double)i / steps;
+                    const int px = (int)std::round(me.x + t * (x - me.x));
+                    const int py = (int)std::round(me.y + t * (y - me.y));
+                    const int pz = (int)std::round(me.z + t * (l - me.z) + 4*t*(1-t));
+                    for (int dy = 0; dy < fpN(me) && clear; ++dy)
+                        for (int dx = 0; dx < fpN(me) && clear; ++dx)
+                            for (int dz = 0; dz < fpN(me) && clear; ++dz)
+                                clear = w.vx->in(px+dx,py+dy,pz+dz) && !MAT[w.vx->at(px+dx,py+dy,pz+dz)].solid;
+                }
+                if (!clear) { msg = "На траектории прыжка препятствие."; continue; }
+            }
+            const PStep landing{x,y,l};
+            ts.speed -= moveToCell(w,me,x,y,dist,&landing);
+            g_act = ActInfo{}; g_act.type = "jump";
+            if (g_human.emit) g_human.emit(g_curRound, idx, 0);
+            continue;
+        }
         if (c == "move") {
             p.kind = PR_MOVE;
             p.x = cmd["x"].num(-1);
@@ -208,6 +259,7 @@ static void humanTurn(World& w, int idx) {
         } else if (c == "dash") p.kind = PR_DASH;
         else if (c == "dodge") p.kind = PR_DODGE;
         else if (c == "help") { p.kind = PR_HELP; p.a = cmd["tgt"].num(-1); }   // Помощь против врага вплотную (v21)
+        else if (c == "study") { p.kind = PR_STUDY; p.a = cmd["i"].num(-1); }
         else if (c == "ready") { p.kind = PR_READY; p.a = cmd["k"].num(-1); p.b = cmd["trig"].num(1); }   // Подготовка (v21): что (−1 оружие, k способность) и условие (1/2)
         else if (c == "disengage") { p.kind = PR_DISENGAGE; p.a = cmd["bonus"].flag() ? 1 : 0; }
         else if (c == "surge") p.kind = PR_SURGE;
@@ -294,15 +346,25 @@ static void humanTurn(World& w, int idx) {
             continue;
         }
         else { msg = "Неизвестная команда."; continue; }
-        const int ox = me.x, oy = me.y;
+        const int ox = me.x, oy = me.y, oz = me.z;
+        const bool held = me.climbing;
+        if (p.kind == PR_MOVE && w.vx && p.x == me.x && p.y == me.y && g_vxTz >= 1 && g_vxTz < w.vx->sz && std::abs(g_vxTz-me.z) == 1) {
+            me.climbing = true;
+            if (!vxStep(w,me,me.x,me.y,me.z,p.x,p.y,g_vxTz)) {
+                me.climbing = held;
+                msg = "На этой высоте нет опоры.";
+                continue;
+            }
+        }
         g_straight = p.kind == PR_MOVE;   // путь игрока — по прямой из дерева путей (то же, что показано под мышью)
         const bool applied = applyPrim(w, idx, ts, p, true, &msg);
         g_straight = false;
         g_vxTz = g_vxGz = -1;
-        if (!applied) continue;
+        if (!applied) { me.climbing = held; continue; }
+        if (w.vx && MAT[w.vx->at(me.x,me.y,me.z-1)].solid) me.climbing = false;
         switch (p.kind) {
             case PR_MOVE:
-                if (me.x == ox && me.y == oy) msg = "Не удалось пройти: путь закрыт или слишком далеко.";
+                if (me.x == ox && me.y == oy && me.z == oz) msg = "Не удалось пройти: путь закрыт или слишком далеко.";
                 else if ((me.x != p.x || me.y != p.y) && !occupied(w, p.x, p.y, &me)) msg = "Дошли не до конца: не хватило движения или путь закрыт.";
                 break;
             case PR_DASH: msg = "Рывок: движения стало вдвое больше."; break;
@@ -317,6 +379,16 @@ static void humanTurn(World& w, int idx) {
             default: break;
         }
         if (g_human.emit) g_human.emit(g_curRound, idx, 0);
+        if (p.kind == PR_SPELL) {
+            const int count = std::clamp(cmd["n"].num(1), 1, 20);
+            for (int i = 1; i < count && !over(w) && me.hp > 0; ++i) {
+                g_vxGz = w.vx ? cmd["z"].num(-1) : -1;
+                const bool cast = applyPrim(w, idx, ts, p, true, &msg);
+                g_vxGz = -1;
+                if (!cast) break;
+                if (g_human.emit) g_human.emit(g_curRound, idx, 0);
+            }
+        }
     }
     endOfTurn(me);
     g_act = ActInfo{};

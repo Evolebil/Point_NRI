@@ -381,7 +381,7 @@ int main() {
             for (int y = 0; y < 10; y++) rows += std::string(y ? "," : "") + "\"" + std::string("00000") + "1" + "0000\"";
             rows += "]";
             const std::string cut = "{\"aw\":10,\"ah\":10,\"wall\":" + rows + "}";
-            CHECK("U185", !parseCustomMap(parseJson(cut), m, err));
+            CHECK("U185", parseCustomMap(parseJson(cut), m, err));
         }
         // тема приводится к 0/1
         CHECK("U186", parseCustomMap(parseJson(mapJson(10, 10, ",\"theme\":7")), m, err) && m.theme == 1);
@@ -575,6 +575,98 @@ int main() {
         CHECK("U233", w0 > n * 0.3 && w0 < n * 0.7);   // стороны не перекошены
     }
 
+    SUITE("Типы существ, вселение и бестелесность");
+    {
+        World w;
+        w.aw = w.ah = 5;
+        w.f.resize(2);
+        Fighter& ghost = w.f[0];
+        Fighter& ally = w.f[1];
+        ghost.b.ctype = CT_GHOST;
+        ghost.x = ghost.y = ally.y = 1;
+        ally.x = 2;
+        CHECK_EQ("possession: ally strike", possessionBonus(w, ally), 2);
+        CHECK_EQ("possession: spent reaction", possessionBonus(w, ally), 0);
+        ghost.reactionUsed = false;
+        ally.team = 1;
+        CHECK_EQ("possession: enemy", possessionBonus(w, ally), 0);
+        ally.team = 0;
+        ghost.banished = 1;
+        CHECK_EQ("possession: banished", possessionBonus(w, ally), 0);
+        ghost.banished = 0;
+        ally.x = 4;
+        CHECK_EQ("possession: range", possessionBonus(w, ally), 0);
+        w.wall[1][2] = true;
+        CHECK("phase: 2D", stepOK(w, ghost, 1,1,0, 2,1,0) && !stepOK(w, ally, 1,1,0, 2,1,0));
+        VoxWorld volume;
+        voxFromWorld(volume, w);
+        w.vx = &volume;
+        CHECK("phase: voxel wall", vxStep(w, ghost, 1,1,VZ0, 2,1,VZ0) && !vxStep(w, ally, 1,1,VZ0, 2,1,VZ0));
+        CHECK("phase: world bounds", !vxStand(w, ghost, -1,1,VZ0));
+        for (int id = 0; id < CT_COUNT - 1; ++id) {
+            Fighter f;
+            f.b.ctype = id;
+            const auto& type = creatureType(id);
+            if (type.skill >= 0) CHECK_EQ(type.name, f.skill(type.skill), f.mod(SKST[type.skill]) + 2);
+            if (type.save >= 0) CHECK_EQ(type.name, saveBonus(f, type.save), f.mod(type.save) + 2);
+            if (type.ward >= 0) {
+                f.hp = f.maxHp = 20;
+                CHECK_EQ(type.name, hurt(f, 5, type.ward, true), 3);
+            }
+        }
+        Spec heal;
+        heal.self = true;
+        heal.healB = 7;
+        CHECK("flat healing", specTitle(heal) == "Исцеление" && describe(heal).find("лечение 7") != std::string::npos);
+    }
+
+    SUITE("Атомы конструктора SRD");
+    {
+        World w;
+        w.aw = w.ah = 8;
+        w.f.resize(3);
+        Fighter& caster = w.f[0];
+        Fighter& target = w.f[1];
+        Fighter& observer = w.f[2];
+        caster.x = 1;
+        target.x = 4;
+        observer.x = 5;
+        target.team = observer.team = 1;
+        caster.y = target.y = observer.y = 2;
+        target.maxHp = 10;
+        target.hp = 9;
+        Rule rule;
+        rule.when = W_WOUNDED;
+        CHECK("blood frenzy: one wound", ruleOn(w,caster,&target,rule,true,true));
+        target.hp = 10;
+        CHECK("blood frenzy: full", !ruleOn(w,caster,&target,rule,true,true));
+        rule.when = W_FOEFIRST;
+        CHECK("ambush before turn", ruleOn(w,caster,&target,rule,true,true));
+        target.startedTurn = true;
+        CHECK("ambush after turn", !ruleOn(w,caster,&target,rule,true,true));
+        rule.when = W_FOETYPE;
+        rule.warg = CT_GHOST;
+        target.b.ctype = CT_GHOST;
+        CHECK("type restriction", ruleOn(w,caster,&target,rule,true,true) && !ruleOn(w,caster,nullptr,rule,true,true));
+        Spec spell;
+        spell.slotLvl = 1;
+        spell.dmgN = spell.upDice = spell.upTargets = spell.targets = 1;
+        caster.slotLeft[3] = 1;
+        const Spec scaled = castAtSlot(caster,spell);
+        CHECK("upcast level three", scaled.dmgN == 3 && scaled.targets == 3 && scaled.slotLvl == 3);
+        CHECK("upcast preserves base and slot", spell.dmgN == 1 && caster.slotLeft[3] == 1);
+        w.illusions.push_back({3,2,0,0,-100,10,false,{0}});
+        TurnState ts;
+        CHECK("illusion caster", !canStudy(w,caster,w.illusions[0]));
+        CHECK("investigation", applyPrim(w,1,ts,{PR_STUDY,0},true) && ts.actionUsed);
+        CHECK("individual knowledge", !canStudy(w,target,w.illusions[0]) && canStudy(w,observer,w.illusions[0]));
+        w.dark[2][3] = true;
+        CHECK("study requires vision", !canStudy(w,observer,w.illusions[0]));
+        target.wardTicks[C_FRIGHT] = 1;
+        CHECK("ward prevents fear", !applyCond(target,C_FRIGHT,2,-1,0,false));
+        endOfTurn(target);
+        CHECK("ward expires", applyCond(target,C_FRIGHT,2,-1,0,false));
+    }
     // ---------------------------------------------------------------- итог
     std::printf("\n==========================================\nИтого: PASS %d, FAIL %d\n", g_pass, g_fail);
     for (auto& f : g_failed) std::printf("  провал: %s\n", f.c_str());

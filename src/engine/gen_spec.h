@@ -277,7 +277,9 @@ enum BPar {
     BP_GRABRESTR, BP_GRABDOT, BP_WSILVER, BP_LIGHTP, BP_TRIGCHARGE, BP_RUNEW, BC_RUNEW,
     BP_UNARM = BC_RUNEW + 3, BP_UNARMSTAT, BP_RECHAFTER,                                                            // пакет атомов 3
     BC_MAG,                        // числа во весь технический диапазон — по 24 корзины на MagF
-    BP_N = BC_MAG + 24 * MG_N
+    BC_CREATURE_TYPE = BC_MAG + 24 * MG_N,
+    BC_SRD_WHEN = BC_CREATURE_TYPE + CT_COUNT,
+    BP_UPDICE = BC_SRD_WHEN + W_N, BP_UPTARGETS, BP_ILLUSION, BP_CLEANSE, BP_WARD_COND, BP_BREAK_DAMAGE, BP_TARGET_TYPE, BP_N
 };
 #define MAGID(f) (BC_MAG + 24 * (f))
 // технические пределы игрока (те же, что MAX_DICE/MAX_COUNT/MAX_FT/MAX_ROUNDS в char_spec.h): генератор Сборщика — в них же
@@ -636,7 +638,7 @@ long long rulePrice(const Rule& r, const Boss& b, const Coef& C) {
         case E_DISATK: e = -P(AT_E_DISATK); break;          // недостаток: очки возвращаются
         case E_ACMINUS: e = -P(AT_E_ACMINUS) * r.n; break;
     }
-    e *= C[AT_W_ALWAYS + r.when];
+    e *= C[whenAtom(r.when)];
     if (r.allyR > 0 && e > 0) e *= 1 + C[AT_RULEAURA] * tierN(TR_AURARAD, r.allyR / 5.0);   // аура: и на союзников рядом (возврат за недостаток аура не растит)
     return e >= 0 ? (long long)std::ceil(e) : -(long long)std::ceil(-e);
 }
@@ -645,12 +647,14 @@ inline void markRule(const Rule& r, AMask& m) {
     static const int EA[E_N] = {AT_E_ADVATK, AT_E_DMG, AT_E_AC, AT_E_DISVSME, AT_E_ADVVSME, AT_E_RES, AT_E_RES, AT_E_ADVSAVE, AT_E_SAVEB, AT_E_ATKDIE, AT_E_SAVEDIE, AT_E_DMGRED, AT_E_PIERCE, AT_E_NOCOVER, AT_E_POWER, AT_E_NOOA,
                                 AT_E_SKILLADV, AT_E_DISATK, AT_E_ACMINUS};
     if (r.allyR > 0) m |= ONE << AT_RULEAURA;
-    m |= ONE << (AT_W_ALWAYS + r.when);
+    m |= ONE << (whenAtom(r.when));
     m |= ONE << EA[r.what];
     if (r.what == E_DMG && r.once) m |= ONE << AT_E_ONCE;
 }
 std::string describeRule(const Rule& r) {
     std::string w = r.when == W_FOECOND ? std::string("у противника «") + CN[r.warg] + "»" : WN[r.when];
+    if (r.when == W_FOETYPE) w += std::string(" «") + creatureType(r.warg).name + "»";
+    if (r.when == W_SELFCOND) w += std::string(" «") + CN[r.warg] + "»";
     std::string e = EN[r.what];
     if (r.what == E_DMG) e = "+" + std::to_string(r.n) + "к" + std::to_string(r.s) + " к урону оружия" + (r.once ? ", раз в ход" : "");
     if (r.what == E_AC) e = "+" + std::to_string(r.n) + " КД";
@@ -832,6 +836,13 @@ void markSpec(const Spec& s, AMask& m) {
     if (s.preCast && s.self) set(AT_PRECAST);
     if (s.immSave && s.delivery == 1 && !s.self) set(AT_IMMSAVE);
     if (s.noRepeat) set(AT_NOREPEAT);
+    if (s.cleanse) set(AT_CLEANSE);
+    if (s.wardCond) set(AT_WARD_COND);
+    if (s.breakOnDamage) set(AT_BREAK_DAMAGE);
+    if (s.targetType >= 0) set(AT_TARGET_TYPE);
+    if (s.illusionRounds) set(AT_ILLUSION);
+    if (s.upDice) set(AT_UPDICE);
+    if (s.upTargets) set(AT_UPTARGETS);
     if (s.cmdAtk) set(AT_CMDATK);
     if (s.protect) set(AT_PROTECT);
     if (s.strike) set(AT_STRIKE);
@@ -1122,5 +1133,12 @@ Spec randSpec(int sub) {
             s.uses = us;
         }
     }
+    if (s.self && !s.react && !s.counter) {
+        if (bern(BP_CLEANSE,.08)) s.cleanse = 1 + catN(BC_COND,C_N-1);
+        if (bern(BP_WARD_COND,.08)) { s.wardCond = 1 + catN(BC_COND,C_N-1); s.wardRounds = 1 + irand(5); }
+    }
+    if (s.cond && !s.self && bern(BP_BREAK_DAMAGE,.12)) s.breakOnDamage = true;
+    if (!s.self && !s.ground && !s.onHit && bern(BP_TARGET_TYPE,.06)) s.targetType = catN(BC_CREATURE_TYPE,CT_COUNT);
+    if (s.ground && !s.conc && bern(BP_ILLUSION, .12)) s.illusionRounds = 1 + irand(5);
     return s;
 }

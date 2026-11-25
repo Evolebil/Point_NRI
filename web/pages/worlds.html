@@ -1,0 +1,28 @@
+<section class="scene scene-full" id="s10" data-route="worlds">
+  <div class="ws-stage"><canvas id="wdCv" aria-label="Карта мира"></canvas></div>
+  <div class="ws-top glass">
+    <button class="btn" type="button" data-ws-exit>← Выйти</button>
+    <b class="ws-title" id="wdTitle">Мир</b>
+    <div class="seg" role="group" aria-label="Редактор"><button type="button" data-ws-to="workshop">Карты</button><button type="button" class="on" data-ws-to="worlds">Миры</button></div>
+    <span class="ws-saved" id="wdSavedInd" role="status" data-state="ok"><i></i><span>Сохранено</span></span>
+    <span class="grow"></span>
+    <button class="btn" id="wdExport" type="button">Экспорт</button>
+    <button class="btn btn-accent" id="wdSave" type="button">Сохранить мир</button>
+  </div>
+  <aside class="ws-left glass" aria-label="Миры">
+    <div class="caps">Мои миры</div>
+    <div id="wdList" class="ws-list"></div>
+    <div class="caps">Новый мир</div>
+    <input type="text" id="wdName" value="Новый мир" maxlength="40" aria-label="Название мира">
+    <div class="size-line"><input type="number" id="wdSeed" value="47361" min="1" aria-label="Зерно мира"><button class="btn" id="wdRandom" type="button">Случайное</button></div>
+    <select id="wdSize" aria-label="Размер мира"><option value="50">50×50</option><option value="100" selected>100×100</option><option value="200">200×200</option></select>
+    <select id="wdTheme" aria-label="Тема"><option value="0">дикая местность</option><option value="1">город</option></select>
+    <button class="btn btn-accent wide" id="wdCreate" type="button">Создать мир</button>
+  </aside>
+  <aside class="ws-right glass">
+    <div class="caps">Участок для боя</div>
+    <div class="ws-big" id="wdSel">32×20 клеток</div>
+    <p class="small muted">Арены вырезаются из мира: от 5×5 до 100×100. Рамкой выберите нужный участок: тяните рамку или её углы.</p>
+    <button class="btn btn-accent wide" id="wdOpen" type="button" disabled>Открыть в редакторе карт</button>
+  </aside>
+</section>

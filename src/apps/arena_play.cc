@@ -173,8 +173,9 @@ int main() {
             const Boss& B = side == 0 ? opp : me;
             const std::string myName = cmd["char"]["name"].str("Безымянный");
             // мозг соперника: нейросеть-боец (если веса загружены) или правило-бот по его ИНТ
-            g_voxMode = cmd["vox"].flag(false);   // режим кубов (3D, этап 1б): против игрока — правило-бот (сеть переобучается позже, ТЗ №12)
-            const bool netBrain = !g_voxMode && cmd["opp"]["brain"].str("net") == "net" && anyFighterNet();
+            g_volGen = true;
+            g_voxMode = cmd["vox"].flag(false) || cmd["volume"].flag(false);   // режим кубов (3D, этап 1б): против игрока — правило-бот (сеть переобучается позже, ТЗ №12)
+            const bool netBrain = !cmd["vox"].flag(false) && cmd["opp"]["brain"].str("net") == "net" && anyFighterNet();
             g_forceNetMask = netBrain ? (1 << (1 - side)) : 0;
             const std::string enemyBrain = netBrain ? "нейросеть-боец (GRU)" : "правило-бот";
             std::vector<std::string> frames;
@@ -205,6 +206,7 @@ int main() {
             };
             const int res = fight(A, B, &frames, &mapJson);
             g_human.idx = -1;
+            g_volGen = false;
             g_human.ask = nullptr;
             g_forceNetMask = 0;
             g_customMap = CustomMap();
@@ -288,12 +290,13 @@ int main() {
             };
             g_human.seats = seat;
             g_human.multi = true;
-            g_voxMode = cmd["vox"].flag(false);   // режим кубов, если хозяин комнаты выбрал вид 3D; ботами тогда — правило-бот
+            g_volGen = true;
+            g_voxMode = cmd["vox"].flag(false) || cmd["volume"].flag(false);   // режим кубов, если хозяин комнаты выбрал вид 3D; ботами тогда — правило-бот
             g_human.idx = -1;
             for (size_t i = 0; i < seat.size(); i++)
                 if (seat[i] >= 0 && g_human.idx < 0) g_human.idx = (int)i;
             g_forceNetMask = 0;
-            if (anyFighterNet() && !g_voxMode)   // сеть-боец кубов не знает (переобучение — ТЗ №12)
+            if (anyFighterNet() && !cmd["vox"].flag(false))   // сеть-боец кубов не знает (переобучение — ТЗ №12)
                 for (size_t i = 0; i < brains.size() && i < 31; i++)
                     if (seat[i] < 0 && brains[i] == "net") g_forceNetMask |= (1 << i);
             World* wp = nullptr;
@@ -312,6 +315,7 @@ int main() {
                 return reply;
             };
             const int res = fightRoster(R, &frames, &mapJson, nullptr, nullptr);
+            g_volGen = false;
             g_human.ask = nullptr;
             g_human.seats.clear();
             g_human.multi = false;

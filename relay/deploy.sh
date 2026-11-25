@@ -7,6 +7,7 @@ rm -rf public
 mkdir -p public/vendor public/assets/models
 cp ../web/vendor/three-r159.min.js ../web/vendor/three-r159-gltf.js public/vendor/
 cp ../web/assets/models/*.glb public/assets/models/
+cp ../web/assets/castle-flight.webp ../web/assets/castle.mp4 public/assets/
 # заголовки кэша: имена библиотек содержат версию — на год; модели — на сутки (как отдаёт play_server.py)
 cat > public/_headers <<'H'
 /vendor/*

@@ -531,6 +531,7 @@ function frameLog(i){
       const res = e.crit ? '<b>КРИТ!</b>' : (e.d20 === 1 ? 'единица — промах' : (e.hit ? 'попал' : (e.ac >= 0 && e.d20 + e.b >= e.ac ? 'промах (парировал)' : 'промах')));
       evs.push(`<span class="ev ${e.hit ? '' : 'mut'}">🎲 ${nameOf(e.who, f)} → ${nameOf(e.tgt, f)}: к20 <b>${e.d20}</b> ${e.b >= 0 ? '+' : '−'} ${Math.abs(e.b)} = <b>${e.d20 + e.b}</b>${e.ac >= 0 ? ' против КД ' + e.ac : ''} — ${res}${adv}</span>`);
     }
+    else if (e.k === 'possess') evs.push(`<span class="ev good">${nameOf(e.who, f)} вселяется в ${nameOf(e.tgt, f)} на один удар (+2 к попаданию и урону)</span>`);
     else if (e.k === 'save'){   // спасбросок: к20 + бонус против СЛ
       const st = ['СИЛ', 'ЛОВ', 'ТЕЛ', 'ИНТ', 'МДР', 'ХАР'][e.stat] || '';
       evs.push(e.auto ? `<span class="ev bad">🛡 ${nameOf(e.who, f)}: спасбросок ${st} против СЛ ${e.dc} — автоматический провал (оглушён или парализован)</span>`
@@ -650,6 +651,14 @@ function buildTerrain(){
     t.fillStyle = 'rgba(160,220,120,.25)'; t.beginPath(); t.arc(cx - r*.3, cy - r*.4, r*.45, 0, 7); t.fill();
     t.strokeStyle = 'rgba(0,0,0,.4)'; t.lineWidth = Math.max(1, TC*.05); t.beginPath(); t.arc(cx, cy - TC*.04, r, 0, 7); t.stroke();
     if (TC >= 22){ t.fillStyle = 'rgba(255,255,255,.85)'; t.font = `700 ${Math.round(TC*.3)}px system-ui`; t.textAlign = 'center'; t.textBaseline = 'middle'; t.fillText(th * 5, cx, cy - TC*.04); }   // высота в футах
+  }
+  for (const [x,y,z,column] of MAP.vx || []) {
+    const surface = 2 + hAt(x,y) - 1;
+    if (column[surface-z] !== '0') continue;
+    t.fillStyle = '#221c1b';
+    t.fillRect(x*TC,y*TC,TC,TC);
+    t.fillStyle = '#a6957d';
+    for (let i=1;i<=3;i++) t.fillRect((x+i*.17)*TC,(y+i*.22)*TC,TC*(1-i*.2),TC*.09);
   }
   if (TC >= 12){ t.strokeStyle = 'rgba(255,255,255,.05)'; t.lineWidth = 1; t.beginPath();
     for (let x=0;x<=AW;x++){ t.moveTo(x*TC+.5, 0); t.lineTo(x*TC+.5, AH*TC); }
@@ -802,6 +811,15 @@ function render(now){
   ctx.fillStyle = '#0a0c11'; ctx.fillRect(x0 - 10, y0 - 10, aw + 20, ah + 20);
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(terrain, x0, y0, aw, ah);
+  if (MAP.vox && typeof G !== 'undefined'){
+    const viewer = FR[curIdx].f[G.req ? G.req.me : G.me];
+    if (viewer && viewer.z < 2 + lv36(MAP.height,viewer.x,viewer.y)){
+      ctx.fillStyle='#292723'; ctx.fillRect(x0,y0,aw,ah);
+      ctx.fillStyle='#908374';
+      for (const [x,y,z,col] of MAP.vx || [])
+        if (col[viewer.z-z] === '0') ctx.fillRect(PX(x),PY(y),cell,cell);
+    }
+  }
   ctx.strokeStyle = 'rgba(242,193,78,.75)'; ctx.lineWidth = 3; ctx.setLineDash([10,6]); ctx.strokeRect(x0 - 6, y0 - 6, aw + 12, ah + 12); ctx.setLineDash([]);
   if (MAP.water){
     const tm = now / 700, vx0 = Math.max(0, Math.floor((0 - x0) / cell)), vx1 = Math.min(AW, Math.ceil((W - x0) / cell)), vy0 = Math.max(0, Math.floor((0 - y0) / cell)), vy1 = Math.min(AH, Math.ceil((H - y0) / cell));
@@ -839,6 +857,10 @@ function render(now){
         if (cell >= 18 && (x + y) % 3 === 0){ ctx.fillStyle = 'rgba(255,240,200,.85)'; ctx.font = `700 ${Math.round(cell * .3)}px system-ui`; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText('▲' + d * 5, px + 2, py + 2); }
       } }
   }
+  for (const [x,y] of fr.illusions || []){
+    ctx.save(); ctx.fillStyle = 'rgba(137,109,196,.55)'; ctx.fillRect(PX(x),PY(y),cell,cell);
+    ctx.strokeStyle = '#e1cfff'; ctx.setLineDash([3,3]); ctx.strokeRect(PX(x)+1,PY(y)+1,cell-2,cell-2); ctx.restore();
+  }
   if (fr.dyn){   // изменения арены от способностей: временные стены, местность, тьма
     for (const d of fr.dyn){
       const px = PX(d[0]), py = PY(d[1]);
@@ -854,8 +876,6 @@ function render(now){
       else { ctx.fillStyle = 'rgba(6,8,28,.55)'; ctx.fillRect(px, py, cell + .6, cell + .6); }
     }
   }
-  // туман войны на карте (игра за персонажа): клетки, которых сторона игрока не видит, затемнены; маска приходит с ходом
-  if (typeof fogCanvas === 'function'){ const fc = fogCanvas(); if (fc){ ctx.save(); ctx.imageSmoothingEnabled = cell < 24; ctx.globalAlpha = .62; ctx.drawImage(fc, x0, y0, aw, ah); ctx.restore(); } }
   if (fr.chase){
     const a = posAt(0, t), b = posAt(1, t);
     if (a && b){ ctx.save(); ctx.strokeStyle = 'rgba(242,193,78,.9)'; ctx.setLineDash([10,7]); ctx.lineDashOffset = -now / 35; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(PX(a.x + .5), PY(a.y + .5)); ctx.lineTo(PX(b.x + .5), PY(b.y + .5)); ctx.stroke(); ctx.restore(); }
@@ -873,7 +893,7 @@ function render(now){
   const order = fr.f.map((f, k) => k).sort((a, b) => (fr.f[a].kind < 2) - (fr.f[b].kind < 2));
   order.forEach(k => {
     const f = fr.f[k], p = posAt(k, t); if (!p) return;
-    if (f.hid && typeof G !== 'undefined') return;   // туман войны: игрок этого бойца не видит (v21)
+    if ((f.hid || f.ns) && typeof G !== 'undefined') return;   // туман войны: игрок этого бойца не видит (v21)
     const half = (f.n || 1) / 2;   // крупный: центр его квадрата
     let px = PX(p.x + half), py = PY(p.y + half), alpha = f.hid ? .3 : 1;   // в реплее боя сети — полупрозрачный: её сторона его не знает
     if (f.fled === 1 && FR[prevIdx].f[k] && !FR[prevIdx].f[k].fled && stepT0 > -1e8){   // шагнул за край арены
@@ -932,6 +952,18 @@ function render(now){
   });
   if (typeof overlayDraw === 'function') overlayDraw(now);
   if (typeof ptrDraw === 'function') ptrDraw(now);   // указки игроков комнаты
+  if (typeof fogCanvas === 'function') {
+    const mask = fogCanvas();
+    if (!mask && G.active && !G.over){
+      ctx.fillStyle = '#000'; ctx.fillRect(x0,y0,aw,ah);
+    } else if (mask) {
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalAlpha = 1;
+      ctx.drawImage(mask, x0, y0, aw, ah);
+      ctx.restore();
+    }
+  }
   }
   } catch (e) { if (!render.err){ render.err = 1; console.error('ошибка рисования', e); } }
   if (playing && tt >= 1 && now >= holdUntil){

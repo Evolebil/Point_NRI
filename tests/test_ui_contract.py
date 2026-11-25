@@ -16,9 +16,11 @@ class TestUiContract(unittest.TestCase):
     def test_theme_picker_and_palettes_are_in_page(self):
         for value in ("system", "dark", "light", "red-black", "red-navy", "forest"):
             with self.subTest(theme=value):
-                self.assertIn(f'<option value="{value}"', self.page)
+                self.assertIn(f"['{value}',", self.page)
                 self.assertIn(f'data-theme="{value}"', self.page)
-        self.assertIn("localStorage.setItem('dnd_theme', value)", self.page)
+        self.assertIn('id="themeGrid"', self.page)
+        self.assertIn('class="theme-tile" data-theme="${v}"', self.page)
+        self.assertIn("LS.set('dnd_theme', b.dataset.theme)", self.page)
 
     def test_additional_damage_starts_with_one_and_adds_explicitly(self):
         self.assertIn("const rows = Math.min(filled, dt.length)", self.page)

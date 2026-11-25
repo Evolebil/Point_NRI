@@ -75,8 +75,7 @@ int main(int argc, char** argv) {
         budgetArg > 0 ? std::vector<long long>{budgetArg} : std::vector<long long>{200, 400, 800, 1600, 3200, 6400};
     int nB = (int)BL.size(), perB = std::max(1, fights / nB);
 
-    Coef C;
-    for (int a = 0; a < AT_N; a++) C[a] = AD[a].init;
+    Coef C = trainingPrices();
     Coef start = C;
     std::printf("=== Арена Боссов v6: ОДНА таблица цен на все бюджеты ===\nБюджеты:");
     for (auto b : BL) std::printf(" %lld", b);
@@ -399,6 +398,13 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 3; i++) {
         Boss b = makeBoss(BL[nB / 2], C, true);
         std::printf("Босс %d\n%s", i + 1, describeBoss(b).c_str());
+    }
+    if (const char* path = std::getenv("DND_TRAIN_PRICES_OUT")) {
+        std::ofstream out(path);
+        out.precision(17);
+        for (int a = 0; a < AT_N; ++a) out << C[a] << '\t' << AD[a].name << '\n';
+        out.close();
+        if (!out) { std::perror(path); return 1; }
     }
     return 0;
 }

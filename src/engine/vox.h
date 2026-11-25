@@ -15,9 +15,7 @@ enum VoxMat : unsigned char {
     VX_COVER, VX_RUBBLE, VX_LAVA, VX_ACID, VX_ICE, VX_FORCE, VX_LADDER, VX_N
 };
 // hp 0 — неразрушим (дно мира, жидкости, барьер способности); solid — опора и преграда движению; seeThru — обзор сквозь
-// (листва и вода — пока насквозь: частичное укрытие листвой — этап 2); liquid — плавание (этап 2). Ствол дерева — тонкий, в углу
-// клетки (решение владельца 2026-11-16): не твёрдый — мимо него проходят, обзор и области не держит, даёт полукрытие (vxCover),
-// хиты есть — рубится; по нему лезут (vxByTree). Лестница (этап 4: на крышу дома) — как ствол: не твёрдая, лезет любой
+// Ствол пропускает движение и вместе с листвой блокирует взгляд. Лестница остаётся прозрачной.
 struct MatInfo { const char* name; short hp; unsigned char ac; bool solid, seeThru, liquid; };
 // КД и хиты — как у объектов сейчас (DMG «Объекты»: дерево КД 15, камень КД 17): кубик стены — OBJ_WALL_HP, крепкой —
 // OBJ_STRONG_HP, ствола — OBJ_TREE_HP, двери — OBJ_DOOR_HP, настила — DECK_HP; земля и песок — мягче камня
@@ -26,7 +24,7 @@ constexpr MatInfo MAT[VX_N] = {
     {"земля", 27, 10, true, false, false},       {"трава", 27, 10, true, false, false},
     {"песок", 18, 8, true, false, false},        {"камень", OBJ_WALL_HP, 17, true, false, false},
     {"крепкий камень", OBJ_STRONG_HP, 19, true, false, false},
-    {"дерево", OBJ_TREE_HP, 15, false, true, false}, {"листва", 5, 10, true, true, false},
+    {"дерево", OBJ_TREE_HP, 15, false, false, false}, {"листва", 5, 10, true, false, false},
     {"вода", 0, 0, false, true, true},           {"доски", DECK_HP, 15, true, false, false},
     {"дверь", OBJ_DOOR_HP, 15, true, false, false}, {"укрытие", OBJ_CLIMB_HP, 17, true, true, false},
     {"обломки", 9, 10, true, false, false},      {"лава", 0, 0, false, true, true},
@@ -196,6 +194,9 @@ inline int vxTopZ(const World& w, int x, int y) {
 }
 // Тело f — m×m×m кубов от куба ног z клетки (x, y) (рост — vxEyeH в world.h: до среднего 1 куб, большой 2 …): все кубы на
 // арене и в воздухе или жидкости (копателю — и в копаемом; dug — тело в земле: копатель держится за неё)
+inline bool ghostPasses(const Fighter& f, unsigned char m) {
+    return f.b.ctype == CT_GHOST && (m == VX_STONE || m == VX_STRONG || m == VX_DOOR || m == VX_PLANK);
+}
 inline bool vxBodyIn(const World& w, const Fighter& f, int x, int y, int z, int m, bool* dug = nullptr) {
     const VoxWorld& v = *w.vx;
     if (x < 0 || y < 0 || x + m > w.aw || y + m > w.ah || z < 1 || z + m > v.sz) return false;
@@ -203,7 +204,7 @@ inline bool vxBodyIn(const World& w, const Fighter& f, int x, int y, int z, int 
         for (int dx = 0; dx < m; dx++)
             for (int k = 0; k < m; k++) {
                 const unsigned char c = v.at(x + dx, y + dy, z + k);
-                if (!MAT[c].solid) continue;
+                if (!MAT[c].solid || ghostPasses(f, c)) continue;
                 if (!(f.b.burrowS && vxDiggable(c))) return false;
                 if (dug) *dug = true;
             }
@@ -238,11 +239,11 @@ inline bool vxStandEx(const World& w, const Fighter& f, int x, int y, int z, boo
                 }
                 sup = z <= top;
             }
-            if (!sup)   // лазун держится за любую стену; любой — за дерево (ствол в своей клетке, крона рядом: лезут, как в 2D)
+            if (!sup)   // для лазания нужна опора рядом со стоящим бойцом
                 for (int k = 0; k < 5 && !sup; k++) {
                     static const int DX[5] = {0, 1, -1, 0, 0}, DY[5] = {0, 0, 0, 1, -1};
                     const unsigned char a = v.at(cx + DX[k], cy + DY[k], z), b = v.at(cx + DX[k], cy + DY[k], z + 1);
-                    sup = vxTreeMat(a) || vxTreeMat(b) || (f.b.climbS && (MAT[a].solid || MAT[b].solid));
+                    sup = vxTreeMat(a) || vxTreeMat(b) || ((f.climbing || f.b.climbS) && (MAT[a].solid || MAT[b].solid));
                 }
         }
     return sup;
@@ -260,7 +261,7 @@ inline bool vxNoSky(const World& w, const Fighter& f) {
             bool roof = false;
             for (int z = f.z + std::max(1, n); z < v.sz && !roof; z++) {
                 const unsigned char m = v.at(f.x + dx, f.y + dy, z);
-                roof = MAT[m].solid && !MAT[m].seeThru;
+                roof = m != VX_LEAF && MAT[m].solid && !MAT[m].seeThru;
             }
             if (!roof) return false;
         }
@@ -280,12 +281,13 @@ inline bool vxByTree(const World& w, int x, int y, int z) {
 inline bool vxStep(const World& w, const Fighter& f, int x, int y, int z, int nx, int ny, int nz) {
     const int dx = nx - x, dy = ny - y, dz = nz - z;
     if (std::abs(dx) > 1 || std::abs(dy) > 1 || (!dx && !dy && !dz) || !vxStand(w, f, nx, ny, nz)) return false;
-    if (!dx && !dy) return std::abs(dz) == 1 && (f.b.fly || f.b.climbS || f.b.burrowS || w.ladder[y][x] || vxByTree(w, x, y, std::max(z, nz)));
+    if (!dx && !dy) return std::abs(dz) == 1 && (f.climbing || f.b.fly || f.b.climbS || f.b.burrowS || w.ladder[y][x] || vxByTree(w,x,y,std::max(z,nz)));
     if (std::abs(dz) > (f.b.fly ? 1 : 2)) return false;
     if (dx && dy && !f.b.burrowS) {
         const VoxWorld& v = *w.vx;
         const int zz = std::max(z, nz);
-        if (MAT[v.at(x + dx, y, zz)].solid || MAT[v.at(x, y + dy, zz)].solid) return false;
+        const auto a = v.at(x + dx, y, zz), b = v.at(x, y + dy, zz);
+        if ((MAT[a].solid && !ghostPasses(f, a)) || (MAT[b].solid && !ghostPasses(f, b))) return false;
     }
     return true;
 }
@@ -422,8 +424,7 @@ std::string vxPathTreeJson(const World& w, const Fighter& f, int maxFt) {
 // Луч по кубам (Amanatides–Woo) от точки a к точке b (координаты в кубах); кубы самих концов не считаются. f(материал) —
 // код куба на луче: 0 — пропустить, ≥ 100 — преграда (дальше не идём). Возвращает наибольший код
 template <class P>
-int vxRay(const World& w, double ax, double ay, double az, double bx, double by, double bz, P&& f) {
-    const VoxWorld& v = *w.vx;
+int vxRay(const VoxWorld& v, double ax, double ay, double az, double bx, double by, double bz, P&& f) {
     const double ddx = bx - ax, ddy = by - ay, ddz = bz - az;
     int x = (int)std::floor(ax), y = (int)std::floor(ay), z = (int)std::floor(az), best = 0;
     const int ex = (int)std::floor(bx), ey = (int)std::floor(by), ez = (int)std::floor(bz);
@@ -442,10 +443,10 @@ int vxRay(const World& w, double ax, double ay, double az, double bx, double by,
     return best;
 }
 // Обзор лучом по кубам: от глаз (низ куба ног z + e0, vxEyeH: средний — 0,8 куба) клетки (x0, y0) к глазам в (x1, y1);
-// закрывают твёрдые непрозрачные кубы (листва, укрытие, лёд — насквозь), кроме кубов самих концов
+// закрывают непрозрачные кубы, включая ствол и крону, кроме кубов самих концов
 bool vxLos(const World& w, int x0, int y0, int z0, int x1, int y1, int z1, double e0, double e1) {
-    return vxRay(w, x0 + 0.5, y0 + 0.5, z0 + e0, x1 + 0.5, y1 + 0.5, z1 + e1,
-                 [](unsigned char m) { return MAT[m].solid && !MAT[m].seeThru ? 100 : 0; }) < 100;
+    return vxRay(*w.vx, x0 + 0.5, y0 + 0.5, z0 + e0, x1 + 0.5, y1 + 0.5, z1 + e1,
+                 [](unsigned char m) { return !MAT[m].seeThru ? 100 : 0; }) < 100;
 }
 // середина тела над низом куба ног (в кубах): половина роста — крошечный 0,125, маленький 0,25, средний 0,5, большой 1 …
 inline double vxMidH(const Fighter& f, int n) { return f.b.size == 0 ? .125 : (f.b.size == 1 ? .25 : .5 * n); }
@@ -480,7 +481,7 @@ inline bool vxAreaCube(const World& w, int shape, int size, const Fighter& me, i
     vxAreaOrigin(shape, me, cx, cy, cz, ox, oy, oz);
     if (!vxInShape3(shape, size, ox, oy, oz, cx + .5, cy + .5, cz + .5, px + .5, py + .5, pz + .5)) return false;
     if (vxBlocksEffect(w.vx->at(px, py, pz))) return false;
-    return vxRay(w, ox, oy, oz, px + .5, py + .5, pz + .5, [](unsigned char m) { return vxBlocksEffect(m) ? 100 : 0; }) < 100;
+    return vxRay(*w.vx, ox, oy, oz, px + .5, py + .5, pz + .5, [](unsigned char m) { return vxBlocksEffect(m) ? 100 : 0; }) < 100;
 }
 // Область задевает бойца e (центр — куб (cx, cy, cz)): прежний бой — по клеткам (inShapeF); режим кубов — хоть один куб его
 // тела в форме и без полного укрытия от точки начала
@@ -505,7 +506,7 @@ inline int vxAreaZ(const World& w, int cx, int cy) {
 // камень, стена и прочее твёрдое (лёд, барьер) — укрытие на три четверти (+5); полное укрытие — цель не видна (обзор)
 inline int vxCover(const World& w, const Fighter& a, const Fighter& d) {
     const int na = fpN(a), nd = fpN(d);
-    return vxRay(w, a.x + na / 2.0, a.y + na / 2.0, a.z + vxEyeH(a, na), d.x + nd / 2.0, d.y + nd / 2.0, d.z + vxMidH(d, nd),
+    return vxRay(*w.vx, a.x + na / 2.0, a.y + na / 2.0, a.z + vxEyeH(a, na), d.x + nd / 2.0, d.y + nd / 2.0, d.z + vxMidH(d, nd),
                  [](unsigned char m) { return m == VX_WOOD || m == VX_LEAF || m == VX_COVER ? 2 : (!MAT[m].solid ? 0 : 5); });
 }
 // копатель прошёл: кубы его тела, которые были землёй, стали воздухом (ход остаётся; событие vox в кадр)

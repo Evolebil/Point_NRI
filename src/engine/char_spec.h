@@ -188,6 +188,29 @@ static bool specFromJson(const Json& j, Spec& s, std::string& err) {
         for (size_t q = 0; q < k; q++) dup = dup || s.more[q].type == d.type;
         if (dup) { err = std::string("доп. урон: тип «") + DTN[d.type] + "» уже есть в способности, нужен другой"; return false; }
     }
+    s.cleanse = j["cleanse"].num(0);
+    s.wardCond = j["wardCond"].num(0);
+    s.wardRounds = j["wardRounds"].num(0);
+    s.breakOnDamage = j["breakOnDamage"].flag();
+    s.targetType = j["targetType"].num(-1);
+    if (!inRange(s.cleanse, 0, C_N-1, "снимаемое состояние", err) ||
+        !inRange(s.wardCond, 0, C_N-1, "защита от состояния", err) ||
+        !inRange(s.wardRounds, 0, MAX_ROUNDS, "раундов защиты", err) ||
+        !inRange(s.targetType, -1, CT_COUNT-1, "тип цели", err)) return false;
+    if ((s.cleanse || s.wardCond) && !s.self) { err = "Для снятия состояния и защиты выберите способность на себя или союзника"; return false; }
+    if (s.wardCond && !s.wardRounds) { err = "Укажите длительность защиты"; return false; }
+    if (s.breakOnDamage && (!s.cond || s.self)) { err = "Укажите состояние, которое снимается уроном"; return false; }
+    if (s.targetType >= 0 && (s.self || s.onHit || s.ground)) { err = "Ограничение по типу цели доступно для направленных способностей"; return false; }
+    s.illusionRounds = j["illusionRounds"].num(0);
+    if (!inRange(s.illusionRounds, 0, MAX_ROUNDS, "длительность иллюзии", err)) return false;
+    if (s.illusionRounds && (!s.ground || s.self || s.onHit)) { err = "Иллюзия ставится на клетку"; return false; }
+    s.upDice = j["upDice"].num(0);
+    s.upTargets = j["upTargets"].num(0);
+    if (!inRange(s.upDice, 0, MAX_DICE, "кубики за уровень ячейки", err) ||
+        !inRange(s.upTargets, 0, 10, "цели за уровень ячейки", err)) return false;
+    if ((s.upDice || s.upTargets) && (s.slotLvl < 1 || s.slotLvl >= 9)) { err = "Для усиления нужна базовая ячейка 1–8 круга"; return false; }
+    if (s.upDice && !(s.self ? s.healN : s.dmgN)) { err = "Укажите базовые кубики урона или лечения"; return false; }
+    if (s.upTargets && (s.self || s.radius || s.ground || s.onHit)) { err = "Дополнительные цели доступны у направленной способности"; return false; }
     if (s.wallLen > 0 && s.wallRounds <= 0) { err = "барьер: укажите число раундов"; return false; }
     if (s.wallLen > 0) s.ground = true;   // барьер всегда ставится на клетку
     if (s.ground && s.self) { err = "способность «по клетке» не может быть «на себя»"; return false; }
@@ -227,15 +250,15 @@ static bool specFromJson(const Json& j, Spec& s, std::string& err) {
         s.more.clear();
         return true;
     }
-    const bool selfEffect = s.healN || s.tempN || s.acB || s.sbAmt || s.buffN || s.darkR || s.invisN || s.hide || s.teleFt ||
+    const bool selfEffect = s.cleanse || s.wardCond || s.healN || s.healB || s.tempN || s.acB || s.sbAmt || s.buffN || s.darkR || s.invisN || s.hide || s.teleFt ||
                             s.images || s.globeLvl || s.flyRounds || s.extraTurns || s.growRounds || s.lightR;   // + пакет атомов 2
     const bool hostile = s.dmgN || s.cond || s.pushFt || s.dotN || s.pullFt || s.dispel || s.banishN > 0;   // доп. урон (more) бывает только вместе с основным
     if (s.self && !selfEffect) { err = "способность «на себя» без эффекта"; return false; }
-    const bool zone = s.ground && (s.wallLen > 0 || (s.terr && s.radius > 0));
+    const bool zone = s.ground && (s.illusionRounds || s.wallLen > 0 || (s.terr && s.radius > 0));
     if (!s.self && !hostile && !zone) { err = "способность по цели без урона, состояния, толчка, урона по времени, барьера или местности"; return false; }
     if (s.ground && hostile && s.radius < 5) { err = "способность по клетке с уроном или состоянием требует радиус области от 5 фт"; return false; }
     if (zone && !hostile) { s.delivery = 0; s.dmgN = 0; s.more.clear(); }
-    if (!s.self && (s.healN || s.tempN || s.acB || s.sbAmt || s.buffN || s.darkR || s.invisN || s.hide || s.teleFt)) { err = "эффекты на себя нельзя смешивать со способностью по цели (сделайте две способности)"; return false; }
+    if (!s.self && (s.healN || s.healB || s.tempN || s.acB || s.sbAmt || s.buffN || s.darkR || s.invisN || s.hide || s.teleFt)) { err = "эффекты на себя нельзя смешивать со способностью по цели (сделайте две способности)"; return false; }
     if (s.ally && (!s.self || s.teleFt || s.hide || s.darkR)) { err = "на союзника — только лечение, временные хиты, баффы и невидимость"; return false; }
     if (s.self) { if (!s.ally) s.range = 5; s.radius = 0; s.delivery = 0; s.dmgN = 0; s.cond = 0; s.pushFt = 0; s.dotN = 0; s.more.clear(); }
     if (s.pushFt == 0) s.collN = 0;
@@ -275,7 +298,7 @@ static bool bossFromJson(const Json& j, Boss& b, long long& budget, int& hpWante
     b.wHeavy = w["heavy"].flag();          // размеры (v21): тяжёлое оружие; размер существа 0–5
     b.size = j["size"].num(2);
     b.ctype = j["ctype"].num(9);   // тип существа (v21)
-    if (!inRange(b.ctype, 0, 13, "тип существа", err)) return false;
+    if (!inRange(b.ctype, 0, CT_COUNT - 1, "тип существа", err)) return false;
     if (!inRange(b.size, 0, 5, "размер", err)) return false;
     b.wTwoH = w["twoHanded"].flag();       // доспехи и щит (v21): двуручное, универсальное (грань двумя руками)
     b.wVers = w["versatile"].num(0);
@@ -420,7 +443,8 @@ static bool bossFromJson(const Json& j, Boss& b, long long& budget, int& hpWante
         for (auto& r : b.rules) {
             if (!inRange(r.when, 0, W_N - 1, "условие правила", err) || !inRange(r.what, 0, E_N - 1, "эффект правила", err)) return false;
             if (!ruleAllowed(r.when, r.what)) { err = std::string("правило «") + WN[r.when] + " → " + EN[r.what] + "»: резист и спасброски — только с условием о себе"; return false; }
-            if (r.when == W_FOECOND && !inRange(r.warg, 1, C_N - 1, "состояние противника в правиле", err)) return false;
+            if (r.when == W_FOETYPE && !inRange(r.warg, 0, CT_COUNT - 1, "тип противника", err)) return false;
+            if ((r.when == W_FOECOND || r.when == W_SELFCOND) && !inRange(r.warg, 1, C_N - 1, "состояние противника в правиле", err)) return false;
             if (r.what == E_DMG && (!inRange(r.n, 1, MAX_DICE, "кубики правила", err) || std::find(DICE, DICE + DICE_N, r.s) == DICE + DICE_N)) { if (err.empty()) err = "грань кубика правила"; return false; }
             if (r.what == E_AC && !inRange(r.n, 1, 20, "+КД правила", err)) return false;
             if (r.what == E_SAVEB && !inRange(r.n, 1, 20, "+ к спасброскам в правиле", err)) return false;
@@ -639,6 +663,13 @@ static std::string specPartsJson(const Spec& s, const Coef& C) {
     if (s.wallLen > 0) part("барьер", [](Spec& t) { t.wallLen = 0; });
     if (!s.self && s.range > 5) part("дальность " + std::to_string(s.range) + " фт", [](Spec& t) { t.range = 5; });
     if (!s.self && s.radius > 0) part("область " + std::to_string(s.radius) + " фт", [](Spec& t) { t.radius = 0; });
+    if (s.cleanse) part("снятие состояния", [](Spec& t) { t.cleanse = 0; });
+    if (s.wardCond) part("защита от состояния", [](Spec& t) { t.wardCond = 0; });
+    if (s.targetType >= 0) part(std::string("тип цели: ") + creatureType(s.targetType).name, [](Spec& t) { t.targetType = -1; });
+    if (s.breakOnDamage) part("снимается уроном", [](Spec& t) { t.breakOnDamage = false; });
+    if (s.illusionRounds) part("иллюзорное укрытие", [](Spec& t) { t.illusionRounds = 0; });
+    if (s.upDice) part("кубики за старшую ячейку", [](Spec& t) { t.upDice = 0; });
+    if (s.upTargets) part("цели за старшую ячейку", [](Spec& t) { t.upTargets = 0; });
     if (s.targets > 1) part("целей: " + std::to_string(s.targets), [](Spec& t) { t.targets = 1; });
     if (!s.self && s.delivery == 2) part("всегда попадает", [](Spec& t) { t.delivery = 0; });
     if (s.bonus) part("бонусным действием", [](Spec& t) { t.bonus = false; });
@@ -698,6 +729,9 @@ static std::string catalogReply(long long budget, const Coef& C) {
     for (int k = 0; k < DICE_N; k++) o += std::string(k ? "," : "") + std::to_string(DICE[k]);
     o += "],\"stats\":[";
     for (int i = 0; i < STAT_N; i++) o += std::string(i ? "," : "") + jq(SN[i]);
+    o += "],\"creatureTypes\":[";
+    for (int i = 0; i < CT_COUNT; i++)
+        o += std::string(i ? "," : "") + "{\"name\":" + jq(creatureType(i).name) + ",\"trait\":" + jq(typeTrait(i)) + "}";
     o += "],\"skills\":[";
     for (int k = 0; k < SK_N; k++) o += std::string(k ? "," : "") + "{\"name\":" + jq(SKN[k]) + ",\"stat\":" + std::to_string(SKST[k]) + ",\"combat\":" + (skCombat(k) ? "true" : "false") + "}";
     o += "],\"dtypes\":[";
@@ -734,13 +768,13 @@ static std::string catalogReply(long long budget, const Coef& C) {
          ",\"saveProf\":" + std::to_string(cp(P(AT_SAVEPROF))) + ",\"prof1\":" + std::to_string(cp(P(AT_PROF))) + ",\"skillC\":" + std::to_string(cp(P(AT_SKILLC))) +
          ",\"skillNC\":" + std::to_string(cp(P(AT_SKILLNC))) + ",\"noWProf\":" + std::to_string(cp(P(AT_NOWPROF))) + ",\"shield\":" + std::to_string(cp(C[AT_SHIELD])) + ",\"armDex\":" + std::to_string(cp(C[AT_ARMDEX])) + ",\"legRes\":" + std::to_string(cp(P(AT_LEGRES))) + ",\"legAct\":" + std::to_string(cp(P(AT_LEGACT))) + ",\"lair\":" + std::to_string(cp(P(AT_LAIR))) +
          ",\"parry\":" + std::to_string(cp(P(AT_PARRY))) + ",\"surge\":" + std::to_string(cp(P(AT_SURGE))) +
-         ",\"speed30\":" + std::to_string(cp(P(AT_SPEED, speedUnits(30)))) + ",\"slot\":" + std::to_string(C[AT_SLOT]) +
+         ",\"speed30\":" + std::to_string(cp(P(AT_SPEED, speedUnits(30)))) + ",\"slot\":" + std::to_string(slotUnitPrice(C)) +
          ",\"imm5\":" + std::to_string(P(AT_IMMTYPE, 5.0)) + ",\"vuln5\":" + std::to_string(P(AT_VULN, 5.0)) + ",\"aura\":" + std::to_string(P(AT_AURA)) + ",\"rdmg\":" + std::to_string(P(AT_RDMG)) +
          ",\"collide\":" + std::to_string(P(AT_COLLIDE)) + ",\"invis\":" + std::to_string(P(AT_INVIS)) + ",\"dark\":" + std::to_string(P(AT_DARK)) + ",\"terr\":" + std::to_string(P(AT_TERR)) +
          ",\"statbuf\":" + std::to_string(P(AT_STATBUF)) + ",\"hide\":" + std::to_string(P(AT_HIDE)) + ",\"summon\":" + std::to_string(P(AT_SUMMON)) + ",\"darkv\":" + std::to_string(cp(P(AT_DARKV))) + ",\"blind\":" + std::to_string(cp(P(AT_BLINDS))) + "}";
     // «когда → что»: условия и эффекты, какие сочетания разрешены (резист и спасброски — только условия о себе)
     o += ",\"whens\":[";
-    for (int w = 0; w < W_N; w++) o += std::string(w ? "," : "") + "{\"name\":" + jq(WN[w]) + ",\"self\":" + (whenSelf(w) ? "true" : "false") + ",\"share\":" + std::to_string(C[AT_W_ALWAYS + w]) + "}";
+    for (int w = 0; w < W_N; w++) o += std::string(w ? "," : "") + "{\"name\":" + jq(WN[w]) + ",\"self\":" + (whenSelf(w) ? "true" : "false") + ",\"share\":" + std::to_string(C[whenAtom(w)]) + "}";
     o += "],\"whats\":[";
     for (int e = 0; e < E_N; e++) o += std::string(e ? "," : "") + jq(EN[e]);
     o += "]";

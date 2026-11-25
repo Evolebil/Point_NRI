@@ -1,0 +1,33 @@
+<section class="scene" id="s1" data-route="editor">
+  <div class="ed">
+    <div class="ed-head"><h1 class="ed-title">Персонаж</h1><button class="btn btn-accent" id="edSave" type="button">Сохранить и выйти</button></div>
+    <nav class="ed-nav" aria-label="Разделы персонажа">
+      <div id="stepBar" class="ed-steps"></div>
+      <div class="ed-points">
+        <div class="caps">Очки</div>
+        <div><b class="big tnum" id="spent">0</b> <span class="muted">из <span id="bud"></span> <span id="budgetUnit">очков</span> · <span id="leftLbl"></span></span></div>
+        <details class="ed-buys"><summary>Покупки и итог</summary><div class="meter" id="meter"></div><div id="verdict"></div><div class="items" id="items"></div></details>
+        <div class="ed-file"><button class="btn btn-sm" id="btnExport" type="button">Скачать</button><button class="btn btn-sm" id="btnImport" type="button">Загрузить</button><button class="btn btn-sm" id="toOpp" type="button" hidden disabled></button></div>
+        <input type="file" id="fileImport" accept="application/json,.json" hidden>
+      </div>
+    </nav>
+    <div class="ed-main">
+      <div class="ed-top">
+        <div class="ed-token panel">
+          <div class="token" id="edToken"><span>Токен создаётся автоматически</span></div>
+          <button class="btn btn-sm" id="edPortraitBtn" type="button">Добавить изображение</button>
+          <input type="file" id="edPortraitFile" accept="image/png,image/jpeg,image/webp" hidden>
+        </div>
+        <div class="ed-sum">
+          <div class="bar bar-points"><i id="edPtsBar"></i><span id="edPts">Очки без учёта ХП: —</span></div>
+          <div class="bar bar-hp"><i id="edHpBar"></i><span id="edHp">ХП —</span></div>
+          <div class="ed-stats">
+            <div class="shield" title="Класс доспеха"><svg viewBox="0 0 100 116" aria-hidden="true"><path d="M50 4 94 18v38c0 28-19 46-44 56C25 102 6 84 6 56V18z"/></svg><small>КД</small><b id="edAc">—</b></div>
+            <div class="stat-grid" id="edStats"></div>
+          </div>
+        </div>
+      </div>
+      <div class="ed-body panel"><div id="form"></div></div>
+    </div>
+  </div>
+</section>

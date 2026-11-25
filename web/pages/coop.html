@@ -1,0 +1,22 @@
+<section class="scene" id="s6" data-route="coop">
+  <div class="page" id="rmJoin">
+    <h1 class="page-title center">Совместный бой</h1>
+    <p class="page-sub center">Создайте комнату и отправьте друзьям код — или войдите в чужую по коду.</p>
+    <label class="name-line">Ваше имя <input type="text" id="rmName" maxlength="24" autocomplete="nickname"></label>
+    <div class="cols cols-2 coop-cards">
+      <div class="panel panel-flex">
+        <h2>Создать комнату</h2>
+        <p class="muted">Вы станете хозяином: выберите карту, добавите ботов и начнёте бой. Код из пяти знаков появится сразу после создания.</p>
+        <button class="btn btn-accent btn-lg wide" id="rmCreate" type="button">Создать и войти</button>
+      </div>
+      <div class="panel panel-flex">
+        <h2>Войти по коду</h2>
+        <p class="muted">Код из пяти знаков (латинские буквы и цифры) даёт хозяин комнаты.</p>
+        <div class="code-line"><input type="text" id="rmCode" class="code-input" maxlength="5" autocomplete="off" spellcheck="false" placeholder="XXXXX" aria-label="Код комнаты"><button class="btn btn-accent btn-lg" id="rmEnter" type="button" disabled>Войти</button></div>
+        <p class="small muted" id="rmWhy" aria-live="polite"></p>
+      </div>
+    </div>
+    <p class="muted small center">Комната без действий удаляется через 3 часа. Если вылетели — войдите снова под тем же именем, место сохранится.</p>
+  </div>
+  <div class="page" id="rmBox"></div>
+</section>

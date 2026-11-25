@@ -140,7 +140,7 @@ long long priceOf(const Boss& b, const Coef& C, double budget) {
                  : r.what == E_NOCOVER ? P(AT_E_NOCOVER) : r.what == E_POWER ? P(AT_E_POWER) * r.n * hits : r.what == E_NOOA ? P(AT_E_NOOA)
                  : r.what == E_SKILLADV ? P(AT_E_SKILLADV) * (skCombat(std::clamp(r.n, 0, SK_N - 1)) ? 1.0 : 0.1) : r.what == E_DISATK ? -P(AT_E_DISATK)
                  : r.what == E_ACMINUS ? -P(AT_E_ACMINUS) * r.n : P(AT_E_ADVSAVE);
-        e *= C[AT_W_ALWAYS + r.when];
+        e *= C[whenAtom(r.when)];
         if (r.allyR > 0 && e > 0) e *= 1 + C[AT_RULEAURA] * tierN(TR_AURARAD, r.allyR / 5.0);   // аура и на своих (v21)
         t += e >= 0 ? (long long)std::ceil(e) : -(long long)std::ceil(-e);
     }
@@ -233,7 +233,7 @@ AMask featureAtoms(const Boss& b) {
     if (b.redirect) set(AT_REDIRECT);
     for (auto& tg : b.trigs) markTrig(tg, m);   // «событие → эффект» (v21)
     for (auto& r : b.rules) {   // «когда → что»: атомы условия и эффекта
-        set(AT_W_ALWAYS + r.when);
+        set(whenAtom(r.when));
         set(r.what == E_ADVATK ? AT_E_ADVATK : r.what == E_DMG ? AT_E_DMG : r.what == E_AC ? AT_E_AC : r.what == E_DISVSME ? AT_E_DISVSME
             : r.what == E_ADVVSME ? AT_E_ADVVSME : r.what == E_ADVSAVE ? AT_E_ADVSAVE : r.what == E_SAVEB ? AT_E_SAVEB
             : r.what == E_ATKDIE ? AT_E_ATKDIE : r.what == E_SAVEDIE ? AT_E_SAVEDIE : r.what == E_DMGRED ? AT_E_DMGRED : r.what == E_PIERCE ? AT_E_PIERCE

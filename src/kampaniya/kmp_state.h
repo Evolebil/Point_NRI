@@ -76,12 +76,16 @@ inline int statIdx(const std::string& n) {
 
 // модификатор навыка — та же формула, что Fighter::skill (world.h): характеристика + мастерство (владение) + ещё раз (экспертиза)
 inline int heroSkill(const Boss& b, int k) {
-    return b.mod(SKST[k]) + (((b.skillProf >> k) & 1u) ? b.prof : 0) + (((b.skillExp >> k) & 1u) ? b.prof : 0);
+    return b.skillBonus(k) + b.mod(SKST[k]) + (((b.skillProf >> k) & 1u) ? b.prof : 0) + (((b.skillExp >> k) & 1u) ? b.prof : 0);
 }
 // правило «когда → что: преимущество на навык» (rules.h, skillAdv) вне боя: условия о себе, без противника
 inline bool heroSkillAdv(const Hero& h, int k) {
     for (const Rule& r : h.b.rules) {
         if (r.what != E_SKILLADV || r.n != k) continue;
+        if (r.when == W_FULLHP && h.hp == h.hpMax) return true;
+        if (r.when == W_SHIELD && h.b.shield) return true;
+        if (r.when == W_UNARMORED && !h.b.armor) return true;
+        if (r.when == W_NOSHIELD && !h.b.armor && !h.b.shield) return true;
         if (r.when == W_ALWAYS || r.when == W_NOCOND) return true;
         if (r.when == W_HPLOW && h.hp * 2 <= h.hpMax) return true;
         if (r.when == W_HPHIGH && h.hp * 2 > h.hpMax) return true;
@@ -108,6 +112,7 @@ inline bool checkMod(const Hero& h, const std::string& what, int& mod, bool& adv
         const int sm = h.b.mod(SKST[k]);
         mod = heroSkill(h.b, k);
         parts = std::string(SN[SKST[k]]) + " " + (sm >= 0 ? "+" : "") + num(sm);
+        if (h.b.skillBonus(k)) parts += ", особенность типа +2";
         if ((h.b.skillProf >> k) & 1u) parts += ", владение +" + num(h.b.prof);
         if ((h.b.skillExp >> k) & 1u) parts += ", экспертиза +" + num(h.b.prof);
         if (heroSkillAdv(h, k)) adv = true, parts += ", правило: преимущество";

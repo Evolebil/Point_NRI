@@ -16,9 +16,11 @@ struct Fighter {
     bool up = false;    // стоит на втором ярусе (мост, балкон, навес)
     int alt = 0;        // высота полёта над землёй (настилом), уровней по 5 фт (v21)
     int z = 0;          // режим кубов (этап 1б): куб, где ноги (ярус up и высота alt тогда не используются)
+    bool climbing = false;  // держится за стену после явного вертикального хода
     int zCol = -1;      // режим кубов: клетка (y·W + x), где z проверен; другая — боец перенесён (толчок, телепорт)
     int lairLast = 0;   // прошлое действие логова (1 обвал, 2 трясина): подряд одно и то же нельзя
     // превращение (v21): в облике — тело шаблона со своим запасом хитов; свой облик (Boss) и хиты ждут возврата
+    bool startedTurn = false;
     bool inForm = false;
     int formHpSave = 0, formMaxSave = 0;
     std::shared_ptr<Boss> formOrig;
@@ -27,7 +29,9 @@ struct Fighter {
     int cond[C_N] = {};
     int cstat[C_N] = {};
     int cdc[C_N] = {};
+    unsigned breakOnDamage = 0;
     int cimm[C_N] = {};
+    int wardTicks[C_N] = {}, wardCaster[C_N] = {};
     int cgrit[C_N] = {};   // нарастающая стойкость (v21, этап 7): проваленных повторных спасбросков от этого жёсткого контроля подряд
     bool hidden = false, fresh = false;
     // приспешник: кто призвал (индекс бойца) и какой способностью; vanished — исчез (концентрация призыва снята)
@@ -112,7 +116,7 @@ struct Fighter {
     int wAtk() const { return wMod() + (b.wNoProf ? 0 : b.prof); }
     int sAtk() const { return mainMod() + b.prof; }
     // бонус проверки навыка: модификатор + мастерство при владении + ещё раз при экспертизе
-    int skill(int k) const { return mod(SKST[k]) + (((b.skillProf >> k) & 1u) ? b.prof : 0) + (((b.skillExp >> k) & 1u) ? b.prof : 0); }
+    int skill(int k) const { return b.skillBonus(k) + mod(SKST[k]) + (((b.skillProf >> k) & 1u) ? b.prof : 0) + (((b.skillExp >> k) & 1u) ? b.prof : 0); }
 };
 // Реакция — один путь списания для всех реакций (провоцированная атака, Парирование, контратака, перенаправление,
 // способность-реакция)
@@ -130,7 +134,13 @@ thread_local long long g_castAtom[2][AT_N] = {};
 constexpr int MAXT = 64;   // команд в бою — технический предохранитель (v21: ограничения нет, только он)
 thread_local unsigned g_mapSerial = 0;   // версии карт (World::mapVer) — общие для потока, чтобы не совпадали у разных боёв
 struct VoxWorld;   // объёмный мир (vox.h): в режиме кубов путь, шаг и обзор идут по нему
+struct Illusion {
+    int x, y, z, caster, dc, until;
+    bool concentration;
+    std::vector<int> recognized;
+};
 struct World {
+    std::vector<Illusion> illusions;
     // diff — труднопроходимая местность, dark — тьма
     bool wall[W][W] = {};
     bool climb[W][W] = {};
@@ -263,7 +273,10 @@ inline int distFP(int ax, int ay, int az, int an, int bx, int by, int bz, int bn
 }
 inline bool fpOverlap(int ax, int ay, int an, int bx, int by, int bn) { return ax < bx + bn && bx < ax + an && ay < by + bn && by < ay + an; }
 inline bool nodeOK1(const World& w, const Fighter& f, int x, int y, int l) {
-    if (x < 0 || y < 0 || x >= w.aw || y >= w.ah || w.wall[y][x]) return false;
+    if (x < 0 || y < 0 || x >= w.aw || y >= w.ah || (w.wall[y][x] && f.b.ctype != CT_GHOST)) return false;
+    if (w.wall[y][x] && std::any_of(w.dyn.begin(), w.dyn.end(), [&](const auto& d) {
+        return d[2] == 1 && d[0] == x && d[1] == y;
+    })) return false;   // силовой барьер удерживает и призрака
     if (l) return w.deck[y][x] > 0;
     return (!w.pit[y][x] || f.b.burrowS) && (!w.deck[y][x] || w.deck[y][x] - zAt(w, x, y) >= bodyZ(sizeLv(f)));   // копатель — и под ущельем
 }
@@ -298,7 +311,7 @@ static thread_local const void* fitOwnerF = nullptr;
 static thread_local unsigned fitVer = 0;
 static thread_local int fitSize = -1;
 inline unsigned char fitInfo(const World& w, const Fighter& f, int x, int y, int l) {
-    const int key = f.b.size | (f.b.ignDiff ? 256 : 0) | (f.b.climbS ? 512 : 0) | (f.b.swimS ? 1024 : 0) | (f.b.burrowS ? 2048 : 0);
+    const int key = f.b.size | (f.b.ignDiff ? 256 : 0) | (f.b.climbS ? 512 : 0) | (f.b.swimS ? 1024 : 0) | (f.b.burrowS ? 2048 : 0) | (f.b.ctype == CT_GHOST ? 4096 : 0);
     if (fitOwnerW != &w || fitOwnerF != &f || fitVer != w.mapVer || fitSize != key) {
         fitOwnerW = &w;
         fitOwnerF = &f;
@@ -389,14 +402,14 @@ inline void forRules(const Fighter& x, F&& f) {
     for (size_t k = 0; k < x.b.rules.size(); k++) f(x.b.rules[k], (int)k);
     if (!g_curW) return;
     for (auto& y : g_curW->f)
-        if (&y != &x && y.hp > 0 && y.team == x.team)
+        if (&y != &x && y.hp > 0 && !y.fled && !y.banished && y.team == x.team)
             for (auto& r : y.b.rules)
                 if (r.allyR > 0 && distFt(x, y) <= r.allyR) f(r, -1);
 }
 int fpN(const Fighter& f) {
     if (fpFull(f) == 1 || !g_curW) return fpFull(f);
     if (g_curW->vx) return fpAt(*g_curW, f, f.x, f.y, f.z);   // режим кубов: без кэша (копание меняет кубы без mapVer)
-    const long long key = ((((long long)g_curW->mapVer * W + f.y) * W + f.x) * 2 + (f.up ? 1 : 0)) * 8 + f.b.size;   // размер меняет превращение
+    const long long key = ((((long long)g_curW->mapVer * W + f.y) * W + f.x) * 2 + (f.up ? 1 : 0)) * 32 + f.b.size * 4 + 2 * f.b.burrowS + (f.b.ctype == CT_GHOST);   // размер меняет превращение
     if (f.fpKey != key) {
         f.fpKey = key;
         f.fpVal = fpAt(*g_curW, f, f.x, f.y, f.up ? 1 : 0);
@@ -459,10 +472,29 @@ bool losFP(const World& w, int ax, int ay, int az, int an, int bx, int by, int b
 }
 // видимость между бойцами (с их ярусом) и от бойца до клетки (земля клетки)
 // (режим кубов — от глаз до глаз по росту, vxEyeH)
-bool losF(const World& w, const Fighter& a, const Fighter& b) {
-    return losFP(w, a.x, a.y, zF(w, a), fpN(a), b.x, b.y, zF(w, b), fpN(b), vxEyeH(a, fpN(a)), vxEyeH(b, fpN(b)));
+// Куб иллюзии заслоняет обзор только для наблюдателя, который ещё верит в него.
+inline bool illusionOpaque(const World& w, const Illusion& im, const Fighter& viewer) {
+    if (dist3(viewer.x, viewer.y, zF(w, viewer), im.x, im.y, im.z) <= std::max(viewer.b.truesight, viewer.b.blindsight)) return false;
+    for (int i : im.recognized) if (&w.f[i] == &viewer) return false;
+    return true;
 }
-bool losFC(const World& w, const Fighter& a, int x, int y) { return losFP(w, a.x, a.y, zF(w, a), fpN(a), x, y, zAt(w, x, y), 1, vxEyeH(a, fpN(a))); }
+bool illusionLine(const World& w, const Fighter& v, int x, int y, double eyeZ) {
+    if (w.illusions.empty()) return false;
+    const int n = std::max(std::abs(x-v.x), std::abs(y-v.y));
+    const double eye = zF(w,v) + vxEyeH(v,fpN(v));
+    for (const auto& im : w.illusions) {
+        if (!illusionOpaque(w, im, v)) continue;
+        for (int k = 1; k < n; ++k) {
+            const double t = double(k)/n, z = eye + (eyeZ-eye)*t;
+            if (std::lround(v.x+(x-v.x)*t) == im.x && std::lround(v.y+(y-v.y)*t) == im.y && z >= im.z && z < im.z+1) return true;
+        }
+    }
+    return false;
+}
+bool losF(const World& w, const Fighter& a, const Fighter& b) {
+    return !illusionLine(w,a,b.x,b.y,zF(w,b)+vxEyeH(b,fpN(b))) && losFP(w, a.x, a.y, zF(w, a), fpN(a), b.x, b.y, zF(w, b), fpN(b), vxEyeH(a, fpN(a)), vxEyeH(b, fpN(b)));
+}
+bool losFC(const World& w, const Fighter& a, int x, int y) { return !illusionLine(w,a,x,y,zAt(w,x,y)+.8) && losFP(w, a.x, a.y, zF(w, a), fpN(a), x, y, zAt(w, x, y), 1, vxEyeH(a, fpN(a))); }
 // облако дыма или тумана (HAZ obscure) в клетке на уровне z: сильно заслонено
 inline bool fogCell(const World& w, int x, int y, double z) {
     const int k = w.haz[y][x];
@@ -617,7 +649,7 @@ static int stepCostL(const World& w, const Fighter& f, int fx, int fy, int fl, i
         if (up > 0 && !f.b.climbS && !f.b.burrowS) cost += climbFt(up);   // лазун и копатель — без надбавки
     }
     if (fpFull(f) > 1 && (fitInfo(w, f, x, y, l) & 7) < fpFull(f)) cost *= 2;   // протискивается: движение вдвое дороже
-    if (!l && w.door[y][x] == 1) cost += 5;   // закрытую дверь по пути открывают (взаимодействие с предметом)
+    if (!l && f.b.ctype != CT_GHOST && w.door[y][x] == 1) cost += 5;   // закрытую дверь по пути открывают (взаимодействие с предметом)
     return cost;
 }
 static int stepCost(const World& w, const Fighter& f, int fx, int fy, int x, int y) { return stepCostL(w, f, fx, fy, fL(w, f), x, y, fL(w, f)); }
@@ -843,15 +875,16 @@ static int nearestKnownFoe(const World& w, const Fighter& f) {
         if (w.f[i].hp > 0 && w.f[i].team != f.team && isKnown(w, f.team, (int)i)) d = std::min(d, distFt(f, w.f[i]));
     return d;
 }
-int moveToCell(World& w, Fighter& f, int cx, int cy, int speed) {
+int moveToCell(World& w, Fighter& f, int cx, int cy, int speed, const PStep* landing = nullptr) {
     const int fi = (int)(&f - &w.f[0]);
     recordMove(fi, cx, cy, speed);
     if (speed <= 0 || (f.x == cx && f.y == cy && !(w.vx && g_vxTz >= 0 && g_vxTz != f.z))) return 0;   // режим кубов: вверх-вниз в своей клетке
     std::vector<PStep> path;
-    pathTo(w, f, cx, cy, path);
+    if (landing) path.push_back(*landing);
+    else pathTo(w, f, cx, cy, path);
     int left = speed;
     for (auto& c : path) {
-        const int cost = stepCostL(w, f, f.x, f.y, fL(w, f), c.first, c.second, c.l);
+        const int cost = landing ? speed : stepCostL(w, f, f.x, f.y, fL(w, f), c.first, c.second, c.l);
         if (left < cost) break;
         if (enemyAt(w, f, c.first, c.second)) {
             // упёрся в невидимого (неизвестного) врага: он становится известен команде, попытка стоит 5 фт
@@ -869,7 +902,7 @@ int moveToCell(World& w, Fighter& f, int cx, int cy, int speed) {
             for (size_t i = 0; i < w.f.size(); i++) {
                 Fighter& g = w.f[i];
                 // провоцированная атака — ближняя атака оружием: ближнее или метательное, безоружный и лучник не атакуют
-                if (g.hp <= 0 || g.team == f.team || g.reactionUsed || !meleeWeapon(g.b)) continue;
+                if (g.hp <= 0 || g.banished || g.fled || g.team == f.team || g.reactionUsed || !meleeWeapon(g.b)) continue;
                 // участники погони (главные боссы) одновременно бегут в одну сторону: провоцированных атак друг по другу нет (DMG)
                 if (w.chaseOn && fi < 2 && (int)i < 2) continue;
                 // недееспособный не реагирует
@@ -899,7 +932,7 @@ int moveToCell(World& w, Fighter& f, int cx, int cy, int speed) {
             f.zCol = f.y * W + f.x;
             vxDig(w, f);
         } else {
-        if (!c.l && w.door[c.second][c.first] == 1) setDoor(w, c.first, c.second, 2);   // открыл дверь по пути
+        if (!c.l && f.b.ctype != CT_GHOST && w.door[c.second][c.first] == 1) setDoor(w, c.first, c.second, 2);   // открыл дверь по пути
         f.x = c.first;
         f.y = c.second;
         f.up = c.l;
@@ -909,6 +942,9 @@ int moveToCell(World& w, Fighter& f, int cx, int cy, int speed) {
         left -= cost;
         hazardHit(w, f);
         if (f.hp <= 0) return speed - left;
+        for (auto& im : w.illusions)
+            if (im.z == zF(w,f) && fpOverlap(f.x,f.y,fpN(f),im.x,im.y,1) &&
+                std::find(im.recognized.begin(), im.recognized.end(), fi) == im.recognized.end()) im.recognized.push_back(fi);
         if (useMe) {   // метрика использования скорости (№6): шаг, который не приблизил к ближайшему известному врагу
             g_use[fi][U_FT] += cost;
             if (nearestKnownFoe(w, f) >= dBefore) g_use[fi][U_FTAWAY] += cost;

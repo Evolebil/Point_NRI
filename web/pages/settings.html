@@ -1,0 +1,26 @@
+<section class="scene" id="s9" data-route="settings">
+  <div class="page">
+    <h1 class="page-title">Настройки</h1>
+    <div class="panel panel-settings">
+      <div class="set-row"><span class="set-label">Имя игрока</span><b class="set-value" id="setName"></b><button class="btn" id="setNameBtn" type="button">Сменить имя</button></div>
+      <hr>
+      <h2>Оформление</h2>
+      <div class="theme-grid" id="themeGrid"></div>
+      <hr>
+      <h2>Вид боя</h2>
+      <div class="seg seg-lg" id="viewSeg"><button type="button" data-view="2d">2D</button><button type="button" data-view="3d">3D</button></div>
+      <div class="small muted" id="viewNote"></div>
+      <div class="set-row"><span class="set-label">Бойцы в 3D</span><div class="seg" id="tokSeg"><button type="button" data-tok="0">Модели</button><button type="button" data-tok="1">Жетоны</button></div></div>
+      <hr>
+      <h2>Фон меню</h2>
+      <div class="seg seg-lg" id="bgSeg"><button type="button" data-bg="live">Живой</button><button type="button" data-bg="static">Статичный</button></div>
+      <hr>
+      <h2>Правила боя</h2>
+      <div class="set-row"><span class="set-label">Время на ход</span>
+        <select id="turnTime" aria-label="Время на ход"><option value="0" selected>без ограничения</option><option value="60">60 с</option><option value="45">45 с</option><option value="30">30 с</option><option value="20">20 с</option><option value="10">10 с (блиц)</option></select>
+        <span class="small muted">Необязательное правило для одиночного боя: время вышло — ход завершается.</span></div>
+      <div class="set-row"><span class="set-label">Темп соперника</span>
+        <select id="tempo" aria-label="Темп анимации соперника"><option value="1" selected>спокойно</option><option value="1.6">быстро</option><option value="2.6">очень быстро</option></select></div>
+    </div>
+  </div>
+</section>

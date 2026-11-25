@@ -13,7 +13,7 @@ std::string hitDiceText(const Boss& b) {
 std::string describeBoss(const Boss& b) {
     char buf[400];
     std::string r;
-    r += std::string("  ") + CTN[std::clamp(b.ctype, 0, 13)] + ", кости хитов " + hitDiceText(b) + "\n";
+    r += std::string("  ") + creatureType(b.ctype).name + " — " + typeTrait(b.ctype) + ", кости хитов " + hitDiceText(b) + "\n";
     std::snprintf(buf, sizeof buf, "  Статы:");
     r += buf;
     for (int i = 0; i < STAT_N; i++) {

@@ -79,8 +79,10 @@ void breakConc(World& w, int idx) {
     Fighter& c = w.f[idx];
     if (c.concSpec < 0) return;
     for (auto& f : w.f) {
-        for (int k = 1; k < C_N; k++)
+        for (int k = 1; k < C_N; k++) {
+            if (f.wardCaster[k] == idx + 1) f.wardTicks[k] = f.wardCaster[k] = 0;
             if (f.cond[k] > 0 && f.condConc[k] == idx + 1) f.cond[k] = 0;
+        }
         if (f.dotRounds > 0 && f.dotConc == idx + 1) f.dotRounds = 0;
     }
     const Spec& s = c.b.abil[c.concSpec];
@@ -94,6 +96,9 @@ void breakConc(World& w, int idx) {
     if (s.sbAmt) endStatBuff(c);
     if (s.acB) c.acBuffRounds = 0;
     if (s.invisN) c.invisRounds = 0;
+    w.illusions.erase(std::remove_if(w.illusions.begin(), w.illusions.end(), [&](const Illusion& im) {
+        return im.caster == idx && im.concentration;
+    }), w.illusions.end());
     c.concSpec = -1;
     c.concDCs.clear();
     g_concBroken++;
@@ -257,8 +262,18 @@ void hitOne(World& w, const Spec& s, Fighter& me, Fighter& t0);
 // приём «при попадании» (v21): плата (применение, кость запаса) — только при попадании; эффекты способности ложатся на
 // попавшую цель (без своего броска атаки; со спасброском, если доставка 1), кость запаса — к урону; урон себе; лечение
 // себе, если цель умерла от удара; обезоруживание
+Spec castAtSlot(const Fighter& caster, const Spec& base) {
+    Spec s = base;
+    if (!s.slotLvl) return s;
+    const int extra = std::max(0, findSlot(caster, s.slotLvl) - s.slotLvl);
+    if (s.dmgN) s.dmgN += extra * s.upDice;
+    if (s.healN) s.healN += extra * s.upDice;
+    s.targets += extra * s.upTargets;
+    s.slotLvl += extra;
+    return s;
+}
 void applyManeuver(World& w, Fighter& me, int si, Fighter& t, bool crit) {
-    const Spec s = me.b.abil[si];
+    const Spec s = castAtSlot(me, me.b.abil[si]);
     paySpec(w, me, si, true);
     g_act.abil = si;
     if (s.pool) me.poolLeft--;
@@ -291,6 +306,17 @@ void altMultiAttacks(World& w, Fighter& me, int tIdx) {
         swapWeapon(me.b, k);
     }
 }
+// Короткое вселение: одна реакция при объявлении удара; несколько духов не усиливают один бросок.
+int possessionBonus(World& w, Fighter& host) {
+    for (auto& ghost : w.f) {
+        if (ghost.b.ctype != CT_GHOST || &ghost == &host || ghost.team != host.team || !canReact(ghost)) continue;
+        if (distFt(ghost, host) > 5 || !canSee(w, ghost, host) || !losF(w, ghost, host)) continue;
+        spendReaction(ghost);
+        if (g_evLog) evPush("{\"k\":\"possess\",\"who\":" + std::to_string(&ghost - w.f.data()) + ",\"tgt\":" + std::to_string(&host - w.f.data()) + "}");
+        return 2;
+    }
+    return 0;
+}
 // Атака оружием; nAtt == −1 — целое действие «Атака»: все удары основным оружием и (пакет атомов 1) оружием мультиатаки
 void doWeapon(World& w, Fighter& me, int tIdx, int nAtt, int man, bool offhand, bool twfMod) {
     doWeaponMain(w, me, tIdx, nAtt, man, offhand, twfMod);
@@ -322,12 +348,13 @@ void doWeaponMain(World& w, Fighter& me, int tIdx, int nAtt, int man, bool offha
             if (!(p2 * (avg + 2 * power) > p1 * avg)) power = 0;
         }
         g_heavyDis = me.b.wHeavy && me.b.size < 2;   // размеры (v21): маленьким тяжёлое оружие — с помехой
-        bool hit = attackRoll(w, me, t, me.wAtk() - power, range, crit);
+        const int spirit = possessionBonus(w, me);
+        bool hit = attackRoll(w, me, t, me.wAtk() + spirit - power, range, crit);
         g_heavyDis = false;
         g_attacksMade++;
         me.hidden = false;
         if (!hit) continue;
-        int dmg = 2 * power + rollDice(me.b.wN * (crit ? 2 : 1), wDie(me.b)) + (offhand && !twfMod ? std::min(0, me.wMod()) : me.wMod());
+        int dmg = spirit + 2 * power + rollDice(me.b.wN * (crit ? 2 : 1), wDie(me.b)) + (offhand && !twfMod ? std::min(0, me.wMod()) : me.wMod());
         if (me.growRounds != 0) dmg += rollDice(crit ? 2 : 1, 4);   // увеличение (пакет атомов 2): +1к4 к урону оружия
         if (me.buffRounds > 0) dmg += rollDice(me.buffN * (crit ? 2 : 1), me.buffS);
         // «когда → что»: кубики к урону оружия (каждое попадание или раз в ход)
@@ -465,6 +492,7 @@ void pushAway(World& w, Fighter& src, Fighter& t, int ft, int collN = 0) {
             t.x = nx;
             t.y = ny;
             t.zCol = ny * W + nx;   // та же высота в новой клетке: без опоры vxFixAll уронит (1к6 за 10 фт, сбит с ног)
+            t.climbing = false;  // толчок сбивает хват
             if (!vxStandEx(w, t, nx, ny, t.z, t.b.fly && canStayAloft(t))) break;   // столкнули с уступа — дальше падает, а не летит
         }
         hazardHit(w, t);
@@ -516,7 +544,8 @@ bool globeBlocks(const World& w, const Spec& s, const Fighter& me, const Fighter
     return false;
 }
 void hitOne(World& w, const Spec& s, Fighter& me, Fighter& t0) {
-    if (t0.banished > 0) return;                    // изгнанного нет на поле
+    if (s.targetType >= 0 && t0.b.ctype != s.targetType) return;
+    if (t0.banished > 0 || t0.fled) return;                    // изгнанного нет на поле
     if (globeBlocks(w, s, me, t0)) return;          // сфера неуязвимости (пакет атомов 2)
     if (s.healAlly && t0.team == me.team) {         // способность лечит союзников вместо урона (пакет атомов 2)
         int h = 0;
@@ -600,8 +629,10 @@ void hitOne(World& w, const Spec& s, Fighter& me, Fighter& t0) {
     if (taken > 0 && t.concSpec >= 0) t.concDCs.push_back(std::max(10, taken / 2));
     if (applyC && t.hp > 0 &&
         applyCond(t, s.cond, s.condRounds, s.saveStat, dc, s.delivery != 2 && !s.noRep, (int)(&me - &w.f[0]),
-                  s.conc ? (int)(&me - &w.f[0]) + 1 : 0) && s.cond == C_GRAPPLE)
-        grabExtras(t, (int)(&me - &w.f[0]), s.grabRestr, s.grabDot ? s.dotN : 0, s.dotS, s.dtype);
+                  s.conc ? (int)(&me - &w.f[0]) + 1 : 0)) {
+        if (s.breakOnDamage) t.breakOnDamage |= 1u << s.cond;
+        if (s.cond == C_GRAPPLE) grabExtras(t, (int)(&me - &w.f[0]), s.grabRestr, s.grabDot ? s.dotN : 0, s.dotS, s.dtype);
+    }
     if (s.grabDot && s.cond == C_GRAPPLE) applyD = false;   // урон по времени — пока держит (grabExtras), а не на N раундов
     // изгнание (пакет атомов 2): цель исчезает с поля на N раундов (атака — при попадании, спасбросок — при провале)
     if (s.banishN > 0 && t.hp > 0 && (s.delivery != 1 || saveFailed)) {
@@ -737,7 +768,7 @@ void areaHitsObjects(World& w, const Spec& s, const Fighter& me, int cx, int cy,
                     const unsigned char m = v.at(x, y, z);
                     if (MAT[m].hp <= 0 || m == VX_DIRT || m == VX_GRASS || m == VX_SAND) continue;
                     if (!vxInShape3(s.shape, s.radius, ox, oy, oz, cx + .5, cy + .5, cz + .5, x + .5, y + .5, z + .5)) continue;
-                    if (vxRay(w, ox, oy, oz, x + .5, y + .5, z + .5, [](unsigned char c) { return vxBlocksEffect(c) ? 100 : 0; }) >= 100) continue;
+                    if (vxRay(*w.vx, ox, oy, oz, x + .5, y + .5, z + .5, [](unsigned char c) { return vxBlocksEffect(c) ? 100 : 0; }) >= 100) continue;
                     hit.push_back({x, y, z});
                 }
         for (const auto& c : hit) {
@@ -810,7 +841,7 @@ int pickAlly(const World& w, const Fighter& me, const Spec& s, int pref = -1) {
     auto ok = [&](int i) {
         if (i < 0 || i >= (int)w.f.size()) return false;
         const Fighter& g = w.f[i];
-        if (g.hp <= 0 || g.team != me.team || g.fled) return false;
+        if (g.hp <= 0 || g.team != me.team || g.fled || g.banished) return false;
         if (i != myIdx && (distFt(me, g) > s.range || !losF(w, me, g))) return false;
         if (s.cmdAtk) {
             if (i == myIdx || g.b.wN <= 0 || g.disarmed || !canReact(g)) return false;
@@ -827,6 +858,8 @@ int pickAlly(const World& w, const Fighter& me, const Spec& s, int pref = -1) {
         double v;
         if (s.cmdAtk)
             v = g.b.wN * (g.b.wS + 1) / 2.0 * g.b.wAtt;
+        else if (s.cleanse && g.cond[s.cleanse]) v = 10;
+        else if (s.wardCond && !g.wardTicks[s.wardCond]) v = 2;
         else if (s.healN || s.healB)
             v = 1.0 - (double)g.hp / std::max(1, g.maxHp);
         else if (s.tempN)
@@ -843,7 +876,7 @@ int pickAlly(const World& w, const Fighter& me, const Spec& s, int pref = -1) {
     return best;
 }
 void doSpec(World& w, Fighter& me, int si, int tIdx, int gx = -1, int gy = -1) {
-    const Spec& s = me.b.abil[si];
+    const Spec s = castAtSlot(me, me.b.abil[si]);
     g_act.abil = si;
     g_curAbil = si;
     // приём «при попадании» — действие Атака оружием с приёмом (плата — при попадании); вторая рука — одна атака оружием
@@ -858,7 +891,8 @@ void doSpec(World& w, Fighter& me, int si, int tIdx, int gx = -1, int gy = -1) {
     }
     if (s.recharge) g_rechUsed++;
     paySpec(w, me, si, true);
-    if (w.f.size() >= 2) revealTo(w, 1 - me.team, (int)(&me - &w.f[0]));   // способность выдаёт применившего (туман войны)
+    for (int team = 0; team < w.nTeams; ++team)
+        if (team != me.team) revealTo(w, team, (int)(&me - w.f.data()));   // способность выдаёт применившего (туман войны)
     {   // метрики использования (№6)
         const int i = (int)(&me - &w.f[0]);
         if (i >= 0 && i < 2) {
@@ -918,6 +952,19 @@ void doSpec(World& w, Fighter& me, int si, int tIdx, int gx = -1, int gy = -1) {
         // союзники (v21): эффекты «на себя» у способности «на союзника» — тому, кого выбрали (или себе)
         const int ti = s.ally ? pickAlly(w, me, s, tIdx) : -1;
         Fighter& tg = ti >= 0 ? w.f[ti] : me;
+        if (s.cleanse) {
+            tg.cond[s.cleanse] = tg.condConc[s.cleanse] = tg.cgrit[s.cleanse] = 0;
+            tg.breakOnDamage &= ~(1u << s.cleanse);
+            grabSync(tg);
+            g_act.type = "cleanse";
+        }
+        if (s.wardCond) {
+            if (s.wardRounds >= tg.wardTicks[s.wardCond]) {
+                tg.wardTicks[s.wardCond] = s.wardRounds;
+                tg.wardCaster[s.wardCond] = s.conc ? int(&me - w.f.data()) + 1 : 0;
+            }
+            g_act.type = "ward";
+        }
         if (s.healN || s.healB) {
             tg.hp = std::min(tg.maxHp, tg.hp + rollDice(s.healN, s.healS) + s.healB);
             g_act.type = "heal";
@@ -1007,6 +1054,14 @@ void doSpec(World& w, Fighter& me, int si, int tIdx, int gx = -1, int gy = -1) {
                 for (int x = std::max(0, bx - rr); x <= std::min(w.aw - 1, bx + rr); x++)
                     if (inShape(s.shape, s.radius, me.x, me.y, gx, gy, x, y) && !w.wall[y][x] && !w.diff[y][x]) { w.diff[y][x] = true, w.mapVer = ++g_mapSerial; dynAdd(w, x, y, 2, -1); }
         }
+        if (s.illusionRounds > 0) {
+            const int caster = int(&me - w.f.data());
+            w.illusions.erase(std::remove_if(w.illusions.begin(), w.illusions.end(), [&](const Illusion& im) {
+                return im.caster == caster;
+            }), w.illusions.end());
+            w.illusions.push_back({gx, gy, w.vx ? gz - VZ0 : zAt(w,gx,gy), caster, me.dc()+s.dcB,
+                                   g_curRound+s.illusionRounds, s.conc, {caster}});
+        }
         if (s.wallLen > 0) placeWall(w, me, gx, gy, s.wallLen, s.wallRounds);
         me.hidden = false;
         return;
@@ -1020,7 +1075,7 @@ void doSpec(World& w, Fighter& me, int si, int tIdx, int gx = -1, int gy = -1) {
             std::vector<std::pair<double, int>> more;
             for (size_t i = 0; i < w.f.size(); i++) {
                 const Fighter& e = w.f[i];
-                if ((int)i == tIdx || e.hp <= 0 || e.team == me.team || distFt(me, e) > s.range || !losF(w, me, e) || !isKnown(w, me.team, (int)i)) continue;
+                if ((int)i == tIdx || (s.targetType >= 0 && e.b.ctype != s.targetType) || e.hp <= 0 || e.fled || e.banished || e.team == me.team || distFt(me, e) > s.range || !losF(w, me, e) || !isKnown(w, me.team, (int)i)) continue;
                 more.push_back({-evSpecOne(w, s, me, e), (int)i});
             }
             std::sort(more.begin(), more.end());
@@ -1072,7 +1127,7 @@ bool tryReact(World& w, int meIdx, int trig, int srcIdx, int prevDist) {
         if ((trig == 3 || trig == 4) && d > zone) continue;
         int gx = -1, gy = -1, tx = -1, ty = -1;
         if (s.self) {
-            if (s.healN && me.hp * 2 >= me.maxHp) continue;
+            if ((s.healN || s.healB) && me.hp * 2 >= me.maxHp) continue;
             if (s.teleFt > 0) {   // прыжок прочь от виновника
                 int dx = (me.x > src.x) - (me.x < src.x), dy = (me.y > src.y) - (me.y < src.y);
                 if (!dx && !dy) dx = 1;
@@ -1143,6 +1198,7 @@ void endOfTurn(Fighter& me) {
     else if (me.growRounds < 0 && ++me.growRounds == 0) me.b.size = std::max(0, me.b.size - 1);   // размер вырастал — вернуть
     if (me.lightRounds > 0) me.lightRounds--;
     for (int k = 1; k < C_N; k++) {
+        if (me.wardTicks[k] > 0 && --me.wardTicks[k] == 0) me.wardCaster[k] = 0;
         if (me.cond[k] > 0) {
             // нарастающая стойкость (v21, этап 7): каждый проваленный повторный спасбросок от жёсткого контроля — +2 к следующим
             const int dc = me.cdc[k] - (hardCtl(k) ? 2 * me.cgrit[k] : 0);

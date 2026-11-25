@@ -51,8 +51,15 @@ const TAB_ROUTE = {1:'editor', 2:'quick', 3:'battle', 4:'sheet', 5:'workshop', 6
 const FULL_ROUTES = ['battle', 'workshop', 'worlds'];   // поле на весь экран: без шапки и фона
 const ROUTE_ENTER = {}, ROUTE_BACK = {};
 let ROUTE = '';
+function routeFromPath(){
+  const key = location.pathname.slice(1);
+  return key === 'sheet-view' ? 'sheet' : Object.hasOwn(SCENES, key) ? key : 'home';
+}
+addEventListener('popstate', () => go(routeFromPath()));
 function go(route){
   if (!SCENES[route]) route = 'home';
+  const path = route === 'home' ? '/' : '/' + (route === 'sheet' ? 'sheet-view' : route);
+  if (location.pathname !== path) history.pushState(null, '', path + location.search);
   const prev = ROUTE; ROUTE = route;
   Object.entries(SCENES).forEach(([r, id]) => { const el = $(id); if (el) el.classList.toggle('on', r === route); });
   document.body.className = document.body.className.replace(/\broute-\S+/g, '').trim() + ' route-' + route;

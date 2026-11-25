@@ -57,8 +57,8 @@ int main() {
 
     kmp::State s = fresh();
     const kmp::Hero& h = s.heroes[0];
-    // T212 модификаторы: Убеждение = ХАР 3 + 3 + 3 (экспертиза); Выживание = МДР 2 + 3; Атлетика = СИЛ 0
-    T("T212", kmp::heroSkill(h.b, SK_PERSUADE) == 9 && kmp::heroSkill(h.b, SK_SURVIVAL) == 5 && kmp::heroSkill(h.b, SK_ATHL) == 0,
+    // T212 модификаторы: Убеждение = ХАР 3 + 3 + 3 (экспертиза) + 2 (гуманоид); Выживание = МДР 2 + 3; Атлетика = СИЛ 0
+    T("T212", kmp::heroSkill(h.b, SK_PERSUADE) == 11 && kmp::heroSkill(h.b, SK_SURVIVAL) == 5 && kmp::heroSkill(h.b, SK_ATHL) == 0,
       "навык: характеристика + владение + экспертиза");
     // T213 пассивная Внимательность 10 + 2 + 3 = 15; с истощением 1 — помеха, −5
     {
@@ -80,7 +80,7 @@ int main() {
     {
         Json ev = run(s, ct, "{\"type\":\"check\",\"hero\":\"Лис\",\"what\":\"Убеждение\",\"dc\":15}");
         const Json& c = ev["checks"][0];
-        T("T215", c["total"].num() == c["die"].num() + 9 && c["ok"].flag() == (c["total"].num() >= 15) && ev["res"]["ok"].flag() == c["ok"].flag(),
+        T("T215", c["total"].num() == c["die"].num() + 11 && c["ok"].flag() == (c["total"].num() >= 15) && ev["res"]["ok"].flag() == c["ok"].flag(),
           "проверка навыка против СЛ");
     }
     // T216 путь: пеший по дороге 35 км, по лесу без дороги ~17 (канон)

@@ -1,0 +1,35 @@
+<section class="scene" id="s2" data-route="quick">
+  <div class="page">
+    <h1 class="page-title">Быстрый бой</h1>
+    <p class="page-sub">Поиск живого соперника. Если за минуту никто не найдётся, придёт бот на столько же очков, сколько у вашего персонажа (в 2D им играет нейросеть, в 3D — бот по правилам).</p>
+    <div class="cols cols-quick">
+      <div class="panel">
+        <h2>1. Сумма очков</h2>
+        <div class="budget-grid" id="qBudgets"></div>
+        <h2 id="qCharHead">2. Персонаж</h2>
+        <div class="list" id="qChars"></div>
+        <button class="btn" id="qCreate" type="button">+ Создать персонажа</button>
+      </div>
+      <aside class="panel">
+        <h2>Как это работает</h2>
+        <p>Вы нажимаете «Найти бой» и ждёте до минуты.</p>
+        <p>Нашёлся игрок с такой же суммой очков — бой начинается.</p>
+        <p>Не нашёлся — вам даётся бот, собранный на те же очки.</p>
+        <p class="muted small">Арена случайная.</p>
+      </aside>
+    </div>
+    <div class="page-foot"><span class="small muted" id="qWhy"></span><button class="btn btn-accent btn-xl" id="qFind" type="button" disabled>Найти бой</button></div>
+  </div>
+  <!-- настройки одиночного боя: их читает движок (30_opponent.js, 51_room.js startGame); игроку не показываются -->
+  <div hidden id="oppLegacy">
+    <select id="oppMode"><option value="net">net</option><option value="generator">generator</option></select>
+    <select id="oppBrain"><option value="net">net</option><option value="rules">rules</option></select>
+    <select id="oppMul"><option value="1" selected>1</option></select>
+    <input type="number" id="seed" value="1"><button id="btnDice" type="button"></button>
+    <select id="mapSel"><option value="">мир</option></select>
+    <div id="worldBox"><input id="wSeed" value="1"><button id="wDice" type="button"></button><select id="wSize"></select><input type="number" id="wW" value="30"><input type="number" id="wH" value="30"><button id="wShow" type="button"></button><span id="wPick"></span></div>
+    <select id="side"><option value="-1" selected>случайно</option><option value="0">A</option><option value="1">B</option></select>
+    <button id="btnFight" type="button"></button><div id="oppErr"></div><div id="oppCard"></div>
+    <div id="worldCard"><canvas id="wCv"></canvas><div id="wLegend"></div></div>
+  </div>
+</section>

@@ -223,7 +223,7 @@ $('rmBox').addEventListener('click', async e => {
     if (ROOM.mapKind !== 'own' && !roomMapPayload().map) await roomMapPreview();
     if (ROOM.mapKind !== 'own' && !roomMapPayload().map){ toast('Карта ещё не построена — попробуйте снова', 4000, true); return; }
     b.disabled = true;
-    ROOM.n = 0; G.room = ''; await roomCall(Object.assign({cmd:'room_start', rounds: ROOM.rounds, seed: ROOM.seed}, R3.want ? {vox: 1} : {}, roomMapPayload()));   // вид 3D у хозяина — бой в кубах
+    ROOM.n = 0; G.room = ''; await roomCall(Object.assign({cmd:'room_start', volume:1, rounds: ROOM.rounds, seed: ROOM.seed}, R3.want ? {vox: 1} : {}, roomMapPayload()));   // вид 3D у хозяина — бой в кубах
   }
 });
 $('rmBox').addEventListener('change', async e => {
@@ -247,7 +247,7 @@ async function startGame(){
   $('oppErr').innerHTML = '';
   $('btnFight').disabled = true;
   const character=toChar();try{const active=localStorage.getItem('dnd_active_char'),profile=JSON.parse(localStorage.getItem('dnd_chars')||'[]').find(p=>p.id===active);if(profile&&profile.portrait)character.portrait=profile.portrait;}catch(e){}
-  const msg = {cmd:'start', char: character, seed: +$('seed').value, opp: oppCfg(), side: +$('side').value};
+  const msg = {cmd:'start', volume:1, char: character, seed: +$('seed').value, opp: oppCfg(), side: +$('side').value};
   if (R3.want) msg.vox = 1;   // вид 3D (настройка или ?3d=1): бой в режиме кубов — путь, обзор, копание, области по кубам
   const mname = $('mapSel').value; if (mname && MAPS[mname]) msg.map = MAPS[mname];
   if (mname === '__world') msg.world = {seed: $('wSeed').value.trim() || '1', size: +$('wSize').value, x: WPICK ? WPICK[0] : -1, y: WPICK ? WPICK[1] : -1, w: +$('wW').value, h: +$('wH').value};
@@ -302,15 +302,29 @@ function onCaughtUp(){
   else { G.req = G.lastReq = r.req; G.busy = false; renderTurn(); if (r.req.msg) toast(r.req.msg + altHint(r.req)); startTurnTimer(); }
 }
 async function cmd(c){
-  if (G.busy || G.over) return;
+  if (G.busy || G.over || !G.req) return;
+  if (c.c === 'spell') c.n = G.castCount || 1;
+  const key = JSON.stringify(c);
+  if (G.rejected && G.rejected.req === G.req && G.rejected.key === key){
+    toast(G.rejected.msg, 4000, true); return;
+  }
   G.busy = true; clearInterval(turnTimer); toast('');
   // ответ через туннель идёт до пары секунд: кнопки сразу гаснут и видно, что ход отправлен (иначе кажется, что щелчок не дошёл)
   $('turn').querySelectorAll('button:not([data-leave]):not(.hud-min),input,select').forEach(b => { b.disabled = true; });
   const tm = $('tmsg'); if (tm) tm.textContent = c.c === 'end' ? '⏳ Ход завершается…' : '⏳ Отправляю ход…';
   G.sentAt = FR.length;
-  if (G.room){ const v = await api(Object.assign({cmd:'room_step', code:G.room, since:ROOM.n}, c)); roomFeed(v); return; }
-  const r = await api(Object.assign({cmd:'step'}, c));
-  receive(r);
+  const room = G.room;
+  const r = await api(Object.assign(room ? {cmd:'room_step', code:room, since:ROOM.n} : {cmd:'step'}, c));
+  if (room !== G.room) return;
+  if (room) roomFeed(r); else receive(r);
+  if (r.type === 'error' && !/нет связи|NetworkError|Failed to fetch/i.test(r.err || '')){
+    G.rejected = {req:G.req, key, msg:r.err};
+  }
+  if (r.req && r.req.msg && !(r.frames || []).length){
+    G.rejected = {req:G.req, key, msg:r.req.msg};
+    G.busy = false;
+    if (G.req) renderTurn();
+  }
 }
 function showEnd(r){
   G.over = true; G.busy = true;

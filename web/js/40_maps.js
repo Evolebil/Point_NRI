@@ -149,6 +149,14 @@ function paintMap(c, m, cs, x0 = 0, y0 = 0, x1 = m.aw, y1 = m.ah, grid = true){
     if (m.L.ladder[i]){ c.strokeStyle = '#c9a46a'; c.lineWidth = 2; c.beginPath(); c.moveTo(px + cs * .3, py + 2); c.lineTo(px + cs * .3, py + cs - 2); c.moveTo(px + cs * .7, py + 2); c.lineTo(px + cs * .7, py + cs - 2); for (let k = 1; k <= 3; k++){ c.moveTo(px + cs * .3, py + cs * k / 4); c.lineTo(px + cs * .7, py + cs * k / 4); } c.stroke(); }
     if (m.L.deck[i]){ c.fillStyle = 'rgba(150,112,60,.5)'; c.fillRect(px, py, cs, cs); c.strokeStyle = 'rgba(240,200,120,.9)'; c.lineWidth = 1; c.strokeRect(px + 1.5, py + 1.5, cs - 3, cs - 3); if (cs >= 16){ c.fillStyle = '#ffe2a0'; c.font = `700 ${Math.round(cs * .34)}px system-ui`; c.textAlign = 'left'; c.textBaseline = 'bottom'; c.fillText('⌂' + m.L.deck[i] * 5, px + 2, py + cs - 1); } }
   }
+  for (const [x,y,z,col] of (m.vx || new Map()).values()){
+    if (x<x0 || x>=x1 || y<y0 || y>=y1) continue;
+    const surface = 1 + m.L.height[y*m.aw+x];
+    if (col[surface-z] !== '0') continue;
+    c.fillStyle='#211d1a'; c.fillRect(x*cs,y*cs,cs,cs);
+    c.fillStyle='#ab9981';
+    for (let j=1;j<=3;j++) c.fillRect((x+j*.17)*cs,(y+j*.22)*cs,cs*(1-j*.2),cs*.09);
+  }
   if (grid && cs >= 6){ c.strokeStyle = 'rgba(255,255,255,.07)'; c.lineWidth = 1; c.beginPath(); for (let x = x0; x <= x1; x++){ c.moveTo(x * cs + .5, y0 * cs); c.lineTo(x * cs + .5, y1 * cs); } for (let y = y0; y <= y1; y++){ c.moveTo(x0 * cs, y * cs + .5); c.lineTo(x1 * cs, y * cs + .5); } c.stroke(); }
   [['A', '#2f7de1'], ['B', '#e0553f']].forEach(([l, col], k) => (m.starts[k] || []).forEach(st => {
     if (st[0] < x0 || st[0] >= x1 || st[1] < y0 || st[1] >= y1) return;

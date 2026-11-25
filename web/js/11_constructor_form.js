@@ -17,16 +17,18 @@ const zero = (a, ks) => ks.forEach(k => { if (typeof a[k] === 'boolean') a[k] = 
 const G2 = s => `<div class="grid2">${s}</div>`;
 function abilGroups(a, k, P, dt, cd){
   const SAVE = `<label>Спасбросок ${infoIcon('Спасбросок')} цели ${selIn(P('saveStat'), STAT_N.map((n, j) => [j, n]))}</label>`;
-  const COND = {id:'cond', n:'Состояние', has:a => +a.cond > 0, init:a => { a.cond = 1; a.condRounds = 1; }, clear:a => zero(a, ['cond']),
-    html:G2(`<label>Состояние ${selIn(P('cond'), cd)}</label><label>раундов ${numIn(P('condRounds'), 1, LIM.rounds)}</label>${+a.cond === CAT.conds.indexOf('схвачен') ? `${chkIn(P('grabRestr'), 'Схваченный опутан')}${chkIn(P('grabDot'), 'Урон каждый ход, пока держит')}${a.grabDot ? `<label>кубиков ${numIn(P('dotN'), 0, LIM.dice)}</label><label>грань ${selIn(P('dotS'), DIE_OPTS())}</label>` : ''}` : ''}`)};
+  const COND = {id:'cond', n:'Состояние', has:a => +a.cond > 0, init:a => { a.cond = 1; a.condRounds = 1; }, clear:a => zero(a, ['cond','breakOnDamage']),
+    html:G2(`<label>Состояние ${selIn(P('cond'), cd)}</label>${chkIn(P('breakOnDamage'),'Снимается при получении урона')}<label>раундов ${numIn(P('condRounds'), 1, LIM.rounds)}</label>${+a.cond === CAT.conds.indexOf('схвачен') ? `${chkIn(P('grabRestr'), 'Схваченный опутан')}${chkIn(P('grabDot'), 'Урон каждый ход, пока держит')}${a.grabDot ? `<label>кубиков ${numIn(P('dotN'), 0, LIM.dice)}</label><label>грань ${selIn(P('dotS'), DIE_OPTS())}</label>` : ''}` : ''}`)};
   const TIMING = {id:'timing', n:'Как применяется', always:true,
     html:G2(`${chkIn(P('bonus'), 'Бонусное действие')}${chkIn(P('inAttack'), 'Вместо одной атаки действия «Атака» (дракон: страх, затем когти)')}${k === 'self' ? chkIn(P('preCast'), 'Действует с начала боя (наложено заранее)') : ''}<label>Реакция (срабатывает сама) ${selIn(P('react'), [[0,'нет — обычное действие'],[1,'когда меня атакуют'],[2,'когда мне нанесли урон'],[3,'когда враг вошёл в зону'],[4,'когда враг применил способность в зоне']])}</label>`)};
-  const COST = {id:'cost', n:'Ограничения (дешевле)', has:a => any(a, ['uses', 'recharge', 'slotLvl', 'conc', 'noRepeat', 'immSave']), init:a => { a.uses = 1; }, clear:a => zero(a, ['uses', 'recharge', 'slotLvl', 'conc', 'noRepeat', 'immSave']),
+  const COST = {id:'cost', n:'Ограничения (дешевле)', has:a => any(a, ['uses', 'recharge', 'slotLvl', 'upDice', 'upTargets', 'conc', 'noRepeat', 'immSave']), init:a => { a.uses = 1; }, clear:a => zero(a, ['uses', 'recharge', 'slotLvl', 'upDice', 'upTargets', 'conc', 'noRepeat', 'immSave']),
     html:G2(`<label>Применений за бой (пусто — без ограничения) ${usesIn(P('uses'))}</label><label>Перезарядка ${selIn(P('recharge'), [[0,'нет'],[6,'6'],[5,'5–6'],[4,'4–6']])}</label>
-      <label>Уровень ячейки заклинания (0 — нет) ${numIn(P('slotLvl'), 0, 9)}</label>${chkIn(P('conc'), 'Концентрация')}${chkIn(P('noRepeat'), 'Не два раунда подряд')}${chkIn(P('rechAfter'), 'Кончились применения — перезарядка возвращает все')}${k === 'save' ? chkIn(P('immSave'), 'После успешного спасброска цель к ней невосприимчива') : ''}`)};
+      <label>Круг заклинания (выше — дешевле, 0 — без ячейки) ${numIn(P('slotLvl'), 0, 9)}</label><label>Кубиков за старший круг ${numIn(P('upDice'), 0, LIM.dice)}</label>${['attack','auto','save'].includes(k) ? `<label>Целей за старший круг ${numIn(P('upTargets'), 0, 10)}</label>` : ''}${chkIn(P('conc'), 'Концентрация')}${chkIn(P('noRepeat'), 'Не два раунда подряд')}${chkIn(P('rechAfter'), 'Кончились применения — перезарядка возвращает все')}${k === 'save' ? chkIn(P('immSave'), 'После успешного спасброска цель к ней невосприимчива') : ''}`)};
   if (k === 'self') return [
     {id:'ally', n:'И на союзника', has:a => !!a.ally, init:a => { a.ally = true; a.range = a.range || 30; }, clear:a => { a.ally = false; },
       html:G2(`${chkIn(P('ally'), 'И на союзника (лечение, хиты, баффы, невидимость)')}<label>дальность до союзника, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label>`)},
+    {id:'remedy', n:'Снятие и защита от состояний', has:a => any(a,['cleanse','wardCond']), clear:a => zero(a,['cleanse','wardCond','wardRounds']),
+      html:G2(`<label>Снять ${selIn(P('cleanse'), [[0,'—'],...cd])}</label><label>Защитить от ${selIn(P('wardCond'), [[0,'—'],...cd])}</label><label>Раундов защиты ${numIn(P('wardRounds'),0,LIM.rounds)}</label>`)},
     {id:'heal', n:'Лечение', has:a => any(a, ['healN', 'healB']), init:a => { a.healN = 1; a.healS = 8; }, clear:a => zero(a, ['healN', 'healB']),
       html:G2(`<label>кубиков ${numIn(P('healN'), 0, LIM.dice)}</label><label>грань ${selIn(P('healS'), DIE_OPTS())}</label><label>+ к лечению ${numIn(P('healB'), 0, 1000)}</label>`)},
     {id:'temp', n:'Временные хиты', has:a => +a.tempN > 0, init:a => { a.tempN = 1; }, clear:a => zero(a, ['tempN']), html:G2(`<label>к6 ${numIn(P('tempN'), 0, LIM.dice)}</label>`)},
@@ -70,8 +72,8 @@ function abilGroups(a, k, P, dt, cd){
       html:G2(`<label>Форма ${selIn(P('shape'), [[0,'сфера (круг)'],[1,'куб (квадрат)'],[2,'конус от себя'],[3,'линия от себя']])}</label>
         <label>${+a.shape >= 2 ? 'Длина' : (+a.shape === 1 ? 'Полусторона' : 'Радиус')}, фт ${numIn(P('radius'), 0, LIM.ft, 5)}</label>
         ${chkIn(P('selective'), 'Избирательная: бьёт только врагов (иначе задевает и своих, и вас)')}`)},
-    {id:'targets', n:'Несколько целей', has:a => +a.targets > 1, init:a => { a.targets = 2; }, clear:a => { a.targets = 1; },
-      html:G2(`<label>Целей на выбор (без области) ${numIn(P('targets'), 1, 10, 1, 56)}</label>`)},
+    {id:'targets', n:'Выбор целей', has:a => +a.targets > 1 || a.targetType >= 0, init:a => { a.targets = 2; }, clear:a => { a.targets = 1; a.targetType = -1; },
+      html:G2(`<label>Тип существа ${selIn(P('targetType'),[[-1,'любой'],...CAT.creatureTypes.map((t,j) => [j,t.name])])}</label><label>Целей на выбор (без области) ${numIn(P('targets'), 1, 10, 1, 56)}</label>`)},
     COND,
     {id:'move', n:'Толчок и притягивание', has:a => any(a, ['pushFt', 'pullFt', 'collN']), init:a => { a.pushFt = 10; }, clear:a => zero(a, ['pushFt', 'pullFt', 'collN']),
       html:G2(`<label>Толчок, фт ${numIn(P('pushFt'), 0, LIM.ft, 5)}</label><label>Урон при столкновении, к6 ${numIn(P('collN'), 0, LIM.dice)}</label><label>Притягивание, фт ${numIn(P('pullFt'), 0, LIM.ft, 5)}</label>`)},
@@ -82,9 +84,9 @@ function abilGroups(a, k, P, dt, cd){
     {id:'healally', n:'Лечит союзников', has:a => !!a.healAlly, init:a => { a.healAlly = true; }, clear:a => { a.healAlly = false; }, html:G2(`${chkIn(P('healAlly'), 'Союзников в области (или союзника-цель) урон этой способности лечит')}`)},
     {id:'special', n:'Особые эффекты', has:a => any(a, ['maxHpDmg', 'drain', 'dispel']), clear:a => zero(a, ['maxHpDmg', 'drain', 'dispel']),
       html:G2(`${chkIn(P('maxHpDmg'), 'Урон снижает и максимум хитов')}${chkIn(P('drain'), 'Вампиризм: половина урона — себе в хиты')}${chkIn(P('dispel'), 'Рассеивание: снимает баффы и концентрацию')}`)},
-    {id:'ground', n:'Клетка, барьер, местность', has:a => any(a, ['ground', 'terr', 'wallLen']), init:a => { a.ground = true; }, clear:a => zero(a, ['ground', 'terr', 'wallLen', 'wallRounds']),
+    {id:'ground', n:'Клетка, барьер, местность', has:a => any(a, ['ground', 'terr', 'wallLen']), init:a => { a.ground = true; }, clear:a => zero(a, ['ground', 'terr', 'wallLen', 'wallRounds', 'illusionRounds']),
       html:G2(`${chkIn(P('ground'), 'Центр в клетке: область или барьер на любой клетке, а не на враге')}${chkIn(P('terr'), 'Труднопроходимая местность')}
-        ${a.ground ? `<label>Барьер: клеток в линии (0 — нет) ${numIn(P('wallLen'), 0, 100)}</label><label>раундов барьера ${numIn(P('wallRounds'), 0, LIM.rounds)}</label>` : ''}`)},
+        ${a.ground ? `<label>Иллюзорное укрытие, раундов ${numIn(P('illusionRounds'), 0, LIM.rounds)}</label><label>Барьер: клеток в линии (0 — нет) ${numIn(P('wallLen'), 0, 100)}</label><label>раундов барьера ${numIn(P('wallRounds'), 0, LIM.rounds)}</label>` : ''}`)},
     TIMING, COST];
 }
 const KIND_OPTS = [['attack','Атака (бросок попадания)'],['save','Спасбросок цели'],['auto','Без броска атаки'],['self','На себя'],['onhit','При попадании оружием (приём)'],['cmd','Приказ союзнику атаковать'],['guard','Реакция за союзника'],['counter','Контрзаклинание'],['summon','Призыв приспешников'],['form','Превращение (облик)']];
@@ -122,7 +124,7 @@ function abilityHTML(a, i){
   if (k === 'counter'){
     h += `<div class="hint" style="margin:6px 0">Срабатывает сама, реакцией: когда враг применяет способность в пределах дальности, она гаснет (плата за неё всё равно списана).</div>
       <div class="grid2"><label>Дальность, фт ${numIn(P('range'), 5, LIM.ft, 5)}</label><label>Применений за бой (пусто — без ограничения) ${usesIn(P('uses'))}</label>
-      <label>Уровень ячейки заклинания (0 — нет) ${numIn(P('slotLvl'), 0, 9)}</label></div></div>`;
+      <label>Круг заклинания (выше — дешевле, 0 — без ячейки) ${numIn(P('slotLvl'), 0, 9)}</label></div></div>`;
     return h;
   }
   if (k === 'guard'){
@@ -248,7 +250,7 @@ function buildForm(){
     <div class="row"><label>Имя <input type="text" data-p="name" data-t="str" style="width:200px"></label>
     <label>Бюджет (очки) ${numIn('budget', CAT.minBudget || 20, CAT.maxBudget || 100000, 1, 90)}</label>
     <label>Размер ${selIn('size', [[0,'крошечный'],[1,'маленький'],[2,'средний'],[3,'большой'],[4,'огромный'],[5,'громадный']])}</label>
-    <label>Тип существа ${selIn('ctype', ['аберрация', 'зверь', 'небожитель', 'конструкт', 'дракон', 'элементаль', 'фея', 'исчадие', 'великан', 'гуманоид', 'монстр', 'слизь', 'растение', 'нежить'].map((t, j) => [j, t]))}</label></div>
+    <label>Тип существа ${selIn('ctype', CAT.creatureTypes.map((t, j) => [j, t.name]))}<small id="typeTrait"></small></label></div>
     <div class="hint">Бюджет — сила персонажа, любое целое число от ${CAT.minBudget || 20} до ${CAT.maxBudget || 100000}. Все характеристики по 10 бесплатны, поэтому очки уходят на то, что выше десяти, и возвращаются, если что-то опустить ниже. Здоровье тратит остаток: 2 очка за ХП. У соперника по умолчанию столько же очков.</div>
     <div class="hint">Дальше по шагам: характеристики, владения, оружие, способности, защита, движение, особенности. Шаги можно проходить в любом порядке; справа — сколько потрачено и все покупки.</div></div>`);
   // 1 · характеристики и КД
@@ -352,7 +354,7 @@ function buildForm(){
         html:G2(`<label>Регенерация, к6 в ход ${numIn(PP('regenN'), 0, LIM.dice)}</label><label>Всплеск действий (раз за бой) ${numIn(PP('surge'), 0, LIM.count)}</label>
           <label>Легендарное сопротивление ${numIn(PP('legRes'), 0, LIM.count)}</label><label>Легендарные действия (очки) ${numIn(PP('legAct'), 0, LIM.count)}</label>${chkIn(PP('wMagic'), 'Магическое оружие', pc('wMagic'))}`)},
       {id:'slots', n:'Ячейки заклинаний', has:o => (o.slots || []).some(x => +x > 0), clear:o => { o.slots = [0,0,0,0,0,0,0,0,0,0]; },
-        html:`<div class="small">Нужны способностям с «ячейкой» (Способности → Ограничения → Уровень ячейки). В бою способность тратит ячейку своего уровня или выше.</div><div class="small" data-slotwarn style="color:var(--bad)"></div>` + G2([1,2,3,4,5,6,7,8,9].map(L => `<label>${L} ур. × ${numIn(PP('slots.' + L), 0, LIM.count, 1, 56)}</label>`).join(''))},
+        html:`<div class="small">Высокие круги ячеек стоят больше очков. Ячейки нужны способностям с «ячейкой» (Способности → Ограничения → Уровень ячейки). В бою способность тратит ячейку своего уровня или выше.</div><div class="small" data-slotwarn style="color:var(--bad)"></div>` + G2([1,2,3,4,5,6,7,8,9].map(L => `<label>${L} ур. × ${numIn(PP('slots.' + L), 0, LIM.count, 1, 56)}</label>`).join(''))},
       {id:'aura', n:'Аура (на врагов рядом)', has:o => +(o.aura || {}).rad > 0, init:o => { o.aura = Object.assign({s:6, type:3, cond:0, rounds:1}, o.aura, {rad:10}); if (!(+o.aura.n > 0) && !(+o.aura.cond > 0)) o.aura.n = 1; }, clear:o => { (o.aura = o.aura || {}).rad = 0; },
         html:G2(`<label>Радиус ${infoIcon('Радиус')}, фт ${numIn(PP('aura.rad'), 0, LIM.ft, 5)}</label><label>кубиков ${numIn(PP('aura.n'), 0, LIM.dice)}</label><label>грань ${selIn(PP('aura.s'), DIE_OPTS())}</label>
           <label>тип ${dtSel(PP('aura.type'))}</label><label>состояние ${selIn(PP('aura.cond'), [[0,'нет'], ...cd])}</label><label>раундов ${numIn(PP('aura.rounds'), 1, LIM.rounds)}</label>`)},
@@ -387,11 +389,12 @@ const RULE_PRESETS = [
 const dmgTypeSel = (path, v) => `<label class="small">тип <select data-p="${path}" data-t="num">${[[-1, 'как у оружия'], ...DT_OPTS()].map(([k, n]) => `<option value="${k}" ${+(v ?? -1) === k ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>`;
 function ruleHTML(r, i){
   const P = f => `passives.rules.${i}.${f}`;
-  const ws = (CAT.whens || []).map((w, k) => [k, w.name + (([5,6,7,8,10,11,12,15].includes(+r.what)) && !w.self ? ' (нельзя: нужен противник)' : '')]);
+  const ws = (CAT.whens || []).map((w, k) => [k, w.name + (([5,6,7,8,10,11,12,15,16,17,18].includes(+r.what)) && !w.self ? ' (нельзя: нужен противник)' : '')]);
   const es = (CAT.whats || []).map((e, k) => [k, e]);
   const cd = CAT.conds.map((n, j) => [j, n + (CAT.condPrice && CAT.condPrice[j] != null ? ` · ${Math.round(CAT.condPrice[j])} оч. (1 раунд)` : '')]).filter(x => x[0] > 0);
   let h = `<div class="row rule" data-rule="${i}"><b>Когда</b> ${selIn(P('when'), ws)}`;
-  if (+r.when === 5) h += ` состояние ${selIn(P('warg'), cd)}`;
+  if (+r.when === 10) h += ` тип ${selIn(P('warg'), CAT.creatureTypes.map((t,j) => [j,t.name]))}`;
+  if (+r.when === 5 || +r.when === 19) h += ` состояние ${selIn(P('warg'), cd)}`;
   h += ` <b>→</b> ${selIn(P('what'), es)}`;
   if (+r.what === 1) h += ` кубиков ${numIn(P('n'), 1, LIM.dice, 1, 56)} грань ${selIn(P('s'), DIE_OPTS())} ${dmgTypeSel(P('dt'), r.dt)} ${chkIn(P('once'), 'раз в ход')}`;
   if (+r.what === 2) h += ` +${numIn(P('n'), 1, 20, 1, 56)} КД`;

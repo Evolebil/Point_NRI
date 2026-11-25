@@ -16,7 +16,7 @@ double evWeaponBase(const World& w, const Fighter& a, const Fighter& d) {
            dmgMult(d.b, a.b.wType, wPierceNM(a.b)) * ((d.b.uncanny && canReact(d)) ? 0.8 : 1.0);
 }
 double condValue(const World& w, const Fighter& me, const Fighter& t, int kind, int rounds) {
-    if (t.cond[kind] > 0 || t.cimm[kind] > 0 || (t.b.immCond & (1u << kind))) return 0;
+    if (t.cond[kind] > 0 || t.cimm[kind] > 0 || t.wardTicks[kind] > 0 || (t.b.immCond & (1u << kind))) return 0;
     static const double m[C_N] = {0, 0.3, 0.6, 0.4, 0.4, 0.5, 1.3, 0.3, 1.0, 1.0, 1.6, 1.2, 0.4, 0.4, 0.3, 0.9};
     // «подсвечен» усиливает МОИ атаки, остальное режет урон цели
     return me.pol->v[PO_CONDS] * m[kind] * std::min(rounds, 3) *
@@ -52,6 +52,7 @@ bool pushBlocked(const World& w, const Fighter& src, const Fighter& t, int ft) {
     return false;
 }
 double evSpecOne(const World& w, const Spec& s, const Fighter& me, const Fighter& t) {
+    if (s.targetType >= 0 && s.targetType != t.b.ctype) return 0;
     double dmg = 0, dc = me.dc() + s.dcB;
     for (auto& d : s.dmgParts()) dmg += d.n * (d.s + 1) / 2.0 * dmgMult(t.b, d.type, specMagical(me.b, d.type));
     double push = t.b.immPush ? 0.0
@@ -118,6 +119,7 @@ double wallValue(const World& w, const Spec& s, const Fighter& me, const Fighter
 double evSpecAt(const World& w, const Spec& s, const Fighter& me, int cx, int cy, const Fighter* wallFor = nullptr) {
     double ev = 0;
     if (s.dmgN || !s.more.empty() || s.cond || s.pushFt || s.dotN || s.terr) ev += areaValue(w, s, me, cx, cy);
+    if (wallFor && s.illusionRounds && !wallFor->b.truesight && !wallFor->b.blindsight) ev += std::min(3,s.illusionRounds);
     if (wallFor) ev += wallValue(w, s, me, *wallFor);
     return ev;
 }
@@ -141,7 +143,7 @@ double bestGroundCell(const World& w, const Spec& s, const Fighter& me, const st
         const Fighter& e = w.f[ei];
         if (e.hp <= 0) continue;
         const int sx = (me.x > e.x) - (me.x < e.x), sy = (me.y > e.y) - (me.y < e.y);
-        if (s.wallLen > 0) tryCell(e.x + sx, e.y + sy, &e);
+        if (s.wallLen > 0 || s.illusionRounds) tryCell(e.x + sx, e.y + sy, &e);
         if (s.wallLen > 0 && !(s.dmgN || s.cond || s.pushFt || s.dotN || s.terr)) continue;
         tryCell(e.x, e.y, nullptr);
         const int k = std::min(s.radius / 5, std::max(std::abs(me.x - e.x), std::abs(me.y - e.y)) - 1);
